@@ -1,7 +1,7 @@
 interface:
   display_name: "Frame Timing Skill"
-  short_description: "Prepare clean extracted frames for reconstruction with audited timing strategies."
-  default_prompt: "Use $frame-timing-skill to optimize an already-clean extracted frame directory and generate reviewable output_frames."
+  short_description: "Optimize clean extracted frames and produce audited model-safe output frames."
+  default_prompt: "Use $frame-timing-skill on a clean extracted frame directory. Ask for or infer an item name and run name, write outputs under agent_files, run frame-timing-health, then report output_frames plus review and maintenance report paths."
 
 policy:
   allow_implicit_invocation: true

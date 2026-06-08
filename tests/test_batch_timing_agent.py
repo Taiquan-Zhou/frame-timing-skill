@@ -209,6 +209,30 @@ class BatchTimingAgentTest(unittest.TestCase):
             self.assertIn("visual_review/index.md", dashboard)
             self.assertNotIn(str(artifact_root), dashboard)
 
+    def test_batch_review_artifacts_are_readable_text(self):
+        with _tempdir() as tmp:
+            root = Path(tmp)
+            frames = root / "frames"
+            artifact_root = root / "agent_files" / "readable_reports"
+            _make_frames(frames, 4)
+
+            result = run_batch_timing_agent(
+                [BatchTimingItem(name="sample", frames=frames)],
+                artifact_root=artifact_root,
+                limit_first_n=4,
+                write=False,
+            )
+
+            texts = [
+                result.human_review_path.read_text(encoding="utf-8"),
+                result.review_dashboard_path.read_text(encoding="utf-8"),
+                (artifact_root / "analysis" / "maintenance_report.md").read_text(encoding="utf-8"),
+            ]
+            for text in texts:
+                self.assertNotIn("闃", text)
+                self.assertNotIn("鍏", text)
+                self.assertNotIn("鏃", text)
+
     def test_manifest_loader_accepts_utf8_bom_files_from_powershell(self):
         with _tempdir() as tmp:
             root = Path(tmp)

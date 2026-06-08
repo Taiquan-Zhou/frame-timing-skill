@@ -1,33 +1,50 @@
 ---
 name: frame-timing-skill
-description: Use when preparing already-clean extracted video frames for reconstruction by detecting static or fast-motion ranges, compressing or duplicating frames, writing model-safe output_frames, and generating audit/review artifacts without changing image pixels.
+description: Use when preparing already-clean extracted image frames for reconstruction, NeRF, Gaussian Splatting, photogrammetry, or visual review by optimizing frame timing, copying model-safe output_frames, and generating local audit artifacts without changing pixels.
 ---
 
 # Frame Timing Skill
 
-Use this skill when the user has already handled watermark removal/OCR and provides extracted frame directories that should be optimized before 3D reconstruction or similar downstream processing.
+Use this skill only after the user already has clean extracted frame directories. It is a local package-backed skill: prefer the installed CLI entrypoints, or the Python API when integrating from another project.
 
 ## Boundaries
 
-- Input is an extracted image-frame directory.
-- The skill does not remove watermarks.
-- The skill does not run OCR.
-- The skill does not train or reconstruct 3D models.
-- The skill must not modify original input frames.
-- Output frames must be byte-identical copies of source frames; repetition means copying the same source frame again.
+- Input must be extracted image frames, not raw video.
+- Do not remove watermarks, OCR overlays, edit pixels, run reconstruction, upload data, or import from host projects.
+- Keep all generated outputs under `agent_files/`.
+- Original input frames must never be modified.
+- Repeated frames mean byte-identical copies of the same source frame.
 
 ## Core Workflow
 
-1. Load frame records from filenames or `selected_frames.txt`.
-2. Detect long-static and fast-motion ranges.
-3. Create a strategy that compresses static ranges and duplicates fast ranges.
-4. Write `agent_files/<run_name>/output_frames` only when requested.
-5. Generate human review reports, contact sheets, execution audits, and a health report.
-6. Verify the health report before telling the user the result is ready.
+1. Confirm each input is an already-clean frame directory.
+2. If CLI commands are unavailable, install from the skill/package checkout:
+
+```powershell
+python -m pip install .
+```
+
+3. Run batch timing:
+
+```powershell
+frame-timing-batch `
+  --frames "<item_name>=<clean_frame_dir>" `
+  --artifact_root "agent_files/<run_name>" `
+  --limit_first_n 300 `
+  --write
+```
+
+4. Verify before reporting completion:
+
+```powershell
+frame-timing-health --artifact_root "agent_files/<run_name>"
+```
+
+5. Report `output_frames`, review dashboard, human review, maintenance report, and any warnings/errors.
 
 ## Output Contract
 
-The model-safe output is only:
+Model-safe output:
 
 ```text
 agent_files/<run_name>/<item_name>/output_frames/
@@ -36,8 +53,33 @@ agent_files/<run_name>/<item_name>/output_frames/
   run_manifest.json
 ```
 
-Analysis-only artifacts must stay under `analysis/`.
+Analysis-only output:
 
-## Review First
+```text
+agent_files/<run_name>/<item_name>/analysis/
+  human_review.md
+  strategy.json
+  visual_review/index.md
+agent_files/<run_name>/analysis/
+  review_dashboard.md
+  maintenance_report.md
+  maintenance_report.json
+```
 
-For non-trivial changes, inspect the current project, make a short plan, use tests first, and verify before completion.
+Never pass `analysis/` files to reconstruction models. `selected_frames.txt` must include `source_sha256`, and health must exit 0 with status `ok` before the run is considered complete.
+
+## Python API
+
+```python
+from pathlib import Path
+from frame_timing_agent.batch_timing_agent import BatchTimingItem, run_batch_timing_agent
+
+result = run_batch_timing_agent(
+    [BatchTimingItem(name="sample", frames=Path("path/to/clean_frames"))],
+    artifact_root=Path("agent_files/frame_timing_run"),
+    limit_first_n=300,
+    write=True,
+)
+```
+
+For detailed integration notes, read `references/usage.md`. For artifact validation rules, read `references/artifact_contract.md`.
