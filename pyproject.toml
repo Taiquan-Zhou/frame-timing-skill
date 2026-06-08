@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "frame-timing-skill"
+version = "0.1.0"
+description = "Audited frame timing optimization skill for already-clean extracted frames."
+requires-python = ">=3.10"
+dependencies = [
+  "opencv-python>=4.8,<4.13",
+  "numpy>=1.26,<2.0",
+]
+
+[tool.setuptools]
+package-dir = {"" = "scripts"}
+
+[tool.setuptools.packages.find]
+where = ["scripts"]
+
+[tool.setuptools.package-data]
+frame_timing_agent = ["config/*.json"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["scripts"]

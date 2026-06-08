@@ -1,0 +1,32 @@
+{
+  "review_ranges": [
+    {
+      "name": "auto_static_0_54",
+      "start": 0,
+      "end": 54
+    },
+    {
+      "name": "suspected_static_321_517",
+      "start": 321,
+      "end": 517
+    }
+  ],
+  "overrides": {
+    "force_duplicate": [
+      {
+        "start": 245,
+        "end": 281,
+        "total_instances": 4,
+        "reason": "人工确认这一段运动偏快，强制更激进地放慢"
+      }
+    ],
+    "force_keep_uniform": [
+      {
+        "start": 321,
+        "end": 517,
+        "count": 20,
+        "reason": "人工确认该区间停留过久，强制均匀保留 20 帧"
+      }
+    ]
+  }
+}

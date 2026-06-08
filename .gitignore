@@ -1,0 +1,15 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+.tmp_tests/
+.mypy_cache/
+build/
+*.egg-info/
+.venv/
+venv/
+agent_files/
+examples/generated_frames/
+*.mp4
+*.mov
+*.avi
+*.mkv

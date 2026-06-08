@@ -1,0 +1,7 @@
+interface:
+  display_name: "Frame Timing Skill"
+  short_description: "Prepare clean extracted frames for reconstruction with audited timing strategies."
+  default_prompt: "Use $frame-timing-skill to optimize an already-clean extracted frame directory and generate reviewable output_frames."
+
+policy:
+  allow_implicit_invocation: true

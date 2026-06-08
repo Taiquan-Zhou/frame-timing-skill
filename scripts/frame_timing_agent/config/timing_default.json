@@ -1,0 +1,13 @@
+{
+  "static_motion_quantile": 0.15,
+  "fast_motion_quantile": 0.70,
+  "very_fast_motion_quantile": 0.90,
+  "min_static_frames": 21,
+  "min_fast_frames": 5,
+  "static_window_min_low_ratio": 0.70,
+  "static_window_mean_multiplier": 1.20,
+  "static_keep_count": 20,
+  "fast_motion_total_instances": 3,
+  "very_fast_motion_total_instances": 4,
+  "default_fps": 30.0
+}
