@@ -20,14 +20,51 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install package and test runner
-        run: python -m pip install . pytest
+      - name: Install package and test tools
+        run: python -m pip install . pytest build
 
       - name: Run tests
         run: python -m pytest
 
       - name: Compile Python sources
         run: python -m compileall -q scripts examples tests
+
+      - name: Build and audit distributions
+        shell: pwsh
+        run: |
+          $dist = Join-Path $env:RUNNER_TEMP "dist-audit"
+          python -m build --outdir $dist
+          $env:DIST_AUDIT_DIR = $dist
+          @'
+          import os
+          import tarfile
+          import zipfile
+          from pathlib import Path
+
+          blocked = (
+              "/tests/",
+              "/docs/",
+              "/.github/",
+              "/examples/",
+              "AGENTS.md",
+              "handoff.md",
+              "__pycache__",
+          )
+          dist = Path(os.environ["DIST_AUDIT_DIR"])
+          archives = list(dist.glob("*.whl")) + list(dist.glob("*.tar.gz"))
+          if not archives:
+              raise SystemExit("no distributions built")
+          for archive in archives:
+              if archive.suffix == ".whl":
+                  with zipfile.ZipFile(archive) as zf:
+                      names = zf.namelist()
+              else:
+                  with tarfile.open(archive, "r:gz") as tf:
+                      names = tf.getnames()
+              bad = [name for name in names if any(token in name for token in blocked)]
+              if bad:
+                  raise SystemExit(f"{archive.name} contains non-release files: {bad}")
+          '@ | python -
 
       - name: Validate skill metadata
         shell: pwsh

@@ -1,0 +1,16 @@
+include README.md
+include pyproject.toml
+recursive-include scripts/frame_timing_agent *.py *.json
+recursive-exclude * __pycache__ *.py[cod]
+prune .github
+prune .pytest_cache
+prune .tmp_tests
+prune agent_files
+prune build
+prune docs
+prune examples
+prune scripts/*.egg-info
+prune tests
+global-exclude *.egg-info
+exclude AGENTS.md
+exclude SKILL.md

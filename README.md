@@ -127,6 +127,11 @@ Use CLI integration when the host project only needs artifact generation. Use th
 
 - Run `python -m pytest`.
 - Run `python -m compileall -q scripts examples tests`.
+- Run `python -m build` and inspect that wheel/sdist exclude tests, docs, CI, caches, and handoff files.
 - Run `python <path-to-quick_validate.py> .` when the Codex skill validator is available.
 - Run an installed CLI smoke from outside the source checkout.
 - Tag the release only after health status is `ok` on demo artifacts.
+
+## Release Artifact Scope
+
+The development repository keeps tests and CI so the package remains maintainable. Built wheel/sdist artifacts are intentionally slimmed by `MANIFEST.in` and must not include tests, CI files, migration handoff notes, caches, generated frames, or local agent outputs.

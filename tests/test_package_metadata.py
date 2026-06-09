@@ -68,6 +68,7 @@ class PackageMetadataTest(unittest.TestCase):
         self.assertIn("/path/to/frame-timing-skill", readme)
         self.assertIn("Host Project Smoke", usage)
         self.assertIn("Release Checklist", readme)
+        self.assertIn("Release Artifact Scope", readme)
 
     def test_ci_workflow_runs_package_and_skill_verification(self):
         workflow = Path(".github") / "workflows" / "ci.yml"
@@ -75,12 +76,25 @@ class PackageMetadataTest(unittest.TestCase):
 
         self.assertIn("python -m pytest", content)
         self.assertIn("python -m compileall -q scripts examples tests", content)
+        self.assertIn("python -m build --outdir $dist", content)
+        self.assertIn("non-release files", content)
         self.assertIn("quick_validate.py", content)
         self.assertIn("Set-Location $hostDir", content)
         self.assertIn("python -m pip install $source", content)
         self.assertIn("frame-timing-demo", content)
         self.assertIn("frame-timing-batch", content)
         self.assertIn("frame-timing-health", content)
+
+    def test_source_distribution_manifest_excludes_development_artifacts(self):
+        content = Path("MANIFEST.in").read_text(encoding="utf-8")
+
+        self.assertIn("prune tests", content)
+        self.assertIn("prune docs", content)
+        self.assertIn("prune .github", content)
+        self.assertIn("prune examples", content)
+        self.assertIn("prune scripts/*.egg-info", content)
+        self.assertIn("exclude AGENTS.md", content)
+        self.assertIn("recursive-include scripts/frame_timing_agent", content)
 
 
 if __name__ == "__main__":
