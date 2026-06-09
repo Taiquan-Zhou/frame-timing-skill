@@ -34,6 +34,11 @@ dependencies = [
   "numpy>=1.26,<2.0",
 ]
 
+[project.urls]
+Homepage = "https://github.com/Taiquan-Zhou/frame-Extraction-and-Processing-skill"
+Source = "https://github.com/Taiquan-Zhou/frame-Extraction-and-Processing-skill"
+Issues = "https://github.com/Taiquan-Zhou/frame-Extraction-and-Processing-skill/issues"
+
 [project.scripts]
 frame-timing-batch = "frame_timing_agent.batch_timing_agent:main"
 frame-timing-health = "frame_timing_agent.batch_artifact_health:main"

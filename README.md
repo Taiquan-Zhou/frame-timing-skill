@@ -12,6 +12,12 @@ The Python release artifacts are slimmed by `MANIFEST.in`; tests, CI files, cach
 
 ## Install
 
+From GitHub:
+
+```bash
+python -m pip install git+https://github.com/Taiquan-Zhou/frame-Extraction-and-Processing-skill.git
+```
+
 From a local checkout:
 
 ```powershell
@@ -81,6 +87,15 @@ Pass multiple frame sets by repeating `--frames "<item_name>=<clean_frame_dir>"`
 ## Codex Skill Use
 
 Install this repository as a Codex skill when you want an agent to run the workflow for you. The skill entrypoint is [SKILL.md](SKILL.md), with UI metadata in [agents/openai.yaml](agents/openai.yaml).
+
+Using Codex's skill installer:
+
+```bash
+python ~/.codex/skills/.system/skill-installer/scripts/install-skill-from-github.py \
+  --repo Taiquan-Zhou/frame-Extraction-and-Processing-skill \
+  --path . \
+  --name frame-timing-skill
+```
 
 The skill calls the same package CLI/API; it does not duplicate host-project code.
 

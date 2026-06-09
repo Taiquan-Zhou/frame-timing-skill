@@ -31,6 +31,10 @@ class PackageMetadataTest(unittest.TestCase):
         self.assertTrue(Path("SECURITY.md").is_file())
         self.assertNotIn("License :: OSI Approved :: MIT License", data["project"]["classifiers"])
         self.assertIn("codex-skill", data["project"]["keywords"])
+        self.assertEqual(
+            data["project"]["urls"]["Source"],
+            "https://github.com/Taiquan-Zhou/frame-Extraction-and-Processing-skill",
+        )
 
     def test_runtime_dependencies_are_bounded_for_reproducible_installs(self):
         data = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
@@ -77,6 +81,9 @@ class PackageMetadataTest(unittest.TestCase):
         self.assertIn("<path-to-frame-timing-skill>", skill)
         self.assertIn("/path/to/frame-timing-skill", skill)
         self.assertIn("/path/to/frame-timing-skill", readme)
+        self.assertIn("git+https://github.com/Taiquan-Zhou/frame-Extraction-and-Processing-skill.git", readme)
+        self.assertIn("install-skill-from-github.py", readme)
+        self.assertIn("--name frame-timing-skill", readme)
         self.assertIn("Host Project Smoke", usage)
         self.assertIn("Release Checklist", readme)
         self.assertIn("Release Artifact Scope", readme)
