@@ -18,10 +18,22 @@ Use this skill only after the user already has clean extracted frame directories
 ## Core Workflow
 
 1. Confirm each input is an already-clean frame directory.
-2. If CLI commands are unavailable, install from the skill/package checkout:
+2. If CLI commands are unavailable, install the package from the skill directory. When already inside the skill/package checkout, use:
 
 ```powershell
 python -m pip install .
+```
+
+From another working directory, install with an explicit path:
+
+```powershell
+python -m pip install <path-to-frame-timing-skill>
+```
+
+POSIX shell:
+
+```bash
+python -m pip install /path/to/frame-timing-skill
 ```
 
 3. Run batch timing:
@@ -34,9 +46,21 @@ frame-timing-batch `
   --write
 ```
 
+POSIX shell:
+
+```bash
+frame-timing-batch --frames "<item_name>=<clean_frame_dir>" --artifact_root "agent_files/<run_name>" --limit_first_n 300 --write
+```
+
 4. Verify before reporting completion:
 
 ```powershell
+frame-timing-health --artifact_root "agent_files/<run_name>"
+```
+
+POSIX shell:
+
+```bash
 frame-timing-health --artifact_root "agent_files/<run_name>"
 ```
 

@@ -12,6 +12,18 @@ From a local checkout:
 python -m pip install .
 ```
 
+From another project or agent working directory:
+
+```powershell
+python -m pip install <path-to-frame-timing-skill>
+```
+
+POSIX shell:
+
+```bash
+python -m pip install /path/to/frame-timing-skill
+```
+
 For development:
 
 ```powershell
@@ -42,6 +54,14 @@ Verify generated artifacts:
 
 ```powershell
 frame-timing-health --artifact_root agent_files\demo_run
+```
+
+POSIX shell:
+
+```bash
+frame-timing-demo --output_dir agent_files/demo_frames/sample --count 72
+frame-timing-batch --frames "sample=agent_files/demo_frames/sample" --artifact_root agent_files/demo_run --limit_first_n 72 --write
+frame-timing-health --artifact_root agent_files/demo_run
 ```
 
 ## CLI Reference
@@ -77,3 +97,36 @@ frame-timing-health --artifact_root agent_files\demo_run
 ```
 
 Health must report status `ok`. The generated `output_frames/selected_frames.txt` includes `source_sha256`; health checks use it to verify copied-frame provenance without storing private input paths in analysis artifacts.
+
+## Host Project Smoke
+
+From a host project that already has clean extracted frames:
+
+```powershell
+python -m pip install <path-to-frame-timing-skill>
+
+frame-timing-batch `
+  --frames "sample=path\to\clean_frames" `
+  --artifact_root "agent_files\frame_timing_run" `
+  --write
+
+frame-timing-health --artifact_root "agent_files\frame_timing_run"
+```
+
+POSIX shell:
+
+```bash
+python -m pip install /path/to/frame-timing-skill
+frame-timing-batch --frames "sample=path/to/clean_frames" --artifact_root agent_files/frame_timing_run --write
+frame-timing-health --artifact_root agent_files/frame_timing_run
+```
+
+Use CLI integration when the host project only needs artifact generation. Use the Python API when the host project needs structured result objects in-process.
+
+## Release Checklist
+
+- Run `python -m pytest`.
+- Run `python -m compileall -q scripts examples tests`.
+- Run `python <path-to-quick_validate.py> .` when the Codex skill validator is available.
+- Run an installed CLI smoke from outside the source checkout.
+- Tag the release only after health status is `ok` on demo artifacts.

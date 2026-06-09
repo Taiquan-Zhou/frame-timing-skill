@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - master
+      - "codex/**"
+
+jobs:
+  test:
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install package and test runner
+        run: python -m pip install . pytest
+
+      - name: Run tests
+        run: python -m pytest
+
+      - name: Compile Python sources
+        run: python -m compileall -q scripts examples tests
+
+      - name: Validate skill metadata
+        shell: pwsh
+        run: |
+          $validator = Join-Path $env:USERPROFILE ".codex\skills\.system\skill-creator\scripts\quick_validate.py"
+          if (Test-Path -LiteralPath $validator) {
+            python $validator .
+          } else {
+            $text = Get-Content -Raw SKILL.md
+            if (-not $text.StartsWith("---`n")) {
+              throw "SKILL.md missing YAML frontmatter"
+            }
+            $parts = $text -split "---", 3
+            $frontmatter = $parts[1]
+            if ($frontmatter -notmatch "(?m)^name:\s*frame-timing-skill\s*$") {
+              throw "unexpected skill name"
+            }
+            if ($frontmatter -notmatch "(?m)^description:\s*Use when") {
+              throw "skill description must start with 'Use when'"
+            }
+          }
+
+      - name: Installed CLI smoke
+        shell: pwsh
+        run: |
+          $source = (Resolve-Path .).Path
+          $hostDir = Join-Path $env:RUNNER_TEMP "frame-timing-host"
+          New-Item -ItemType Directory -Force -Path $hostDir | Out-Null
+          Set-Location $hostDir
+          python -m pip install $source
+          frame-timing-demo --output_dir agent_files\demo_frames\sample --count 12
+          frame-timing-batch --frames "sample=agent_files\demo_frames\sample" --artifact_root agent_files\ci_demo --limit_first_n 12 --write
+          frame-timing-health --artifact_root agent_files\ci_demo

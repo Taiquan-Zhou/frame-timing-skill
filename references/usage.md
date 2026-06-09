@@ -22,6 +22,14 @@ frame-timing-demo `
   --count 72
 ```
 
+POSIX shell:
+
+```bash
+frame-timing-demo --output_dir agent_files/demo_frames/sample --count 72
+frame-timing-batch --frames "sample=path/to/clean_frames" --artifact_root agent_files/frame_timing_run --limit_first_n 300 --write
+frame-timing-health --artifact_root agent_files/frame_timing_run
+```
+
 ## Python Integration
 
 ```python
@@ -46,6 +54,31 @@ Read `result.batch_report` and `result.items[*]` to locate output and review art
 - Treat `output_frames/` as the only model-safe downstream input.
 - Treat `analysis/` as human/agent review material only.
 - Run `frame-timing-health` before using artifacts downstream.
+
+## Host Project Smoke
+
+Run this from the host project root after the host project has produced clean frames:
+
+```powershell
+python -m pip install <path-to-frame-timing-skill>
+
+frame-timing-batch `
+  --frames "sample=path\to\clean_frames" `
+  --artifact_root "agent_files\frame_timing_run" `
+  --write
+
+frame-timing-health --artifact_root "agent_files\frame_timing_run"
+```
+
+POSIX shell:
+
+```bash
+python -m pip install /path/to/frame-timing-skill
+frame-timing-batch --frames "sample=path/to/clean_frames" --artifact_root agent_files/frame_timing_run --write
+frame-timing-health --artifact_root agent_files/frame_timing_run
+```
+
+Prefer the CLI for loose coupling. Prefer the Python API only when the host project needs direct access to result objects or wants to compose the timing step inside an existing Python pipeline.
 
 ## Maintainer Notes
 
