@@ -16,10 +16,21 @@ class PackageMetadataTest(unittest.TestCase):
         data = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
 
         self.assertEqual(data["build-system"]["build-backend"], "setuptools.build_meta")
-        self.assertIn("setuptools", data["build-system"]["requires"])
+        self.assertTrue(any(requirement.startswith("setuptools") for requirement in data["build-system"]["requires"]))
         self.assertEqual(data["project"]["readme"], "README.md")
+        self.assertEqual(data["project"]["license"], "MIT")
+        self.assertEqual(data["project"]["license-files"], ["LICENSE"])
         package_data = data["tool"]["setuptools"]["package-data"]
         self.assertIn("config/*.json", package_data["frame_timing_agent"])
+
+    def test_repository_declares_public_release_metadata(self):
+        data = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
+
+        self.assertTrue(Path("LICENSE").is_file())
+        self.assertTrue(Path("CHANGELOG.md").is_file())
+        self.assertTrue(Path("SECURITY.md").is_file())
+        self.assertNotIn("License :: OSI Approved :: MIT License", data["project"]["classifiers"])
+        self.assertIn("codex-skill", data["project"]["keywords"])
 
     def test_runtime_dependencies_are_bounded_for_reproducible_installs(self):
         data = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
@@ -93,6 +104,9 @@ class PackageMetadataTest(unittest.TestCase):
         self.assertIn("prune .github", content)
         self.assertIn("prune examples", content)
         self.assertIn("prune scripts/*.egg-info", content)
+        self.assertIn("include LICENSE", content)
+        self.assertIn("include CHANGELOG.md", content)
+        self.assertIn("include SECURITY.md", content)
         self.assertIn("exclude AGENTS.md", content)
         self.assertIn("recursive-include scripts/frame_timing_agent", content)
 

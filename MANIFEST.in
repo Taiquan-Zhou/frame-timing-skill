@@ -1,4 +1,7 @@
 include README.md
+include LICENSE
+include CHANGELOG.md
+include SECURITY.md
 include pyproject.toml
 recursive-include scripts/frame_timing_agent *.py *.json
 recursive-exclude * __pycache__ *.py[cod]

@@ -4,6 +4,12 @@ Independent package and Codex skill for optimizing already-clean extracted video
 
 The package detects static and fast-motion ranges, writes byte-identical copied output frames, and generates audit artifacts under `agent_files/`. It does not extract video, remove watermarks, OCR overlays, alter pixels, upload data, or run reconstruction.
 
+## Repository Status
+
+This repository is intended to be published as a standalone GitHub project. It contains runtime code, Codex skill instructions, tests, CI, and release metadata.
+
+The Python release artifacts are slimmed by `MANIFEST.in`; tests, CI files, caches, generated frames, and local handoff notes are kept out of wheel/sdist builds.
+
 ## Install
 
 From a local checkout:
@@ -72,6 +78,12 @@ frame-timing-health --artifact_root agent_files/demo_run
 
 Pass multiple frame sets by repeating `--frames "<item_name>=<clean_frame_dir>"`.
 
+## Codex Skill Use
+
+Install this repository as a Codex skill when you want an agent to run the workflow for you. The skill entrypoint is [SKILL.md](SKILL.md), with UI metadata in [agents/openai.yaml](agents/openai.yaml).
+
+The skill calls the same package CLI/API; it does not duplicate host-project code.
+
 ## Python API
 
 ```python
@@ -125,6 +137,7 @@ Use CLI integration when the host project only needs artifact generation. Use th
 
 ## Release Checklist
 
+- Confirm `LICENSE`, `CHANGELOG.md`, and `SECURITY.md` are present.
 - Run `python -m pytest`.
 - Run `python -m compileall -q scripts examples tests`.
 - Run `python -m build` and inspect that wheel/sdist exclude tests, docs, CI, caches, and handoff files.
@@ -135,3 +148,7 @@ Use CLI integration when the host project only needs artifact generation. Use th
 ## Release Artifact Scope
 
 The development repository keeps tests and CI so the package remains maintainable. Built wheel/sdist artifacts are intentionally slimmed by `MANIFEST.in` and must not include tests, CI files, migration handoff notes, caches, generated frames, or local agent outputs.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
