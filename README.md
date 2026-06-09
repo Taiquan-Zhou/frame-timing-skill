@@ -1,5 +1,7 @@
 # Frame Timing Skill
 
+[English](README.md) | [中文](README.zh-CN.md)
+
 Independent package and Codex skill for optimizing already-clean extracted video frames before reconstruction.
 
 The package detects static and fast-motion ranges, writes byte-identical copied output frames, and generates audit artifacts under `agent_files/`. It does not extract video, remove watermarks, OCR overlays, alter pixels, upload data, or run reconstruction.
