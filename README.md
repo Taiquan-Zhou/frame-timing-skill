@@ -39,45 +39,35 @@ Ask the AI coding tool to run this install command in the target project:
 python -m pip install git+https://github.com/Taiquan-Zhou/frame-Extraction-and-Processing-skill.git
 ```
 
-## Smoke Test
+## Usage
 
-This section verifies that the package is installed and the core CLI workflow can run on demo frames.
-
-Generate demo frames:
-
-```bash
-frame-timing-demo --output_dir agent_files/demo_frames/sample --count 72
-```
-
-Run frame timing:
+Run frame timing on a directory of already-clean extracted frames:
 
 ```bash
 frame-timing-batch \
-  --frames "sample=agent_files/demo_frames/sample" \
-  --artifact_root agent_files/demo_run \
-  --limit_first_n 72 \
+  --frames "sample=path/to/clean_frames" \
+  --artifact_root agent_files/frame_timing_run \
   --write
 ```
 
-Verify the output:
+Check the generated artifacts:
 
 ```bash
-frame-timing-health --artifact_root agent_files/demo_run
+frame-timing-health --artifact_root agent_files/frame_timing_run
 ```
 
 On PowerShell, use backticks for multiline commands:
 
 ```powershell
 frame-timing-batch `
-  --frames "sample=agent_files\demo_frames\sample" `
-  --artifact_root agent_files\demo_run `
-  --limit_first_n 72 `
+  --frames "sample=path\to\clean_frames" `
+  --artifact_root agent_files\frame_timing_run `
   --write
 ```
 
 ## CLI
 
-- `frame-timing-demo`: generate deterministic demo frames for smoke tests.
+- `frame-timing-demo`: generate deterministic demo frames for local checks.
 - `frame-timing-batch`: analyze clean frame directories and write `output_frames/` plus review artifacts.
 - `frame-timing-health`: verify artifact structure and copied-frame provenance.
 

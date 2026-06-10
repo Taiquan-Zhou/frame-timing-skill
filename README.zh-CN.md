@@ -39,45 +39,35 @@ https://github.com/Taiquan-Zhou/frame-Extraction-and-Processing-skill
 python -m pip install git+https://github.com/Taiquan-Zhou/frame-Extraction-and-Processing-skill.git
 ```
 
-## 功能测试
+## 使用方法
 
-这一段用于验证 package 已安装，并且核心 CLI 流程可以基于 demo frames 跑通。
-
-生成 demo frames：
-
-```bash
-frame-timing-demo --output_dir agent_files/demo_frames/sample --count 72
-```
-
-运行 frame timing：
+对已经清理并抽取好的帧目录运行 frame timing：
 
 ```bash
 frame-timing-batch \
-  --frames "sample=agent_files/demo_frames/sample" \
-  --artifact_root agent_files/demo_run \
-  --limit_first_n 72 \
+  --frames "sample=path/to/clean_frames" \
+  --artifact_root agent_files/frame_timing_run \
   --write
 ```
 
-验证输出：
+检查生成的产物：
 
 ```bash
-frame-timing-health --artifact_root agent_files/demo_run
+frame-timing-health --artifact_root agent_files/frame_timing_run
 ```
 
 PowerShell 多行命令示例：
 
 ```powershell
 frame-timing-batch `
-  --frames "sample=agent_files\demo_frames\sample" `
-  --artifact_root agent_files\demo_run `
-  --limit_first_n 72 `
+  --frames "sample=path\to\clean_frames" `
+  --artifact_root agent_files\frame_timing_run `
   --write
 ```
 
 ## CLI
 
-- `frame-timing-demo`：生成用于 smoke test 的确定性 demo frames。
+- `frame-timing-demo`：生成用于本地检查的确定性 demo frames。
 - `frame-timing-batch`：分析 clean frame 目录，并写出 `output_frames/` 和审查产物。
 - `frame-timing-health`：验证产物结构和复制帧来源。
 
