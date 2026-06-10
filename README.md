@@ -15,7 +15,9 @@ It detects static and fast-motion ranges, writes byte-identical copied output fr
 - Generate human review, visual review, and health reports.
 - Provide both CLI entrypoints and a Python API.
 
-## Use as an Agent Skill
+## For Users
+
+### Use as an Agent Skill
 
 For regular users, ask your AI agent or AI coding tool to install this repository as a skill:
 
@@ -32,7 +34,9 @@ Use frame-timing-skill on path/to/clean_frames
 
 The agent should run `frame-timing path/to/clean_frames` and verify the result with `frame-timing-health`.
 
-## Install Python Package for Developers
+## For Developers
+
+### Install Python Package
 
 For direct CLI or Python API use:
 
@@ -40,7 +44,7 @@ For direct CLI or Python API use:
 python -m pip install git+https://github.com/Taiquan-Zhou/frame-Extraction-and-Processing-skill.git
 ```
 
-## Usage
+### CLI Usage
 
 Run frame timing on a directory of already-clean extracted frames:
 
@@ -65,7 +69,7 @@ Check the generated artifacts:
 frame-timing-health --artifact_root output/frame_timing_run
 ```
 
-## CLI
+### CLI Reference
 
 - `frame-timing`: process one clean frame directory with the default local artifact layout.
 - `frame-timing-demo`: generate deterministic demo frames for local checks.
@@ -74,7 +78,7 @@ frame-timing-health --artifact_root output/frame_timing_run
 
 Pass multiple frame sets by repeating `--frames "<item_name>=<clean_frame_dir>"`.
 
-## Python API
+### Python API
 
 ```python
 from pathlib import Path
