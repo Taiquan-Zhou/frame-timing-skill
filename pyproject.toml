@@ -40,6 +40,7 @@ Source = "https://github.com/Taiquan-Zhou/frame-Extraction-and-Processing-skill"
 Issues = "https://github.com/Taiquan-Zhou/frame-Extraction-and-Processing-skill/issues"
 
 [project.scripts]
+frame-timing = "frame_timing_agent.simple_cli:main"
 frame-timing-batch = "frame_timing_agent.batch_timing_agent:main"
 frame-timing-health = "frame_timing_agent.batch_artifact_health:main"
 frame-timing-demo = "frame_timing_agent.demo_frames:main"

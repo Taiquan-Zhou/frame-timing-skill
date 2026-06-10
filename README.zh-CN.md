@@ -39,9 +39,29 @@ https://github.com/Taiquan-Zhou/frame-Extraction-and-Processing-skill
 python -m pip install git+https://github.com/Taiquan-Zhou/frame-Extraction-and-Processing-skill.git
 ```
 
+再让它用这一条命令处理帧目录：
+
+```bash
+frame-timing path/to/clean_frames
+```
+
 ## 使用方法
 
 对已经清理并抽取好的帧目录运行 frame timing：
+
+```bash
+frame-timing path/to/clean_frames
+```
+
+默认产物会写入 `agent_files/frame_timing_run`。
+
+PowerShell：
+
+```powershell
+frame-timing path\to\clean_frames
+```
+
+如果要处理多个帧目录，或需要自定义批处理参数，再使用高级 batch 命令：
 
 ```bash
 frame-timing-batch \
@@ -56,7 +76,7 @@ frame-timing-batch \
 frame-timing-health --artifact_root agent_files/frame_timing_run
 ```
 
-PowerShell 多行命令示例：
+PowerShell batch 命令示例：
 
 ```powershell
 frame-timing-batch `
@@ -67,6 +87,7 @@ frame-timing-batch `
 
 ## CLI
 
+- `frame-timing`：用默认本地产物结构处理一个 clean frame 目录。
 - `frame-timing-demo`：生成用于本地检查的确定性 demo frames。
 - `frame-timing-batch`：分析 clean frame 目录，并写出 `output_frames/` 和审查产物。
 - `frame-timing-health`：验证产物结构和复制帧来源。
@@ -80,9 +101,9 @@ from pathlib import Path
 from frame_timing_agent.batch_timing_agent import BatchTimingItem, run_batch_timing_agent
 
 result = run_batch_timing_agent(
-    [BatchTimingItem(name="sample", frames=Path("agent_files/demo_frames/sample"))],
-    artifact_root=Path("agent_files/demo_run"),
-    limit_first_n=72,
+    [BatchTimingItem(name="sample", frames=Path("path/to/clean_frames"))],
+    artifact_root=Path("agent_files/frame_timing_run"),
+    limit_first_n=300,
     write=True,
 )
 ```
@@ -99,6 +120,14 @@ python ~/.codex/skills/.system/skill-installer/scripts/install-skill-from-github
 ```
 
 安装后重启 Codex。
+
+在支持 slash command 的 AI 编程工具里，选择或调用 `/skill frame-timing-skill`，然后让它处理你的帧目录：
+
+```text
+Use frame-timing-skill on path/to/clean_frames
+```
+
+该 skill 应优先运行 `frame-timing path/to/clean_frames`，并用 `frame-timing-health` 验证结果。
 
 ## 输出
 

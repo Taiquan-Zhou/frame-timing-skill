@@ -4,6 +4,22 @@ Use this package after a host project has already extracted and cleaned image fr
 
 ## Installed CLI
 
+Primary one-directory interface:
+
+```powershell
+frame-timing path\to\clean_frames
+frame-timing-health --artifact_root agent_files\frame_timing_run
+```
+
+POSIX shell:
+
+```bash
+frame-timing path/to/clean_frames
+frame-timing-health --artifact_root agent_files/frame_timing_run
+```
+
+Advanced batch interface:
+
 ```powershell
 frame-timing-batch `
   --frames "sample=path\to\clean_frames" `
@@ -26,6 +42,7 @@ POSIX shell:
 
 ```bash
 frame-timing-demo --output_dir agent_files/demo_frames/sample --count 72
+frame-timing path/to/clean_frames
 frame-timing-batch --frames "sample=path/to/clean_frames" --artifact_root agent_files/frame_timing_run --limit_first_n 300 --write
 frame-timing-health --artifact_root agent_files/frame_timing_run
 ```
@@ -74,11 +91,11 @@ POSIX shell:
 
 ```bash
 python -m pip install /path/to/frame-timing-skill
-frame-timing-batch --frames "sample=path/to/clean_frames" --artifact_root agent_files/frame_timing_run --write
+frame-timing path/to/clean_frames
 frame-timing-health --artifact_root agent_files/frame_timing_run
 ```
 
-Prefer the CLI for loose coupling. Prefer the Python API only when the host project needs direct access to result objects or wants to compose the timing step inside an existing Python pipeline.
+Prefer `frame-timing <clean_frame_dir>` for loose coupling and simple one-directory runs. Use `frame-timing-batch` for multiple directories or custom batch settings. Prefer the Python API only when the host project needs direct access to result objects or wants to compose the timing step inside an existing Python pipeline.
 
 ## Maintainer Notes
 

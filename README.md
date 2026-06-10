@@ -39,9 +39,29 @@ Ask the AI coding tool to run this install command in the target project:
 python -m pip install git+https://github.com/Taiquan-Zhou/frame-Extraction-and-Processing-skill.git
 ```
 
+Then ask it to process the frame directory with:
+
+```bash
+frame-timing path/to/clean_frames
+```
+
 ## Usage
 
 Run frame timing on a directory of already-clean extracted frames:
+
+```bash
+frame-timing path/to/clean_frames
+```
+
+By default, artifacts are written to `agent_files/frame_timing_run`.
+
+PowerShell:
+
+```powershell
+frame-timing path\to\clean_frames
+```
+
+For multiple frame directories or custom batch settings, use the advanced batch command:
 
 ```bash
 frame-timing-batch \
@@ -56,7 +76,7 @@ Check the generated artifacts:
 frame-timing-health --artifact_root agent_files/frame_timing_run
 ```
 
-On PowerShell, use backticks for multiline commands:
+PowerShell batch command:
 
 ```powershell
 frame-timing-batch `
@@ -67,6 +87,7 @@ frame-timing-batch `
 
 ## CLI
 
+- `frame-timing`: process one clean frame directory with the default local artifact layout.
 - `frame-timing-demo`: generate deterministic demo frames for local checks.
 - `frame-timing-batch`: analyze clean frame directories and write `output_frames/` plus review artifacts.
 - `frame-timing-health`: verify artifact structure and copied-frame provenance.
@@ -80,9 +101,9 @@ from pathlib import Path
 from frame_timing_agent.batch_timing_agent import BatchTimingItem, run_batch_timing_agent
 
 result = run_batch_timing_agent(
-    [BatchTimingItem(name="sample", frames=Path("agent_files/demo_frames/sample"))],
-    artifact_root=Path("agent_files/demo_run"),
-    limit_first_n=72,
+    [BatchTimingItem(name="sample", frames=Path("path/to/clean_frames"))],
+    artifact_root=Path("agent_files/frame_timing_run"),
+    limit_first_n=300,
     write=True,
 )
 ```
@@ -99,6 +120,14 @@ python ~/.codex/skills/.system/skill-installer/scripts/install-skill-from-github
 ```
 
 Restart Codex after installing the skill.
+
+In AI coding tools that expose slash commands, select or invoke `/skill frame-timing-skill`, then ask it to process your frame directory:
+
+```text
+Use frame-timing-skill on path/to/clean_frames
+```
+
+The skill should run `frame-timing path/to/clean_frames` and verify the result with `frame-timing-health`.
 
 ## Output
 

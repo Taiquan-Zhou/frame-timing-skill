@@ -96,5 +96,5 @@ jobs:
           Set-Location $hostDir
           python -m pip install $source
           frame-timing-demo --output_dir agent_files\demo_frames\sample --count 12
-          frame-timing-batch --frames "sample=agent_files\demo_frames\sample" --artifact_root agent_files\ci_demo --limit_first_n 12 --write
+          frame-timing agent_files\demo_frames\sample --artifact_root agent_files\ci_demo --limit_first_n 12
           frame-timing-health --artifact_root agent_files\ci_demo

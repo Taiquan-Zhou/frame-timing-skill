@@ -46,6 +46,10 @@ class PackageMetadataTest(unittest.TestCase):
         data = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
 
         self.assertEqual(
+            data["project"]["scripts"]["frame-timing"],
+            "frame_timing_agent.simple_cli:main",
+        )
+        self.assertEqual(
             data["project"]["scripts"]["frame-timing-batch"],
             "frame_timing_agent.batch_timing_agent:main",
         )
@@ -96,12 +100,18 @@ class PackageMetadataTest(unittest.TestCase):
         self.assertNotIn("开发安装", readme_zh)
         self.assertIn("path/to/clean_frames", readme)
         self.assertIn("path/to/clean_frames", readme_zh)
+        self.assertIn("frame-timing path/to/clean_frames", readme)
+        self.assertIn("frame-timing path/to/clean_frames", readme_zh)
+        self.assertIn("/skill frame-timing-skill", readme)
+        self.assertIn("/skill frame-timing-skill", readme_zh)
         self.assertIn("agent_files/frame_timing_run", readme)
         self.assertIn("agent_files/frame_timing_run", readme_zh)
         self.assertIn("git+https://github.com/Taiquan-Zhou/frame-Extraction-and-Processing-skill.git", readme)
         self.assertIn("https://github.com/Taiquan-Zhou/frame-Extraction-and-Processing-skill", readme)
         self.assertIn("install-skill-from-github.py", readme)
         self.assertIn("--name frame-timing-skill", readme)
+        self.assertIn("frame-timing \"<clean_frame_dir>\"", skill)
+        self.assertIn("prefer the installed `frame-timing` CLI", skill)
         self.assertIn("Host Project Smoke", usage)
         self.assertNotIn("Release Checklist", readme)
         self.assertNotIn("Release Artifact Scope", readme)
@@ -118,8 +128,8 @@ class PackageMetadataTest(unittest.TestCase):
         self.assertIn("quick_validate.py", content)
         self.assertIn("Set-Location $hostDir", content)
         self.assertIn("python -m pip install $source", content)
+        self.assertIn("frame-timing agent_files\\demo_frames\\sample", content)
         self.assertIn("frame-timing-demo", content)
-        self.assertIn("frame-timing-batch", content)
         self.assertIn("frame-timing-health", content)
 
     def test_source_distribution_manifest_excludes_development_artifacts(self):

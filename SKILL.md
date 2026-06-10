@@ -5,7 +5,7 @@ description: Use when preparing already-clean extracted image frames for reconst
 
 # Frame Timing Skill
 
-Use this skill only after the user already has clean extracted frame directories. It is a local package-backed skill: prefer the installed CLI entrypoints, or the Python API when integrating from another project.
+Use this skill only after the user already has clean extracted frame directories. It is a local package-backed skill: prefer the installed `frame-timing` CLI, use `frame-timing-batch` only for multiple frame directories or custom batch settings, and use the Python API when integrating from another project.
 
 ## Boundaries
 
@@ -36,7 +36,21 @@ POSIX shell:
 python -m pip install /path/to/frame-timing-skill
 ```
 
-3. Run batch timing:
+3. Run the simple one-directory interface:
+
+```powershell
+frame-timing "<clean_frame_dir>"
+```
+
+POSIX shell:
+
+```bash
+frame-timing path/to/clean_frames
+```
+
+This writes artifacts under `agent_files/frame_timing_run` by default.
+
+4. For multiple frame directories or custom batch settings, run batch timing:
 
 ```powershell
 frame-timing-batch `
@@ -52,7 +66,7 @@ POSIX shell:
 frame-timing-batch --frames "<item_name>=<clean_frame_dir>" --artifact_root "agent_files/<run_name>" --limit_first_n 300 --write
 ```
 
-4. Verify before reporting completion:
+5. Verify before reporting completion:
 
 ```powershell
 frame-timing-health --artifact_root "agent_files/<run_name>"
@@ -64,7 +78,7 @@ POSIX shell:
 frame-timing-health --artifact_root "agent_files/<run_name>"
 ```
 
-5. Report `output_frames`, review dashboard, human review, maintenance report, and any warnings/errors.
+6. Report `output_frames`, review dashboard, human review, maintenance report, and any warnings/errors.
 
 ## Output Contract
 
