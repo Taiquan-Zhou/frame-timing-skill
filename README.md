@@ -15,7 +15,28 @@ It detects static and fast-motion ranges, writes byte-identical copied output fr
 - Generate human review, visual review, and health reports.
 - Provide both CLI entrypoints and a Python API.
 
-## Install
+## Install as a Codex Skill
+
+Install this repository as a Codex skill:
+
+```bash
+python ~/.codex/skills/.system/skill-installer/scripts/install-skill-from-github.py \
+  --repo Taiquan-Zhou/frame-Extraction-and-Processing-skill \
+  --path . \
+  --name frame-timing-skill
+```
+
+Restart Codex after installing the skill.
+
+In AI coding tools that expose slash commands, select or invoke `/skill frame-timing-skill`, then ask it to process your frame directory:
+
+```text
+Use frame-timing-skill on path/to/clean_frames
+```
+
+The skill should run `frame-timing path/to/clean_frames` and verify the result with `frame-timing-health`.
+
+## Install Python Package
 
 Install from GitHub:
 
@@ -23,49 +44,21 @@ Install from GitHub:
 python -m pip install git+https://github.com/Taiquan-Zhou/frame-Extraction-and-Processing-skill.git
 ```
 
-The `git+` prefix is required by pip when installing directly from a Git repository.
-
-## AI Coding Tool Use
-
-Copy this repository URL into your AI coding tool:
-
-```text
-https://github.com/Taiquan-Zhou/frame-Extraction-and-Processing-skill
-```
-
-Ask the AI coding tool to run this install command in the target project:
-
-```bash
-python -m pip install git+https://github.com/Taiquan-Zhou/frame-Extraction-and-Processing-skill.git
-```
-
-Then ask it to process the frame directory with:
-
-```bash
-frame-timing path/to/clean_frames
-```
-
 ## Usage
 
 Run frame timing on a directory of already-clean extracted frames:
 
 ```bash
-frame-timing path/to/clean_frames
+frame-timing your_frames_path
 ```
 
 By default, artifacts are written to `output/frame_timing_run`.
-
-PowerShell:
-
-```powershell
-frame-timing path\to\clean_frames
-```
 
 For multiple frame directories or custom batch settings, use the advanced batch command:
 
 ```bash
 frame-timing-batch \
-  --frames "sample=path/to/clean_frames" \
+  --frames "sample=your_frames_path" \
   --artifact_root output/frame_timing_run \
   --write
 ```
@@ -76,14 +69,6 @@ Check the generated artifacts:
 frame-timing-health --artifact_root output/frame_timing_run
 ```
 
-PowerShell batch command:
-
-```powershell
-frame-timing-batch `
-  --frames "sample=path\to\clean_frames" `
-  --artifact_root output\frame_timing_run `
-  --write
-```
 
 ## CLI
 
@@ -107,27 +92,6 @@ result = run_batch_timing_agent(
     write=True,
 )
 ```
-
-## Use as a Codex Skill
-
-Install the repository root as a Codex skill:
-
-```bash
-python ~/.codex/skills/.system/skill-installer/scripts/install-skill-from-github.py \
-  --repo Taiquan-Zhou/frame-Extraction-and-Processing-skill \
-  --path . \
-  --name frame-timing-skill
-```
-
-Restart Codex after installing the skill.
-
-In AI coding tools that expose slash commands, select or invoke `/skill frame-timing-skill`, then ask it to process your frame directory:
-
-```text
-Use frame-timing-skill on path/to/clean_frames
-```
-
-The skill should run `frame-timing path/to/clean_frames` and verify the result with `frame-timing-health`.
 
 ## Output
 
