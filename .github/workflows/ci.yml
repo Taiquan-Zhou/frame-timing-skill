@@ -1,0 +1,95 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  test:
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install package and test tools
+        run: python -m pip install . pytest build
+
+      - name: Run tests
+        run: python -m pytest
+
+      - name: Compile Python sources
+        run: python -m compileall -q scripts examples tests
+
+      - name: Build and audit distributions
+        shell: pwsh
+        run: |
+          $dist = Join-Path $env:RUNNER_TEMP "dist-audit"
+          python -m build --outdir $dist
+          $env:DIST_AUDIT_DIR = $dist
+          @'
+          import os
+          import tarfile
+          import zipfile
+          from pathlib import Path
+
+          blocked = (
+              "/tests/",
+              "/docs/",
+              "/.github/",
+              "/examples/",
+              "/output/",
+              "AGENTS.md",
+              "handoff.md",
+              "__pycache__",
+          )
+          dist = Path(os.environ["DIST_AUDIT_DIR"])
+          archives = list(dist.glob("*.whl")) + list(dist.glob("*.tar.gz"))
+          if not archives:
+              raise SystemExit("no distributions built")
+          for archive in archives:
+              if archive.suffix == ".whl":
+                  with zipfile.ZipFile(archive) as zf:
+                      names = zf.namelist()
+              else:
+                  with tarfile.open(archive, "r:gz") as tf:
+                      names = tf.getnames()
+              bad = [name for name in names if any(token in name for token in blocked)]
+              if bad:
+                  raise SystemExit(f"{archive.name} contains non-release files: {bad}")
+          '@ | python -
+
+      - name: Validate skill metadata
+        shell: pwsh
+        run: |
+          $text = Get-Content -Raw SKILL.md
+          if (-not $text.StartsWith("---`n")) {
+            throw "SKILL.md missing YAML frontmatter"
+          }
+          $parts = $text -split "---", 3
+          $frontmatter = $parts[1]
+          if ($frontmatter -notmatch "(?m)^name:\s*frame-timing-skill\s*$") {
+            throw "unexpected skill name"
+          }
+          if ($frontmatter -notmatch "(?m)^description:\s*Use when") {
+            throw "skill description must start with 'Use when'"
+          }
+
+      - name: Installed CLI smoke
+        shell: pwsh
+        run: |
+          $source = (Resolve-Path .).Path
+          $hostDir = Join-Path $env:RUNNER_TEMP "frame-timing-host"
+          New-Item -ItemType Directory -Force -Path $hostDir | Out-Null
+          Set-Location $hostDir
+          python -m pip install $source
+          frame-timing-demo --output_dir output\demo_frames\sample --count 12
+          frame-timing output\demo_frames\sample --artifact_root output\ci_demo --limit_first_n 12
+          frame-timing-health --artifact_root output\ci_demo
