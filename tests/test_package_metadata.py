@@ -33,7 +33,7 @@ class PackageMetadataTest(unittest.TestCase):
         self.assertIn("agent-skill", data["project"]["keywords"])
         self.assertEqual(
             data["project"]["urls"]["Source"],
-            "https://github.com/Taiquan-Zhou/frame-Extraction-and-Processing-skill",
+            "https://github.com/Taiquan-Zhou/frame-timing-skill",
         )
 
     def test_runtime_dependencies_are_bounded_for_reproducible_installs(self):
@@ -94,9 +94,9 @@ class PackageMetadataTest(unittest.TestCase):
         self.assertIn("### Install Python Package", readme)
         self.assertIn("### CLI Usage", readme)
         self.assertIn("### Python API", readme)
-        self.assertIn("Install this skill: https://github.com/Taiquan-Zhou/frame-Extraction-and-Processing-skill", readme)
+        self.assertIn("Install this skill: https://github.com/Taiquan-Zhou/frame-timing-skill", readme)
         self.assertNotIn("<your-agent-skills-dir>/frame-timing-skill", readme)
-        self.assertNotIn("repo: Taiquan-Zhou/frame-Extraction-and-Processing-skill", readme)
+        self.assertNotIn("repo: Taiquan-Zhou/frame-timing-skill", readme)
         self.assertNotIn("## AI Coding Tool Use", readme)
         self.assertNotIn("Codex", readme)
         self.assertNotIn("for development", readme)
@@ -117,8 +117,8 @@ class PackageMetadataTest(unittest.TestCase):
         self.assertIn("/skill frame-timing-skill", readme_zh)
         self.assertIn("output/frame_timing_run", readme)
         self.assertIn("output/frame_timing_run", readme_zh)
-        self.assertIn("git+https://github.com/Taiquan-Zhou/frame-Extraction-and-Processing-skill.git", readme)
-        self.assertIn("https://github.com/Taiquan-Zhou/frame-Extraction-and-Processing-skill", readme)
+        self.assertIn("git+https://github.com/Taiquan-Zhou/frame-timing-skill.git", readme)
+        self.assertIn("https://github.com/Taiquan-Zhou/frame-timing-skill", readme)
         self.assertIn("frame-timing \"<clean_frame_dir>\"", skill)
         self.assertIn("prefer the installed `frame-timing` CLI", skill)
         self.assertIn("Host Project Smoke", usage)
