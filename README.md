@@ -21,7 +21,7 @@ It detects static and fast-motion ranges, writes byte-identical copied output fr
 For regular users, ask your AI agent or AI coding tool to install this repository as a skill:
 
 ```text
-Install this skill: https://github.com/Taiquan-Zhou/frame-Extraction-and-Processing-skill
+Install this skill: https://github.com/Taiquan-Zhou/frame-timing-skill
 ```
 
 Then ask it to process your frame directory:
@@ -38,7 +38,7 @@ Use frame-timing-skill on path/to/clean_frames
 For direct CLI or Python API use:
 
 ```bash
-python -m pip install git+https://github.com/Taiquan-Zhou/frame-Extraction-and-Processing-skill.git
+python -m pip install git+https://github.com/Taiquan-Zhou/frame-timing-skill.git
 ```
 
 ### CLI Usage
