@@ -2,7 +2,7 @@
 
 [English](README.md) | [中文](README.zh-CN.md)
 
-Frame Timing Skill 是一个本地 Python package 和 Codex skill，用于在重建前优化已经清理并抽取好的视频帧。
+Frame Timing Skill 是一个本地 Python package 和通用 Agent Skill，用于在重建前优化已经清理并抽取好的视频帧。
 
 它可以检测静止区间和快速运动区间，生成字节级一致复制的模型安全输出帧，并在 `output/` 下生成本地审查产物。它不负责视频抽帧、去水印、OCR、修改像素、上传数据或执行重建。
 
@@ -15,7 +15,40 @@ Frame Timing Skill 是一个本地 Python package 和 Codex skill，用于在重
 - 生成人工审查、可视化审查和健康检查报告。
 - 同时提供 CLI 入口和 Python API。
 
-## 安装
+## 作为 Agent Skill 安装
+
+这个仓库可以被任何支持本地 skill/instructions 的 AI agent 或 AI 编程工具使用。
+
+Skill 入口文件是：
+
+```text
+SKILL.md
+```
+
+把这个仓库克隆或下载到你的 agent skills 目录：
+
+```bash
+git clone https://github.com/Taiquan-Zhou/frame-Extraction-and-Processing-skill.git <your-agent-skills-dir>/frame-timing-skill
+```
+
+如果你的 agent 提供 GitHub skill installer，使用这些参数：
+
+```text
+repo: Taiquan-Zhou/frame-Extraction-and-Processing-skill
+path: .
+name: frame-timing-skill
+```
+
+安装后，通过你的 agent 的 skill 选择器或 slash-command 入口调用：
+
+```text
+/skill frame-timing-skill
+Use frame-timing-skill on path/to/clean_frames
+```
+
+agent 应优先运行 `frame-timing path/to/clean_frames`，并用 `frame-timing-health` 验证结果。
+
+## 安装 Python Package
 
 从 GitHub 安装：
 
@@ -23,49 +56,21 @@ Frame Timing Skill 是一个本地 Python package 和 Codex skill，用于在重
 python -m pip install git+https://github.com/Taiquan-Zhou/frame-Extraction-and-Processing-skill.git
 ```
 
-这里的 `git+` 是 pip 从 Git 仓库直接安装时需要的标准前缀。
-
-## AI 编程工具调用
-
-把这个仓库网址复制给 AI 编程工具：
-
-```text
-https://github.com/Taiquan-Zhou/frame-Extraction-and-Processing-skill
-```
-
-然后让 AI 编程工具在目标项目里运行这个安装命令：
-
-```bash
-python -m pip install git+https://github.com/Taiquan-Zhou/frame-Extraction-and-Processing-skill.git
-```
-
-再让它用这一条命令处理帧目录：
-
-```bash
-frame-timing path/to/clean_frames
-```
-
 ## 使用方法
 
 对已经清理并抽取好的帧目录运行 frame timing：
 
 ```bash
-frame-timing path/to/clean_frames
+frame-timing your_frames_path
 ```
 
 默认产物会写入 `output/frame_timing_run`。
-
-PowerShell：
-
-```powershell
-frame-timing path\to\clean_frames
-```
 
 如果要处理多个帧目录，或需要自定义批处理参数，再使用高级 batch 命令：
 
 ```bash
 frame-timing-batch \
-  --frames "sample=path/to/clean_frames" \
+  --frames "sample=your_frames_path" \
   --artifact_root output/frame_timing_run \
   --write
 ```
@@ -74,15 +79,6 @@ frame-timing-batch \
 
 ```bash
 frame-timing-health --artifact_root output/frame_timing_run
-```
-
-PowerShell batch 命令示例：
-
-```powershell
-frame-timing-batch `
-  --frames "sample=path\to\clean_frames" `
-  --artifact_root output\frame_timing_run `
-  --write
 ```
 
 ## CLI
@@ -107,27 +103,6 @@ result = run_batch_timing_agent(
     write=True,
 )
 ```
-
-## 作为 Codex Skill 使用
-
-把仓库根目录安装为 Codex skill：
-
-```bash
-python ~/.codex/skills/.system/skill-installer/scripts/install-skill-from-github.py \
-  --repo Taiquan-Zhou/frame-Extraction-and-Processing-skill \
-  --path . \
-  --name frame-timing-skill
-```
-
-安装后重启 Codex。
-
-在支持 slash command 的 AI 编程工具里，选择或调用 `/skill frame-timing-skill`，然后让它处理你的帧目录：
-
-```text
-Use frame-timing-skill on path/to/clean_frames
-```
-
-该 skill 应优先运行 `frame-timing path/to/clean_frames`，并用 `frame-timing-health` 验证结果。
 
 ## 输出
 

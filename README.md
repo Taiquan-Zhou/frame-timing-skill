@@ -2,7 +2,7 @@
 
 [English](README.md) | [中文](README.zh-CN.md)
 
-Frame Timing Skill is a local Python package and Codex skill for optimizing already-clean extracted video frames before reconstruction.
+Frame Timing Skill is a local Python package and portable Agent Skill for optimizing already-clean extracted video frames before reconstruction.
 
 It detects static and fast-motion ranges, writes byte-identical copied output frames, and creates local review artifacts under `output/`. It does not extract video, remove watermarks, run OCR, edit pixels, upload data, or run reconstruction.
 
@@ -15,26 +15,38 @@ It detects static and fast-motion ranges, writes byte-identical copied output fr
 - Generate human review, visual review, and health reports.
 - Provide both CLI entrypoints and a Python API.
 
-## Install as a Codex Skill
+## Install as an Agent Skill
 
-Install this repository as a Codex skill:
+This repository is designed to be used by any AI agent or coding tool that supports local skills/instructions.
 
-```bash
-python ~/.codex/skills/.system/skill-installer/scripts/install-skill-from-github.py \
-  --repo Taiquan-Zhou/frame-Extraction-and-Processing-skill \
-  --path . \
-  --name frame-timing-skill
-```
-
-Restart Codex after installing the skill.
-
-In AI coding tools that expose slash commands, select or invoke `/skill frame-timing-skill`, then ask it to process your frame directory:
+The skill entrypoint is:
 
 ```text
+SKILL.md
+```
+
+Install it by cloning or downloading this repository into your agent's skills directory:
+
+```bash
+git clone https://github.com/Taiquan-Zhou/frame-Extraction-and-Processing-skill.git <your-agent-skills-dir>/frame-timing-skill
+```
+
+If your agent provides a GitHub skill installer, use these values:
+
+```text
+repo: Taiquan-Zhou/frame-Extraction-and-Processing-skill
+path: .
+name: frame-timing-skill
+```
+
+After installation, invoke the skill through your agent's skill picker or slash-command interface, if available:
+
+```text
+/skill frame-timing-skill
 Use frame-timing-skill on path/to/clean_frames
 ```
 
-The skill should run `frame-timing path/to/clean_frames` and verify the result with `frame-timing-health`.
+The agent should run `frame-timing path/to/clean_frames` and verify the result with `frame-timing-health`.
 
 ## Install Python Package
 
@@ -68,7 +80,6 @@ Check the generated artifacts:
 ```bash
 frame-timing-health --artifact_root output/frame_timing_run
 ```
-
 
 ## CLI
 

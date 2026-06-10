@@ -14,7 +14,7 @@ authors = [
   {name = "Frame Timing Skill contributors"},
 ]
 keywords = [
-  "codex-skill",
+  "agent-skill",
   "frame-timing",
   "video-frames",
   "reconstruction",

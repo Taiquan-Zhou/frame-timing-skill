@@ -5,7 +5,6 @@ on:
   push:
     branches:
       - main
-      - "codex/**"
 
 jobs:
   test:
@@ -46,6 +45,7 @@ jobs:
               "/docs/",
               "/.github/",
               "/examples/",
+              "/output/",
               "AGENTS.md",
               "handoff.md",
               "__pycache__",
@@ -69,22 +69,17 @@ jobs:
       - name: Validate skill metadata
         shell: pwsh
         run: |
-          $validator = Join-Path $env:USERPROFILE ".codex\skills\.system\skill-creator\scripts\quick_validate.py"
-          if (Test-Path -LiteralPath $validator) {
-            python $validator .
-          } else {
-            $text = Get-Content -Raw SKILL.md
-            if (-not $text.StartsWith("---`n")) {
-              throw "SKILL.md missing YAML frontmatter"
-            }
-            $parts = $text -split "---", 3
-            $frontmatter = $parts[1]
-            if ($frontmatter -notmatch "(?m)^name:\s*frame-timing-skill\s*$") {
-              throw "unexpected skill name"
-            }
-            if ($frontmatter -notmatch "(?m)^description:\s*Use when") {
-              throw "skill description must start with 'Use when'"
-            }
+          $text = Get-Content -Raw SKILL.md
+          if (-not $text.StartsWith("---`n")) {
+            throw "SKILL.md missing YAML frontmatter"
+          }
+          $parts = $text -split "---", 3
+          $frontmatter = $parts[1]
+          if ($frontmatter -notmatch "(?m)^name:\s*frame-timing-skill\s*$") {
+            throw "unexpected skill name"
+          }
+          if ($frontmatter -notmatch "(?m)^description:\s*Use when") {
+            throw "skill description must start with 'Use when'"
           }
 
       - name: Installed CLI smoke
