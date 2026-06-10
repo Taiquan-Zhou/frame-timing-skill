@@ -7,7 +7,7 @@ build/
 *.egg-info/
 .venv/
 venv/
-agent_files/
+output/
 examples/generated_frames/
 *.mp4
 *.mov

@@ -10,7 +10,7 @@ from frame_timing_agent.frame_source import load_frame_records
 class MakeDemoFramesTest(unittest.TestCase):
     def test_script_generates_loadable_demo_frames(self):
         with tempfile.TemporaryDirectory() as tmp:
-            output_dir = Path(tmp) / "agent_files" / "demo_frames" / "sample"
+            output_dir = Path(tmp) / "output" / "demo_frames" / "sample"
 
             completed = subprocess.run(
                 [

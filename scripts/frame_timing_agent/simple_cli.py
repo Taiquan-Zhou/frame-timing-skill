@@ -15,7 +15,7 @@ from frame_timing_agent.batch_timing_agent import BatchTimingItem, run_batch_tim
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run frame timing on one already-clean extracted frame directory.")
     parser.add_argument("frames", type=Path, help="Directory containing already-clean extracted image frames.")
-    parser.add_argument("--artifact_root", type=Path, default=Path("agent_files") / "frame_timing_run")
+    parser.add_argument("--artifact_root", type=Path, default=Path("output") / "frame_timing_run")
     parser.add_argument("--name", default=None, help="Artifact item name. Defaults to the frame directory name.")
     parser.add_argument("--limit_first_n", type=int, default=300)
     parser.add_argument("--mode", default="aggressive_motion")

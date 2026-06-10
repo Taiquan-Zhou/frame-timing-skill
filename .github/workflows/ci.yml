@@ -95,6 +95,6 @@ jobs:
           New-Item -ItemType Directory -Force -Path $hostDir | Out-Null
           Set-Location $hostDir
           python -m pip install $source
-          frame-timing-demo --output_dir agent_files\demo_frames\sample --count 12
-          frame-timing agent_files\demo_frames\sample --artifact_root agent_files\ci_demo --limit_first_n 12
-          frame-timing-health --artifact_root agent_files\ci_demo
+          frame-timing-demo --output_dir output\demo_frames\sample --count 12
+          frame-timing output\demo_frames\sample --artifact_root output\ci_demo --limit_first_n 12
+          frame-timing-health --artifact_root output\ci_demo

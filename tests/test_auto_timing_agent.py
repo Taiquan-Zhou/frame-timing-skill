@@ -23,7 +23,7 @@ class AutoTimingAgentTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             frames = root / "frames"
-            artifact_dir = root / "agent_files" / "preview"
+            artifact_dir = root / "output" / "preview"
             frames.mkdir()
             for index in range(30):
                 _write_image(frames / f"frame_{index:06d}_src_{index:06d}.jpg", 100)
@@ -46,7 +46,7 @@ class AutoTimingAgentTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             frames = root / "frames"
-            artifact_dir = root / "agent_files" / "write"
+            artifact_dir = root / "output" / "write"
             frames.mkdir()
             for index in range(30):
                 _write_image(frames / f"frame_{index:06d}_src_{index:06d}.jpg", 100)
@@ -65,7 +65,7 @@ class AutoTimingAgentTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             frames = root / "frames"
-            artifact_dir = root / "agent_files" / "subset"
+            artifact_dir = root / "output" / "subset"
             frames.mkdir()
             for source_index in [20, 10, 30, 40]:
                 _write_image(frames / f"frame_{source_index:06d}_src_{source_index:06d}.jpg", 100)
@@ -82,7 +82,7 @@ class AutoTimingAgentTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             frames = root / "frames"
-            artifact_dir = root / "agent_files" / "override"
+            artifact_dir = root / "output" / "override"
             override_config = root / "override.json"
             frames.mkdir()
             for index in range(30):
@@ -130,7 +130,7 @@ class AutoTimingAgentTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             frames = root / "frames"
-            artifact_dir = root / "agent_files" / "script"
+            artifact_dir = root / "output" / "script"
             frames.mkdir()
             for index in range(3):
                 _write_image(frames / f"frame_{index:06d}_src_{index:06d}.jpg", 100)

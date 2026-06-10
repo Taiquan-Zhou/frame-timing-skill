@@ -210,8 +210,8 @@ def _safe_artifact_name(name: str) -> str:
 
 
 def _validate_artifact_root(artifact_root: Path) -> None:
-    if "agent_files" not in {part.lower() for part in artifact_root.parts}:
-        raise ValueError(f"artifact_root must be inside an agent_files directory: {artifact_root}")
+    if "output" not in {part.lower() for part in artifact_root.parts}:
+        raise ValueError(f"artifact_root must be inside an output directory: {artifact_root}")
 
 
 def _success_result(
@@ -350,7 +350,7 @@ def _write_batch_human_review(
         f"- 批处理项数量：{len(results)}",
         f"- 成功：{success_count}",
         f"- 失败：{failure_count}",
-        "- 产物根目录：当前 `agent_files` batch 目录。",
+        "- 产物根目录：当前 `output` batch 目录。",
         "",
         "## 2. 批处理结果表",
         "",

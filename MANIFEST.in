@@ -9,7 +9,7 @@ recursive-exclude * __pycache__ *.py[cod]
 prune .github
 prune .pytest_cache
 prune .tmp_tests
-prune agent_files
+prune output
 prune build
 prune docs
 prune examples

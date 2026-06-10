@@ -8,7 +8,7 @@ import cv2
 import numpy as np
 
 
-DEFAULT_OUTPUT_DIR = Path("agent_files") / "demo_frames" / "sample"
+DEFAULT_OUTPUT_DIR = Path("output") / "demo_frames" / "sample"
 
 
 def generate_demo_frames(output_dir: Path | str = DEFAULT_OUTPUT_DIR, count: int = 72) -> list[Path]:
@@ -16,7 +16,7 @@ def generate_demo_frames(output_dir: Path | str = DEFAULT_OUTPUT_DIR, count: int
         raise ValueError(f"count must be positive: {count}")
 
     output_dir = Path(output_dir)
-    _validate_agent_files_path(output_dir)
+    _validate_output_path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     _clear_previous_demo_frames(output_dir)
 
@@ -75,9 +75,9 @@ def _draw_reference_grid(image: np.ndarray, offset: int) -> None:
         cv2.line(image, (0, y), (width - 1, y), (104, 116, 128), thickness=1)
 
 
-def _validate_agent_files_path(path: Path) -> None:
-    if "agent_files" not in {part.lower() for part in path.parts}:
-        raise ValueError(f"output_dir must be inside an agent_files directory: {path}")
+def _validate_output_path(path: Path) -> None:
+    if "output" not in {part.lower() for part in path.parts}:
+        raise ValueError(f"output_dir must be inside an output directory: {path}")
 
 
 def _clear_previous_demo_frames(output_dir: Path) -> None:

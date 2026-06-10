@@ -4,7 +4,7 @@
 
 Frame Timing Skill is a local Python package and Codex skill for optimizing already-clean extracted video frames before reconstruction.
 
-It detects static and fast-motion ranges, writes byte-identical copied output frames, and creates local review artifacts under `agent_files/`. It does not extract video, remove watermarks, run OCR, edit pixels, upload data, or run reconstruction.
+It detects static and fast-motion ranges, writes byte-identical copied output frames, and creates local review artifacts under `output/`. It does not extract video, remove watermarks, run OCR, edit pixels, upload data, or run reconstruction.
 
 ## Features
 
@@ -53,7 +53,7 @@ Run frame timing on a directory of already-clean extracted frames:
 frame-timing path/to/clean_frames
 ```
 
-By default, artifacts are written to `agent_files/frame_timing_run`.
+By default, artifacts are written to `output/frame_timing_run`.
 
 PowerShell:
 
@@ -66,14 +66,14 @@ For multiple frame directories or custom batch settings, use the advanced batch 
 ```bash
 frame-timing-batch \
   --frames "sample=path/to/clean_frames" \
-  --artifact_root agent_files/frame_timing_run \
+  --artifact_root output/frame_timing_run \
   --write
 ```
 
 Check the generated artifacts:
 
 ```bash
-frame-timing-health --artifact_root agent_files/frame_timing_run
+frame-timing-health --artifact_root output/frame_timing_run
 ```
 
 PowerShell batch command:
@@ -81,7 +81,7 @@ PowerShell batch command:
 ```powershell
 frame-timing-batch `
   --frames "sample=path\to\clean_frames" `
-  --artifact_root agent_files\frame_timing_run `
+  --artifact_root output\frame_timing_run `
   --write
 ```
 
@@ -102,7 +102,7 @@ from frame_timing_agent.batch_timing_agent import BatchTimingItem, run_batch_tim
 
 result = run_batch_timing_agent(
     [BatchTimingItem(name="sample", frames=Path("path/to/clean_frames"))],
-    artifact_root=Path("agent_files/frame_timing_run"),
+    artifact_root=Path("output/frame_timing_run"),
     limit_first_n=300,
     write=True,
 )
@@ -134,14 +134,14 @@ The skill should run `frame-timing path/to/clean_frames` and verify the result w
 Model-safe output is written to:
 
 ```text
-agent_files/<run_name>/<item_name>/output_frames/
+output/<run_name>/<item_name>/output_frames/
 ```
 
 Review and health artifacts are written under:
 
 ```text
-agent_files/<run_name>/analysis/
-agent_files/<run_name>/<item_name>/analysis/
+output/<run_name>/analysis/
+output/<run_name>/<item_name>/analysis/
 ```
 
 Only `output_frames/` should be passed to downstream reconstruction tools.

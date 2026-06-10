@@ -35,7 +35,7 @@ class SimpleCliTest(unittest.TestCase):
         with _tempdir() as tmp:
             root = Path(tmp)
             frames = root / "clean_frames"
-            artifact_root = root / "agent_files" / "frame_timing_run"
+            artifact_root = root / "output" / "frame_timing_run"
             _make_frames(frames, 5)
             script = Path(__file__).resolve().parents[1] / "scripts" / "frame_timing_agent" / "simple_cli.py"
 

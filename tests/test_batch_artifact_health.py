@@ -39,7 +39,7 @@ class BatchArtifactHealthTest(unittest.TestCase):
         with _tempdir() as tmp:
             root = Path(tmp)
             frames = root / "frames"
-            artifact_root = root / "agent_files" / "health_ok"
+            artifact_root = root / "output" / "health_ok"
             _make_frames(frames, 12)
 
             run_batch_timing_agent(
@@ -69,7 +69,7 @@ class BatchArtifactHealthTest(unittest.TestCase):
         with _tempdir() as tmp:
             root = Path(tmp)
             frames = root / "private_customer_frames"
-            artifact_root = root / "agent_files" / "privacy_ok"
+            artifact_root = root / "output" / "privacy_ok"
             _make_frames(frames, 10)
 
             run_batch_timing_agent(
@@ -104,7 +104,7 @@ class BatchArtifactHealthTest(unittest.TestCase):
         with _tempdir() as tmp:
             root = Path(tmp)
             frames = root / "frames"
-            artifact_root = root / "agent_files" / "health_bad_link"
+            artifact_root = root / "output" / "health_bad_link"
             _make_frames(frames, 8)
 
             run_batch_timing_agent(
@@ -128,7 +128,7 @@ class BatchArtifactHealthTest(unittest.TestCase):
         with _tempdir() as tmp:
             root = Path(tmp)
             frames = root / "frames"
-            artifact_root = root / "agent_files" / "health_cli"
+            artifact_root = root / "output" / "health_cli"
             _make_frames(frames, 6)
             run_batch_timing_agent(
                 [BatchTimingItem(name="sample", frames=frames)],
@@ -157,7 +157,7 @@ class BatchArtifactHealthTest(unittest.TestCase):
         with _tempdir() as tmp:
             root = Path(tmp)
             frames = root / "frames"
-            artifact_root = root / "agent_files" / "health_preview"
+            artifact_root = root / "output" / "health_preview"
             _make_frames(frames, 6)
 
             run_batch_timing_agent(
@@ -177,7 +177,7 @@ class BatchArtifactHealthTest(unittest.TestCase):
         with _tempdir() as tmp:
             root = Path(tmp)
             frames = root / "frames"
-            artifact_root = root / "agent_files" / "health_modified_output"
+            artifact_root = root / "output" / "health_modified_output"
             _make_frames(frames, 8)
 
             run_batch_timing_agent(
@@ -200,7 +200,7 @@ class BatchArtifactHealthTest(unittest.TestCase):
         with _tempdir() as tmp:
             root = Path(tmp)
             frames = root / "frames"
-            artifact_root = root / "agent_files" / "health_output_boundary"
+            artifact_root = root / "output" / "health_output_boundary"
             _make_frames(frames, 8)
 
             run_batch_timing_agent(
@@ -221,7 +221,7 @@ class BatchArtifactHealthTest(unittest.TestCase):
         with _tempdir() as tmp:
             root = Path(tmp)
             frames = root / "frames"
-            artifact_root = root / "agent_files" / "health_path_escape"
+            artifact_root = root / "output" / "health_path_escape"
             _make_frames(frames, 6)
 
             run_batch_timing_agent(
@@ -244,7 +244,7 @@ class BatchArtifactHealthTest(unittest.TestCase):
         with _tempdir() as tmp:
             root = Path(tmp)
             frames = root / "frames"
-            artifact_root = root / "agent_files" / "health_orphan"
+            artifact_root = root / "output" / "health_orphan"
             _make_frames(frames, 6)
 
             run_batch_timing_agent(

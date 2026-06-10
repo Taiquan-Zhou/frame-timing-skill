@@ -41,7 +41,7 @@ def run_batch_artifact_health_check(artifact_root: Path | str) -> BatchArtifactH
     errors: list[str] = []
     warnings: list[str] = []
 
-    _check_agent_files_root(artifact_root, errors)
+    _check_output_root(artifact_root, errors)
     summary = _load_json(analysis_dir / "batch_summary.json", errors)
     _require_file(analysis_dir / "batch_summary.csv", errors)
     _require_file(analysis_dir / "human_review.md", errors)
@@ -78,9 +78,9 @@ def run_batch_artifact_health_check(artifact_root: Path | str) -> BatchArtifactH
     return result
 
 
-def _check_agent_files_root(artifact_root: Path, errors: list[str]) -> None:
-    if "agent_files" not in {part.lower() for part in artifact_root.parts}:
-        errors.append(f"artifact_root is not inside agent_files: {artifact_root}")
+def _check_output_root(artifact_root: Path, errors: list[str]) -> None:
+    if "output" not in {part.lower() for part in artifact_root.parts}:
+        errors.append(f"artifact_root is not inside output: {artifact_root}")
 
 
 def _require_file(path: Path, errors: list[str]) -> None:
@@ -342,7 +342,7 @@ def _health_markdown(result: BatchArtifactHealthResult) -> str:
         f"- 检查 item 数：{result.checked_items}",
         f"- 检查 dashboard 链接数：{result.checked_links}",
         f"- 检查输出帧溯源数：{result.checked_output_frames}",
-        "- 产物根目录：当前 `agent_files` batch 目录。",
+        "- 产物根目录：当前 `output` batch 目录。",
         "",
         "## 错误",
     ]
@@ -353,7 +353,7 @@ def _health_markdown(result: BatchArtifactHealthResult) -> str:
         [
             "",
             "## 说明",
-            "- 本检查只读取并验证 agent_files 内部产物，不修改原始帧目录。",
+            "- 本检查只读取并验证 output 内部产物，不修改原始帧目录。",
             "- 输出帧溯源检查要求 `output_frames` 中的每张图片与记录的源帧哈希字节级一致；重复帧只能复制同一源帧。",
             "- 状态为 ok 只代表本地 agent 产物结构和审计一致，不代表建模质量已经合格。",
             "",

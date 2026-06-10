@@ -40,7 +40,7 @@ class BatchTimingAgentTest(unittest.TestCase):
             root = Path(tmp)
             frames_a = root / "frames_a"
             frames_b = root / "frames_b"
-            artifact_root = root / "agent_files" / "batch"
+            artifact_root = root / "output" / "batch"
             _make_frames(frames_a, 24)
             _make_frames(frames_b, 18, offset=100)
 
@@ -79,7 +79,7 @@ class BatchTimingAgentTest(unittest.TestCase):
         with _tempdir() as tmp:
             root = Path(tmp)
             frames = root / "frames"
-            artifact_root = root / "agent_files" / "batch_cli"
+            artifact_root = root / "output" / "batch_cli"
             _make_frames(frames, 5)
 
             completed = subprocess.run(
@@ -111,7 +111,7 @@ class BatchTimingAgentTest(unittest.TestCase):
             root = Path(tmp)
             frames = root / "frames"
             missing = root / "missing"
-            artifact_root = root / "agent_files" / "batch_failures"
+            artifact_root = root / "output" / "batch_failures"
             _make_frames(frames, 8)
 
             result = run_batch_timing_agent(
@@ -138,7 +138,7 @@ class BatchTimingAgentTest(unittest.TestCase):
         with _tempdir() as tmp:
             root = Path(tmp)
             frames = root / "frames"
-            artifact_root = root / "agent_files" / "batch_duplicate"
+            artifact_root = root / "output" / "batch_duplicate"
             _make_frames(frames, 3)
 
             with self.assertRaisesRegex(ValueError, "duplicate batch item name"):
@@ -152,14 +152,14 @@ class BatchTimingAgentTest(unittest.TestCase):
                     write=False,
                 )
 
-    def test_artifact_root_must_be_inside_agent_files(self):
+    def test_artifact_root_must_be_inside_output(self):
         with _tempdir() as tmp:
             root = Path(tmp)
             frames = root / "frames"
             unsafe_artifact_root = root / "batch"
             _make_frames(frames, 3)
 
-            with self.assertRaisesRegex(ValueError, "artifact_root must be inside an agent_files directory"):
+            with self.assertRaisesRegex(ValueError, "artifact_root must be inside an output directory"):
                 run_batch_timing_agent(
                     [BatchTimingItem(name="sample", frames=frames)],
                     artifact_root=unsafe_artifact_root,
@@ -167,11 +167,20 @@ class BatchTimingAgentTest(unittest.TestCase):
                     write=False,
                 )
 
+            result = run_batch_timing_agent(
+                [BatchTimingItem(name="sample", frames=frames)],
+                artifact_root=root / "output" / "batch",
+                limit_first_n=3,
+                write=False,
+            )
+
+            self.assertEqual(result.success_count, 1)
+
     def test_manifest_config_can_drive_batch_run(self):
         with _tempdir() as tmp:
             root = Path(tmp)
             frames = root / "frames"
-            artifact_root = root / "agent_files" / "manifest_batch"
+            artifact_root = root / "output" / "manifest_batch"
             manifest_path = root / "batch_manifest.json"
             _make_frames(frames, 6)
             manifest_path.write_text(
@@ -213,7 +222,7 @@ class BatchTimingAgentTest(unittest.TestCase):
         with _tempdir() as tmp:
             root = Path(tmp)
             frames = root / "frames"
-            artifact_root = root / "agent_files" / "readable_reports"
+            artifact_root = root / "output" / "readable_reports"
             _make_frames(frames, 4)
 
             result = run_batch_timing_agent(
@@ -237,7 +246,7 @@ class BatchTimingAgentTest(unittest.TestCase):
         with _tempdir() as tmp:
             root = Path(tmp)
             frames = root / "frames"
-            artifact_root = root / "agent_files" / "bom_manifest_batch"
+            artifact_root = root / "output" / "bom_manifest_batch"
             manifest_path = root / "batch_manifest.json"
             _make_frames(frames, 2)
             content = json.dumps(
@@ -259,7 +268,7 @@ class BatchTimingAgentTest(unittest.TestCase):
         with _tempdir() as tmp:
             root = Path(tmp)
             frames = root / "frames"
-            artifact_root = root / "agent_files" / "dashboard_contacts"
+            artifact_root = root / "output" / "dashboard_contacts"
             override_path = root / "override.json"
             _make_frames(frames, 8)
             override_path.write_text(

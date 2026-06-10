@@ -4,7 +4,7 @@
 
 Frame Timing Skill 是一个本地 Python package 和 Codex skill，用于在重建前优化已经清理并抽取好的视频帧。
 
-它可以检测静止区间和快速运动区间，生成字节级一致复制的模型安全输出帧，并在 `agent_files/` 下生成本地审查产物。它不负责视频抽帧、去水印、OCR、修改像素、上传数据或执行重建。
+它可以检测静止区间和快速运动区间，生成字节级一致复制的模型安全输出帧，并在 `output/` 下生成本地审查产物。它不负责视频抽帧、去水印、OCR、修改像素、上传数据或执行重建。
 
 ## 功能
 
@@ -53,7 +53,7 @@ frame-timing path/to/clean_frames
 frame-timing path/to/clean_frames
 ```
 
-默认产物会写入 `agent_files/frame_timing_run`。
+默认产物会写入 `output/frame_timing_run`。
 
 PowerShell：
 
@@ -66,14 +66,14 @@ frame-timing path\to\clean_frames
 ```bash
 frame-timing-batch \
   --frames "sample=path/to/clean_frames" \
-  --artifact_root agent_files/frame_timing_run \
+  --artifact_root output/frame_timing_run \
   --write
 ```
 
 检查生成的产物：
 
 ```bash
-frame-timing-health --artifact_root agent_files/frame_timing_run
+frame-timing-health --artifact_root output/frame_timing_run
 ```
 
 PowerShell batch 命令示例：
@@ -81,7 +81,7 @@ PowerShell batch 命令示例：
 ```powershell
 frame-timing-batch `
   --frames "sample=path\to\clean_frames" `
-  --artifact_root agent_files\frame_timing_run `
+  --artifact_root output\frame_timing_run `
   --write
 ```
 
@@ -102,7 +102,7 @@ from frame_timing_agent.batch_timing_agent import BatchTimingItem, run_batch_tim
 
 result = run_batch_timing_agent(
     [BatchTimingItem(name="sample", frames=Path("path/to/clean_frames"))],
-    artifact_root=Path("agent_files/frame_timing_run"),
+    artifact_root=Path("output/frame_timing_run"),
     limit_first_n=300,
     write=True,
 )
@@ -134,14 +134,14 @@ Use frame-timing-skill on path/to/clean_frames
 模型安全输出写入：
 
 ```text
-agent_files/<run_name>/<item_name>/output_frames/
+output/<run_name>/<item_name>/output_frames/
 ```
 
 审查和健康检查产物写入：
 
 ```text
-agent_files/<run_name>/analysis/
-agent_files/<run_name>/<item_name>/analysis/
+output/<run_name>/analysis/
+output/<run_name>/<item_name>/analysis/
 ```
 
 只有 `output_frames/` 应传给下游重建工具。
