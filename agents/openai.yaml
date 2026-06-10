@@ -1,0 +1,7 @@
+interface:
+  display_name: "Frame Timing Skill"
+  short_description: "Optimize clean extracted frames and produce audited model-safe output frames."
+  default_prompt: "Use $frame-timing-skill on a clean extracted frame directory. Prefer the one-argument command frame-timing <clean_frame_dir>, then run frame-timing-health on output/frame_timing_run and report output_frames plus review and maintenance report paths."
+
+policy:
+  allow_implicit_invocation: true

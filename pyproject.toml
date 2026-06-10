@@ -1,0 +1,59 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "frame-timing-skill"
+version = "0.1.0"
+description = "Audited frame timing optimization skill for already-clean extracted frames."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.10"
+authors = [
+  {name = "Frame Timing Skill contributors"},
+]
+keywords = [
+  "agent-skill",
+  "frame-timing",
+  "video-frames",
+  "reconstruction",
+  "provenance",
+]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Multimedia :: Video",
+]
+dependencies = [
+  "opencv-python>=4.8,<4.13",
+  "numpy>=1.26,<2.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/Taiquan-Zhou/frame-Extraction-and-Processing-skill"
+Source = "https://github.com/Taiquan-Zhou/frame-Extraction-and-Processing-skill"
+Issues = "https://github.com/Taiquan-Zhou/frame-Extraction-and-Processing-skill/issues"
+
+[project.scripts]
+frame-timing = "frame_timing_agent.simple_cli:main"
+frame-timing-batch = "frame_timing_agent.batch_timing_agent:main"
+frame-timing-health = "frame_timing_agent.batch_artifact_health:main"
+frame-timing-demo = "frame_timing_agent.demo_frames:main"
+
+[tool.setuptools]
+package-dir = {"" = "scripts"}
+
+[tool.setuptools.packages.find]
+where = ["scripts"]
+
+[tool.setuptools.package-data]
+frame_timing_agent = ["config/*.json"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["scripts"]
