@@ -21,7 +21,7 @@ Frame Timing Skill 是一个本地 Python package 和通用 Agent Skill，用于
 普通使用者只需要让你的 AI agent 或 AI 编程工具安装这个 skill：
 
 ```text
-Install this skill: https://github.com/Taiquan-Zhou/frame-Extraction-and-Processing-skill
+Install this skill: https://github.com/Taiquan-Zhou/frame-timing-skill
 ```
 
 然后让它处理你的帧目录：
@@ -38,7 +38,7 @@ Use frame-timing-skill on path/to/clean_frames
 如果要直接使用 CLI 或 Python API：
 
 ```bash
-python -m pip install git+https://github.com/Taiquan-Zhou/frame-Extraction-and-Processing-skill.git
+python -m pip install git+https://github.com/Taiquan-Zhou/frame-timing-skill.git
 ```
 
 ### CLI 使用方法
