@@ -15,31 +15,15 @@ Frame Timing Skill 是一个本地 Python package 和通用 Agent Skill，用于
 - 生成人工审查、可视化审查和健康检查报告。
 - 同时提供 CLI 入口和 Python API。
 
-## 作为 Agent Skill 安装
+## 作为 Agent Skill 使用
 
-这个仓库可以被任何支持本地 skill/instructions 的 AI agent 或 AI 编程工具使用。
-
-Skill 入口文件是：
+普通使用者只需要让你的 AI agent 或 AI 编程工具安装这个 skill：
 
 ```text
-SKILL.md
+Install this skill: https://github.com/Taiquan-Zhou/frame-Extraction-and-Processing-skill
 ```
 
-把这个仓库克隆或下载到你的 agent skills 目录：
-
-```bash
-git clone https://github.com/Taiquan-Zhou/frame-Extraction-and-Processing-skill.git <your-agent-skills-dir>/frame-timing-skill
-```
-
-如果你的 agent 提供 GitHub skill installer，使用这些参数：
-
-```text
-repo: Taiquan-Zhou/frame-Extraction-and-Processing-skill
-path: .
-name: frame-timing-skill
-```
-
-安装后，通过你的 agent 的 skill 选择器或 slash-command 入口调用：
+然后让它处理你的帧目录：
 
 ```text
 /skill frame-timing-skill
@@ -48,9 +32,9 @@ Use frame-timing-skill on path/to/clean_frames
 
 agent 应优先运行 `frame-timing path/to/clean_frames`，并用 `frame-timing-health` 验证结果。
 
-## 安装 Python Package
+## 开发者安装 Python Package
 
-从 GitHub 安装：
+如果要直接使用 CLI 或 Python API：
 
 ```bash
 python -m pip install git+https://github.com/Taiquan-Zhou/frame-Extraction-and-Processing-skill.git
