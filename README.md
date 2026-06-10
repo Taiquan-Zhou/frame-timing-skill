@@ -17,25 +17,31 @@ It detects static and fast-motion ranges, writes byte-identical copied output fr
 
 ## Install
 
-From GitHub:
+Install from GitHub:
 
 ```bash
 python -m pip install git+https://github.com/Taiquan-Zhou/frame-Extraction-and-Processing-skill.git
 ```
 
-From a local checkout:
+The `git+` prefix is required by pip when installing directly from a Git repository.
 
-```bash
-python -m pip install .
+## AI Coding Tool Use
+
+Copy this repository URL into your AI coding tool:
+
+```text
+https://github.com/Taiquan-Zhou/frame-Extraction-and-Processing-skill
 ```
 
-For development:
+Ask the AI coding tool to run this install command in the target project:
 
 ```bash
-python -m pip install -e .
+python -m pip install git+https://github.com/Taiquan-Zhou/frame-Extraction-and-Processing-skill.git
 ```
 
-## Quickstart
+## Smoke Test
+
+This section verifies that the package is installed and the core CLI workflow can run on demo frames.
 
 Generate demo frames:
 

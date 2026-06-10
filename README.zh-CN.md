@@ -23,19 +23,25 @@ Frame Timing Skill 是一个本地 Python package 和 Codex skill，用于在重
 python -m pip install git+https://github.com/Taiquan-Zhou/frame-Extraction-and-Processing-skill.git
 ```
 
-从本地 checkout 安装：
+这里的 `git+` 是 pip 从 Git 仓库直接安装时需要的标准前缀。
 
-```bash
-python -m pip install .
+## AI 编程工具调用
+
+把这个仓库网址复制给 AI 编程工具：
+
+```text
+https://github.com/Taiquan-Zhou/frame-Extraction-and-Processing-skill
 ```
 
-开发安装：
+然后让 AI 编程工具在目标项目里运行这个安装命令：
 
 ```bash
-python -m pip install -e .
+python -m pip install git+https://github.com/Taiquan-Zhou/frame-Extraction-and-Processing-skill.git
 ```
 
-## 快速开始
+## 功能测试
+
+这一段用于验证 package 已安装，并且核心 CLI 流程可以基于 demo frames 跑通。
 
 生成 demo frames：
 
