@@ -1,4 +1,5 @@
 include README.md
+include README.zh-CN.md
 include LICENSE
 include CHANGELOG.md
 include SECURITY.md

@@ -61,6 +61,7 @@ class PackageMetadataTest(unittest.TestCase):
     def test_user_facing_docs_do_not_reference_private_project_paths(self):
         doc_paths = [
             Path("README.md"),
+            Path("README.zh-CN.md"),
             Path("SKILL.md"),
             Path("references") / "usage.md",
             Path("references") / "artifact_contract.md",
@@ -77,20 +78,21 @@ class PackageMetadataTest(unittest.TestCase):
         skill = Path("SKILL.md").read_text(encoding="utf-8")
         usage = (Path("references") / "usage.md").read_text(encoding="utf-8")
         readme = Path("README.md").read_text(encoding="utf-8")
+        readme_zh = Path("README.zh-CN.md").read_text(encoding="utf-8")
 
         self.assertIn("<path-to-frame-timing-skill>", skill)
         self.assertIn("/path/to/frame-timing-skill", skill)
-        self.assertIn("/path/to/frame-timing-skill", readme)
-        self.assertIn("[中文](#中文)", readme)
-        self.assertIn("[English](#english)", readme)
-        self.assertIn('<a id="中文"></a>', readme)
-        self.assertIn("## 快速开始", readme)
+        self.assertIn("[中文](README.zh-CN.md)", readme)
+        self.assertIn("[English](README.md)", readme_zh)
+        self.assertIn("## Quickstart", readme)
+        self.assertIn("## 快速开始", readme_zh)
         self.assertIn("git+https://github.com/Taiquan-Zhou/frame-Extraction-and-Processing-skill.git", readme)
         self.assertIn("install-skill-from-github.py", readme)
         self.assertIn("--name frame-timing-skill", readme)
         self.assertIn("Host Project Smoke", usage)
-        self.assertIn("Release Checklist", readme)
-        self.assertIn("Release Artifact Scope", readme)
+        self.assertNotIn("Release Checklist", readme)
+        self.assertNotIn("Release Artifact Scope", readme)
+        self.assertNotIn("Repository Status", readme)
 
     def test_ci_workflow_runs_package_and_skill_verification(self):
         workflow = Path(".github") / "workflows" / "ci.yml"
@@ -116,6 +118,7 @@ class PackageMetadataTest(unittest.TestCase):
         self.assertIn("prune examples", content)
         self.assertIn("prune scripts/*.egg-info", content)
         self.assertIn("include LICENSE", content)
+        self.assertIn("include README.zh-CN.md", content)
         self.assertIn("include CHANGELOG.md", content)
         self.assertIn("include SECURITY.md", content)
         self.assertIn("exclude AGENTS.md", content)
