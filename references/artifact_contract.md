@@ -16,6 +16,8 @@ Each output image must be a byte-identical copy of its recorded source frame. `s
 
 In `reconstruction_balanced` mode, strategy version `2` may combine `keep_uniform`, `duplicate_range`, and `select_sources` operations. `select_sources` drops unstable frames from the selected range and keeps only explicit source indices. It must not create duplicate frames or modify pixels.
 
+Manual override operations are authoritative. Automatic jitter-reduction operations must be skipped or clipped when they overlap manual override ranges.
+
 ## Analysis Output
 
 Reports, strategy files, contact sheets, dashboards, and health reports belong under `analysis/`.

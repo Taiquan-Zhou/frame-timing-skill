@@ -106,6 +106,34 @@ class TimingReportTest(unittest.TestCase):
             log = (analysis_dir / "engineering_log.md").read_text(encoding="utf-8")
             self.assertIn("执行模式", log)
 
+    def test_engineering_log_uses_strategy_option_values(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            analysis_dir = Path(tmp) / "analysis"
+            strategy = {
+                "version": 2,
+                "options": {
+                    "static_keep_count": 40,
+                    "fast_motion_total_instances": 3,
+                    "very_fast_motion_total_instances": 4,
+                },
+                "operations": [],
+            }
+
+            write_analysis_artifacts(
+                analysis_dir=analysis_dir,
+                metrics=[_metric(1, 0.5)],
+                segments=[],
+                strategy=strategy,
+                preview_only=False,
+                timestamp_source="selected_frames.txt",
+            )
+
+            log = (analysis_dir / "engineering_log.md").read_text(encoding="utf-8")
+            self.assertIn("压缩到 40 帧", log)
+            self.assertIn("扩展到 3 份", log)
+            self.assertIn("扩展到 4 份", log)
+            self.assertNotIn("压缩到 20 帧", log)
+
 
 if __name__ == "__main__":
     unittest.main()

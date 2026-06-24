@@ -8,9 +8,10 @@ import numpy as np
 
 from frame_timing_agent.auto_timing_agent import run_timing_agent
 from frame_timing_agent.frame_source import load_frame_records
-from frame_timing_agent.jitter_detector import detect_jitter_ranges
+from frame_timing_agent.jitter_detector import JitterRange, detect_jitter_ranges
 from frame_timing_agent.jitter_strategy import build_jitter_reduction_strategy, merge_jitter_with_base_strategy
-from frame_timing_agent.motion_estimator import estimate_frame_motion
+from frame_timing_agent.motion_estimator import MotionEstimate, estimate_frame_motion
+from frame_timing_agent.stable_frame_selector import select_stable_sources
 
 
 def _write_shifted_grid(path: Path, x_offset: int, blur: bool = False) -> None:
@@ -169,6 +170,112 @@ class JitterReductionTest(unittest.TestCase):
             5,
         )
 
+    def test_merge_jitter_with_base_strategy_preserves_manual_overrides(self):
+        records = [
+            type("Record", (), {"source_index": source_index})()
+            for source_index in range(10)
+        ]
+        base_strategy = {
+            "version": 1,
+            "input": {"frame_dir_name": "frames", "limit_first_n": None},
+            "options": {"interpret_ranges_by": "source_index"},
+            "operations": [
+                {
+                    "op": "duplicate_range",
+                    "range": {"start": 3, "end": 7},
+                    "total_instances": 4,
+                    "reason": "manual slow down",
+                    "source": "manual_override",
+                }
+            ],
+        }
+        jitter_strategy = {
+            "version": 2,
+            "input": {"frame_dir_name": "frames", "limit_first_n": None},
+            "options": {"jitter_reduction_mode": "v2", "interpret_ranges_by": "source_index"},
+            "operations": [
+                {
+                    "op": "select_sources",
+                    "range": {"start": 4, "end": 6},
+                    "sources": [5],
+                    "reason": "stable jitter keyframe",
+                    "source": "jitter_reduction_v2",
+                }
+            ],
+        }
+
+        merged = merge_jitter_with_base_strategy(base_strategy, jitter_strategy, records)
+
+        self.assertEqual(merged["operations"], base_strategy["operations"])
+        self.assertIn(
+            "jitter_reduction_v2 overlapped manual_override and was skipped",
+            merged["options"]["merge_warnings"],
+        )
+
+    def test_stable_frame_selector_keeps_temporal_coverage(self):
+        estimates = [
+            MotionEstimate(
+                source_index=index,
+                output_index=index,
+                dx=6.0 if index % 2 else -6.0,
+                dy=0.0,
+                magnitude=6.0,
+                response=1.0,
+                sharpness=1000.0 - index,
+                bad_quality_candidate=False,
+            )
+            for index in range(10)
+        ]
+        jitter_range = JitterRange(
+            start=0,
+            end=9,
+            frame_count=10,
+            mean_jitter_score=12.0,
+            reason="test jitter",
+        )
+
+        selected = select_stable_sources(estimates, jitter_range, max_output_ratio=0.30)
+
+        self.assertEqual(len(selected), 3)
+        self.assertEqual(selected[0], 0)
+        self.assertEqual(selected[-1], 9)
+        self.assertLessEqual(max(right - left for left, right in zip(selected, selected[1:])), 5)
+
+    def test_jitter_strategy_records_configured_detection_thresholds(self):
+        records = [
+            type("Record", (), {"source_index": source_index})()
+            for source_index in range(8)
+        ]
+        estimates = [
+            MotionEstimate(
+                source_index=index,
+                output_index=index,
+                dx=8.0 if index % 2 else -8.0,
+                dy=0.0,
+                magnitude=8.0,
+                response=0.50,
+                sharpness=900.0,
+                bad_quality_candidate=False,
+            )
+            for index in range(8)
+        ]
+
+        strategy = build_jitter_reduction_strategy(
+            records=records,
+            estimates=estimates,
+            frame_dir="frames",
+            limit_first_n=None,
+            max_output_ratio=0.50,
+            min_jitter_frames=3,
+            min_motion=7.0,
+            min_response=0.25,
+            min_sharpness=120.0,
+        )
+
+        self.assertEqual(strategy["options"]["min_motion"], 7.0)
+        self.assertEqual(strategy["options"]["min_response"], 0.25)
+        self.assertEqual(strategy["options"]["min_sharpness"], 120.0)
+
     def test_timing_agent_reconstruction_balanced_mode_writes_auditable_select_sources_strategy(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -194,3 +301,39 @@ class JitterReductionTest(unittest.TestCase):
         self.assertEqual(strategy["operations"][0]["op"], "select_sources")
         self.assertLess(result.estimated_output_count, result.analyzed_count)
         self.assertNotIn("_dup_", selected_rows)
+
+    def test_timing_agent_override_config_can_tune_jitter_thresholds(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            frames = root / "shake"
+            artifact_dir = root / "output" / "jitter_override"
+            override_config = root / "override.json"
+            _make_shifted_frames(frames, [0, 6, -6, 6, -6, 6, -6, 0])
+            override_config.write_text(
+                json.dumps(
+                    {
+                        "config": {
+                            "jitter_min_motion": 1000.0,
+                            "jitter_min_response": 0.50,
+                            "jitter_min_sharpness": 200.0,
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            run_timing_agent(
+                frames,
+                artifact_dir,
+                limit_first_n=None,
+                mode="reconstruction_balanced",
+                write=False,
+                override_config_path=override_config,
+            )
+
+            strategy = json.loads((artifact_dir / "analysis" / "strategy.json").read_text(encoding="utf-8"))
+
+        self.assertEqual(strategy["options"]["min_motion"], 1000.0)
+        self.assertEqual(strategy["options"]["min_response"], 0.50)
+        self.assertEqual(strategy["options"]["min_sharpness"], 200.0)
+        self.assertFalse(any(operation["op"] == "select_sources" for operation in strategy["operations"]))

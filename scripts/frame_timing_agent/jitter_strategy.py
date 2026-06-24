@@ -16,9 +16,17 @@ def build_jitter_reduction_strategy(
     limit_first_n: int | None,
     max_output_ratio: float = 0.60,
     min_jitter_frames: int = 5,
+    min_motion: float = 2.0,
+    min_response: float = 0.02,
+    min_sharpness: float = 100.0,
 ) -> dict[str, Any]:
     operations: list[dict[str, Any]] = []
-    jitter_ranges = detect_jitter_ranges(estimates, min_jitter_frames=min_jitter_frames)
+    jitter_ranges = detect_jitter_ranges(
+        estimates,
+        min_jitter_frames=min_jitter_frames,
+        min_motion=min_motion,
+        min_response=min_response,
+    )
     available_sources = {record.source_index for record in records}
 
     for jitter_range in jitter_ranges:
@@ -56,6 +64,9 @@ def build_jitter_reduction_strategy(
             "jitter_reduction_mode": "v2",
             "max_output_ratio": max_output_ratio,
             "min_jitter_frames": min_jitter_frames,
+            "min_motion": min_motion,
+            "min_response": min_response,
+            "min_sharpness": min_sharpness,
             "interpret_ranges_by": "source_index",
             "pixel_policy": "copy_source_frames_without_warping",
         },
@@ -73,9 +84,23 @@ def merge_jitter_with_base_strategy(
         key=lambda operation: (int(operation["range"]["start"]), int(operation["range"]["end"])),
     )
     source_indices = sorted({record.source_index for record in records})
+    manual_operations = [
+        operation
+        for operation in base_strategy.get("operations", [])
+        if operation.get("source") == "manual_override"
+    ]
+    merge_warnings: list[str] = []
+    jitter_operations = _clip_jitter_operations_around_manual_overrides(
+        jitter_operations,
+        manual_operations,
+        merge_warnings,
+    )
     merged_operations: list[dict[str, Any]] = []
 
     for base_operation in base_strategy.get("operations", []):
+        if base_operation.get("source") == "manual_override":
+            merged_operations.append(base_operation)
+            continue
         merged_operations.extend(_clip_base_operation(base_operation, jitter_operations, source_indices))
     merged_operations.extend(jitter_operations)
     merged_operations.sort(key=lambda operation: (int(operation["range"]["start"]), int(operation["range"]["end"]), operation["op"]))
@@ -83,6 +108,8 @@ def merge_jitter_with_base_strategy(
     merged_options = dict(base_strategy.get("options", {}))
     merged_options.update(jitter_strategy.get("options", {}))
     merged_options["mode"] = "reconstruction_balanced"
+    if merge_warnings:
+        merged_options["merge_warnings"] = merge_warnings
 
     return {
         "version": 2,
@@ -124,6 +151,62 @@ def _clip_base_operation(
                 original_count=len(original_sources),
                 split_count=len(split_sources),
             )
+        split_operations.append(split_operation)
+    return split_operations
+
+
+def _clip_jitter_operations_around_manual_overrides(
+    jitter_operations: list[dict[str, Any]],
+    manual_operations: list[dict[str, Any]],
+    merge_warnings: list[str],
+) -> list[dict[str, Any]]:
+    if not manual_operations:
+        return jitter_operations
+
+    manual_ranges = [
+        (int(operation["range"]["start"]), int(operation["range"]["end"]))
+        for operation in manual_operations
+    ]
+    retained_operations: list[dict[str, Any]] = []
+    for operation in jitter_operations:
+        start = int(operation["range"]["start"])
+        end = int(operation["range"]["end"])
+        overlapping_manual_ranges = [
+            (manual_start, manual_end)
+            for manual_start, manual_end in manual_ranges
+            if start <= manual_end and manual_start <= end
+        ]
+        if not overlapping_manual_ranges:
+            retained_operations.append(operation)
+            continue
+
+        remaining_ranges = _subtract_ranges(start, end, overlapping_manual_ranges)
+        split_operations = _split_select_sources_operation(operation, remaining_ranges)
+        if not split_operations:
+            merge_warnings.append("jitter_reduction_v2 overlapped manual_override and was skipped")
+            continue
+        merge_warnings.append("jitter_reduction_v2 overlapped manual_override and was clipped")
+        retained_operations.extend(split_operations)
+    return retained_operations
+
+
+def _split_select_sources_operation(
+    operation: dict[str, Any],
+    ranges: list[tuple[int, int]],
+) -> list[dict[str, Any]]:
+    if operation.get("op") != "select_sources":
+        return []
+
+    selected_sources = [int(source) for source in operation.get("sources", [])]
+    split_operations = []
+    for start, end in ranges:
+        sources = [source for source in selected_sources if start <= source <= end]
+        if not sources:
+            continue
+        split_operation = dict(operation)
+        split_operation["range"] = {"start": start, "end": end}
+        split_operation["sources"] = sources
+        split_operation["reason"] = f"{operation.get('reason', '')}; clipped around manual_override".strip("; ")
         split_operations.append(split_operation)
     return split_operations
 

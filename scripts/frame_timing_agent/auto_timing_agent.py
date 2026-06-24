@@ -52,9 +52,10 @@ def run_timing_agent(
         raise ValueError(f"unsupported timing agent mode: {mode}")
 
     config = load_config()
+    override_config = _load_override_config(override_config_path)
+    config = _merge_config(config, override_config.get("config", {}))
     if fps is None:
         fps = float(config["default_fps"])
-    override_config = _load_override_config(override_config_path)
 
     frames = Path(frames)
     artifact_dir = Path(artifact_dir)
@@ -81,7 +82,8 @@ def run_timing_agent(
         very_fast_motion_total_instances=int(config["very_fast_motion_total_instances"]),
         overrides=override_config.get("overrides"),
     )
-    motion_estimates = estimate_frame_motion(records)
+    jitter_min_sharpness = float(config.get("jitter_min_sharpness", 100.0))
+    motion_estimates = estimate_frame_motion(records, min_sharpness=jitter_min_sharpness)
     jitter_strategy = build_jitter_reduction_strategy(
         records=records,
         estimates=motion_estimates,
@@ -89,6 +91,9 @@ def run_timing_agent(
         limit_first_n=limit_first_n,
         max_output_ratio=float(config.get("jitter_max_output_ratio", 0.60)),
         min_jitter_frames=int(config.get("jitter_min_frames", 5)),
+        min_motion=float(config.get("jitter_min_motion", 2.0)),
+        min_response=float(config.get("jitter_min_response", 0.02)),
+        min_sharpness=jitter_min_sharpness,
     )
     strategy = merge_jitter_with_base_strategy(base_strategy, jitter_strategy, records)
     estimated_output_count = _estimate_output_count(records, strategy)
@@ -165,6 +170,16 @@ def _load_override_config(config_path: Path | str | None) -> dict:
     if not isinstance(data, dict):
         raise ValueError(f"override config must be a JSON object: {config_path}")
     return data
+
+
+def _merge_config(default_config: dict, override_config: dict) -> dict:
+    if not override_config:
+        return dict(default_config)
+    if not isinstance(override_config, dict):
+        raise ValueError("override config field 'config' must be a JSON object")
+    merged = dict(default_config)
+    merged.update(override_config)
+    return merged
 
 
 def main() -> None:

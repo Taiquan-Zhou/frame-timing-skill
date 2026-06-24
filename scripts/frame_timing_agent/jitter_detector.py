@@ -38,6 +38,7 @@ def detect_jitter_ranges(
     estimates: list[MotionEstimate],
     min_jitter_frames: int = 5,
     min_motion: float = 2.0,
+    min_response: float = 0.02,
 ) -> list[JitterRange]:
     if min_jitter_frames <= 0:
         raise ValueError(f"min_jitter_frames must be positive: {min_jitter_frames}")
@@ -45,7 +46,7 @@ def detect_jitter_ranges(
     if not ordered:
         return []
 
-    scores = score_jitter(ordered, min_motion=min_motion)
+    scores = score_jitter(ordered, min_motion=min_motion, min_response=min_response)
     ranges: list[JitterRange] = []
     current: list[MotionEstimate] = []
     for estimate in ordered:

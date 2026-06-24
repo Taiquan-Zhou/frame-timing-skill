@@ -1,4 +1,9 @@
 {
+  "config": {
+    "jitter_min_motion": 2.0,
+    "jitter_min_response": 0.02,
+    "jitter_min_sharpness": 100.0
+  },
   "review_ranges": [
     {
       "name": "auto_static_0_54",

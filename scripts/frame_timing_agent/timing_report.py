@@ -199,6 +199,10 @@ def _write_engineering_log_md(
     operation_count = len(strategy.get("operations", []))
     manual_count = sum(1 for operation in strategy.get("operations", []) if operation.get("source") == "manual_override")
     bad_count = sum(1 for metric in metrics if metric.bad_quality_candidate)
+    options = strategy.get("options", {})
+    static_keep_count = int(options.get("static_keep_count", 20))
+    fast_motion_total_instances = int(options.get("fast_motion_total_instances", 3))
+    very_fast_motion_total_instances = int(options.get("very_fast_motion_total_instances", 4))
     mode_text = "预览模式，未写出输出帧" if preview_only else "执行模式，已写出输出帧"
     lines = [
         "# 视频帧节奏 Agent 工程日志",
@@ -222,8 +226,8 @@ def _write_engineering_log_md(
         "## 策略决策",
         f"- 生成策略操作数量：{operation_count}",
         f"- 人工覆盖策略数量：{manual_count}",
-        "- 长静止段默认压缩到 20 帧，减少无效重复计算。",
-        "- 快速运动段默认把每帧扩展到 3 份，极快运动段扩展到 4 份。",
+        f"- 长静止段默认压缩到 {static_keep_count} 帧，减少无效重复计算。",
+        f"- 快速运动段默认把每帧扩展到 {fast_motion_total_instances} 份，极快运动段扩展到 {very_fast_motion_total_instances} 份。",
         "- 质量异常段只标记和报告，第一版不自动删除。",
         "",
         "## 处理结果",
