@@ -14,6 +14,8 @@ Allowed files:
 
 Each output image must be a byte-identical copy of its recorded source frame. `selected_frames.txt` records `source_sha256` for each output image so health checks can verify provenance without storing private input paths.
 
+In `reconstruction_balanced` mode, strategy version `2` may combine `keep_uniform`, `duplicate_range`, and `select_sources` operations. `select_sources` drops unstable frames from the selected range and keeps only explicit source indices. It must not create duplicate frames or modify pixels.
+
 ## Analysis Output
 
 Reports, strategy files, contact sheets, dashboards, and health reports belong under `analysis/`.

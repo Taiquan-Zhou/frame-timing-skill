@@ -145,6 +145,30 @@ def _audit_operation(
         result["kept_sources"] = sorted({record.source_index for record in output_in_range})
         return result
 
+    if op == "select_sources":
+        requested_sources = sorted({int(source) for source in operation.get("sources", [])})
+        expected_sources = [source for source in requested_sources if source in affected_sources]
+        kept_sources = sorted({record.source_index for record in output_in_range})
+        result["expected_sources"] = expected_sources
+        result["kept_sources"] = kept_sources
+        result["dropped_count"] = max(0, len(affected_sources) - len(kept_sources))
+        result["expected_output_record_count"] = len(expected_sources)
+        if kept_sources != expected_sources:
+            result["errors"].append(
+                f"select_sources {start}-{end} expected sources {expected_sources}, got {kept_sources}"
+            )
+        if len(output_in_range) != len(expected_sources):
+            result["errors"].append(
+                f"select_sources {start}-{end} expected {len(expected_sources)} records, got {len(output_in_range)}"
+            )
+        for source in kept_sources:
+            instances = [record.instance_id for record in output_in_range if record.source_index == source]
+            if instances != [0]:
+                result["errors"].append(
+                    f"source {source} expected one non-duplicate instance [0], got {instances}"
+                )
+        return result
+
     result["warnings"].append(f"unsupported audit details for operation: {op}")
     return result
 

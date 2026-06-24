@@ -1,6 +1,7 @@
 import unittest
+from unittest.mock import patch
 
-from frame_timing_agent.segment_detector import detect_segments
+from frame_timing_agent.segment_detector import Segment, _detect_jittered_static_windows, detect_segments
 from frame_timing_agent.timing_metrics import FrameMetric
 
 
@@ -200,6 +201,57 @@ class SegmentDetectorTest(unittest.TestCase):
         self.assertEqual(segment.start, 10)
         self.assertEqual(segment.end, 50)
         self.assertEqual(segment.frame_count, 5)
+
+    def test_jittered_static_window_honors_mean_multiplier_config(self):
+        classified_metrics = [(_metric(index, 0.014), "normal") for index in range(21)]
+
+        segments = _detect_jittered_static_windows(
+            classified_metrics=classified_metrics,
+            existing_segments=[],
+            static_threshold=0.010,
+            fast_threshold=0.100,
+            very_fast_threshold=0.200,
+            min_static_frames=21,
+            min_low_ratio=0.70,
+            mean_multiplier=1.20,
+        )
+
+        self.assertEqual(segments, [])
+
+    def test_jittered_static_window_does_not_expand_sparse_segment_ranges(self):
+        classified_metrics = [
+            (_metric(1_000_000_000, 0.010), "normal"),
+            (_metric(1_000_000_100, 0.010), "normal"),
+        ]
+        existing_segments = [
+            Segment(
+                segment_type="fast_motion",
+                start=0,
+                end=2_000_000_000,
+                frame_count=2,
+                mean_motion=0.5,
+                reason="sparse huge range",
+            )
+        ]
+
+        def guarded_range(start, stop=None, step=1):
+            if stop is not None and abs(stop - start) > 1000:
+                raise AssertionError("range expansion is not allowed for sparse segment spans")
+            return range(start) if stop is None else range(start, stop, step)
+
+        with patch("frame_timing_agent.segment_detector.range", guarded_range, create=True):
+            segments = _detect_jittered_static_windows(
+                classified_metrics=classified_metrics,
+                existing_segments=existing_segments,
+                static_threshold=0.010,
+                fast_threshold=0.100,
+                very_fast_threshold=0.200,
+                min_static_frames=2,
+                min_low_ratio=0.70,
+                mean_multiplier=1.20,
+            )
+
+        self.assertEqual(segments, [])
 
 
 if __name__ == "__main__":

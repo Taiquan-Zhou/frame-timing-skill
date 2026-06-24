@@ -14,6 +14,7 @@ Use this skill only after the user already has clean extracted frame directories
 - Keep all generated outputs under `output/`.
 - Original input frames must never be modified.
 - Repeated frames mean byte-identical copies of the same source frame.
+- Reconstruction balancing means moderate static compression, fast-motion duplication, and stable source-frame selection for jitter ranges. It does not warp, crop, interpolate, or stabilize pixels.
 
 ## Core Workflow
 
@@ -50,7 +51,9 @@ frame-timing path/to/clean_frames
 
 This writes artifacts under `output/frame_timing_run` by default.
 
-4. For multiple frame directories or custom batch settings, run batch timing:
+4. Use the default `reconstruction_balanced` mode; do not ask the user to choose a strategy.
+
+5. For multiple frame directories or custom batch settings, run batch timing:
 
 ```powershell
 frame-timing-batch `
@@ -66,7 +69,7 @@ POSIX shell:
 frame-timing-batch --frames "<item_name>=<clean_frame_dir>" --artifact_root "output/<run_name>" --limit_first_n 300 --write
 ```
 
-5. Verify before reporting completion:
+6. Verify before reporting completion:
 
 ```powershell
 frame-timing-health --artifact_root "output/<run_name>"
@@ -78,7 +81,7 @@ POSIX shell:
 frame-timing-health --artifact_root "output/<run_name>"
 ```
 
-6. Report `output_frames`, review dashboard, human review, maintenance report, and any warnings/errors.
+7. Report `output_frames`, review dashboard, human review, maintenance report, and any warnings/errors.
 
 ## Output Contract
 
@@ -105,6 +108,8 @@ output/<run_name>/analysis/
 ```
 
 Never pass `analysis/` files to reconstruction models. `selected_frames.txt` must include `source_sha256`, and health must exit 0 with status `ok` before the run is considered complete.
+
+In `reconstruction_balanced` mode, `strategy.json` uses version `2`. It combines `keep_uniform`, `duplicate_range`, and `select_sources` operations. `output_frames/` remains byte-identical to source frames; no pixels are modified.
 
 ## Python API
 

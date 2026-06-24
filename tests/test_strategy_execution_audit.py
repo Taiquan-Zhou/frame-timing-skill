@@ -67,6 +67,77 @@ class StrategyExecutionAuditTest(unittest.TestCase):
             self.assertEqual(keep_result["kept_sources"], [5, 8])
             self.assertEqual(keep_result["dropped_count"], 2)
 
+    def test_audit_reports_select_sources_results(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            input_dir = root / "input"
+            output_dir = root / "output"
+            input_dir.mkdir()
+            for index in range(6):
+                _write_image(input_dir / f"frame_{index:06d}_src_{index:06d}.jpg", value=50 + index)
+            records = load_frame_records(input_dir, fps=30.0)
+            strategy = {
+                "version": 2,
+                "operations": [
+                    {
+                        "op": "select_sources",
+                        "range": {"start": 1, "end": 4},
+                        "sources": [1, 4],
+                        "reason": "stable jitter keyframes",
+                        "source": "jitter_reduction_v2",
+                    }
+                ],
+            }
+
+            apply_strategy(records, strategy, output_dir)
+            audit = audit_strategy_execution(records, strategy, output_dir)
+
+            self.assertEqual(audit["status"], "ok")
+            select_result = audit["operation_results"][0]
+            self.assertEqual(select_result["op"], "select_sources")
+            self.assertEqual(select_result["expected_sources"], [1, 4])
+            self.assertEqual(select_result["kept_sources"], [1, 4])
+            self.assertEqual(select_result["dropped_count"], 2)
+            self.assertEqual(audit["warnings"], [])
+
+    def test_audit_fails_when_select_sources_keeps_unrequested_source(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            input_dir = root / "input"
+            output_dir = root / "output"
+            input_dir.mkdir()
+            for index in range(6):
+                _write_image(input_dir / f"frame_{index:06d}_src_{index:06d}.jpg", value=50 + index)
+            records = load_frame_records(input_dir, fps=30.0)
+            bad_apply_strategy = {
+                "version": 2,
+                "operations": [
+                    {
+                        "op": "select_sources",
+                        "range": {"start": 1, "end": 4},
+                        "sources": [1, 2, 4],
+                        "reason": "simulate bad output",
+                    }
+                ],
+            }
+            expected_strategy = {
+                "version": 2,
+                "operations": [
+                    {
+                        "op": "select_sources",
+                        "range": {"start": 1, "end": 4},
+                        "sources": [1, 4],
+                        "reason": "stable jitter keyframes",
+                    }
+                ],
+            }
+
+            apply_strategy(records, bad_apply_strategy, output_dir)
+            audit = audit_strategy_execution(records, expected_strategy, output_dir)
+
+            self.assertEqual(audit["status"], "failed")
+            self.assertTrue(any("select_sources 1-4 expected sources" in error for error in audit["errors"]))
+
     def test_audit_reports_broken_output_directory(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

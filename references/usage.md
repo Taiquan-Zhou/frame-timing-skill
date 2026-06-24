@@ -18,6 +18,10 @@ frame-timing path/to/clean_frames
 frame-timing-health --artifact_root output/frame_timing_run
 ```
 
+The default mode is `reconstruction_balanced`, optimized for reconstruction.
+
+This writes strategy version `2`, combines static compression, fast-motion duplication, and `select_sources` operations for jitter ranges. The selected output frames remain byte-identical copies of source frames.
+
 Advanced batch interface:
 
 ```powershell
@@ -70,6 +74,7 @@ Read `result.batch_report` and `result.items[*]` to locate output and review art
 - Keep host-specific extraction, OCR, watermark removal, and reconstruction outside this package.
 - Treat `output_frames/` as the only model-safe downstream input.
 - Treat `analysis/` as human/agent review material only.
+- Use the default `reconstruction_balanced` mode for reconstruction-oriented frame optimization.
 - Run `frame-timing-health` before using artifacts downstream.
 
 ## Host Project Smoke

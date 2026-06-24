@@ -58,6 +58,36 @@ class SimpleCliTest(unittest.TestCase):
             self.assertEqual(summary["success_count"], 1)
             self.assertEqual(summary["items"][0]["name"], "clean_frames")
 
+    def test_cli_accepts_reconstruction_balanced_mode(self):
+        with _tempdir() as tmp:
+            root = Path(tmp)
+            frames = root / "shaky_frames"
+            artifact_root = root / "output" / "frame_timing_run"
+            _make_frames(frames, 5)
+            script = Path(__file__).resolve().parents[1] / "scripts" / "frame_timing_agent" / "simple_cli.py"
+
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    str(frames),
+                    "--mode",
+                    "reconstruction_balanced",
+                ],
+                cwd=root,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            strategy = json.loads(
+                (artifact_root / "shaky_frames" / "analysis" / "strategy.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(strategy["version"], 2)
+            self.assertEqual(strategy["options"]["mode"], "reconstruction_balanced")
+            self.assertEqual(strategy["options"]["jitter_reduction_mode"], "v2")
+
 
 if __name__ == "__main__":
     unittest.main()

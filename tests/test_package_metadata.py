@@ -33,7 +33,7 @@ class PackageMetadataTest(unittest.TestCase):
         self.assertIn("agent-skill", data["project"]["keywords"])
         self.assertEqual(
             data["project"]["urls"]["Source"],
-            "https://github.com/Taiquan-Zhou/frame-Extraction-and-Processing-skill",
+            "https://github.com/Taiquan-Zhou/frame-timing-skill",
         )
 
     def test_runtime_dependencies_are_bounded_for_reproducible_installs(self):
@@ -45,22 +45,10 @@ class PackageMetadataTest(unittest.TestCase):
     def test_console_scripts_expose_stable_agent_entrypoints(self):
         data = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
 
-        self.assertEqual(
-            data["project"]["scripts"]["frame-timing"],
-            "frame_timing_agent.simple_cli:main",
-        )
-        self.assertEqual(
-            data["project"]["scripts"]["frame-timing-batch"],
-            "frame_timing_agent.batch_timing_agent:main",
-        )
-        self.assertEqual(
-            data["project"]["scripts"]["frame-timing-health"],
-            "frame_timing_agent.batch_artifact_health:main",
-        )
-        self.assertEqual(
-            data["project"]["scripts"]["frame-timing-demo"],
-            "frame_timing_agent.demo_frames:main",
-        )
+        self.assertEqual(data["project"]["scripts"]["frame-timing"], "frame_timing_agent.simple_cli:main")
+        self.assertEqual(data["project"]["scripts"]["frame-timing-batch"], "frame_timing_agent.batch_timing_agent:main")
+        self.assertEqual(data["project"]["scripts"]["frame-timing-health"], "frame_timing_agent.batch_artifact_health:main")
+        self.assertEqual(data["project"]["scripts"]["frame-timing-demo"], "frame_timing_agent.demo_frames:main")
 
     def test_user_facing_docs_do_not_reference_private_project_paths(self):
         doc_paths = [
@@ -78,9 +66,10 @@ class PackageMetadataTest(unittest.TestCase):
                 with self.subTest(path=str(doc_path), pattern=pattern):
                     self.assertNotIn(pattern, content)
 
-    def test_docs_explain_non_cwd_install_and_host_project_smoke(self):
+    def test_docs_explain_skill_install_cli_modes_and_host_project_smoke(self):
         skill = Path("SKILL.md").read_text(encoding="utf-8")
         usage = (Path("references") / "usage.md").read_text(encoding="utf-8")
+        artifact_contract = (Path("references") / "artifact_contract.md").read_text(encoding="utf-8")
         readme = Path("README.md").read_text(encoding="utf-8")
         readme_zh = Path("README.zh-CN.md").read_text(encoding="utf-8")
 
@@ -94,34 +83,36 @@ class PackageMetadataTest(unittest.TestCase):
         self.assertIn("### Install Python Package", readme)
         self.assertIn("### CLI Usage", readme)
         self.assertIn("### Python API", readme)
-        self.assertIn("Install this skill: https://github.com/Taiquan-Zhou/frame-Extraction-and-Processing-skill", readme)
-        self.assertNotIn("<your-agent-skills-dir>/frame-timing-skill", readme)
-        self.assertNotIn("repo: Taiquan-Zhou/frame-Extraction-and-Processing-skill", readme)
-        self.assertNotIn("## AI Coding Tool Use", readme)
-        self.assertNotIn("Codex", readme)
-        self.assertNotIn("for development", readme)
+        self.assertIn("Install this skill: https://github.com/Taiquan-Zhou/frame-timing-skill", readme)
         self.assertIn("### 作为 Agent Skill 使用", readme_zh)
         self.assertIn("### 安装 Python Package", readme_zh)
         self.assertIn("### CLI 使用方法", readme_zh)
-        self.assertNotIn("## Smoke Test", readme)
-        self.assertNotIn("## 功能测试", readme_zh)
-        self.assertNotIn("From a local checkout", readme)
-        self.assertNotIn("For development", readme)
-        self.assertNotIn("从本地 checkout 安装", readme_zh)
-        self.assertNotIn("开发安装", readme_zh)
-        self.assertIn("path/to/clean_frames", readme)
-        self.assertIn("path/to/clean_frames", readme_zh)
+        for content in [readme, readme_zh, skill, usage, artifact_contract]:
+            self.assertIn("reconstruction_balanced", content)
+            self.assertIn("select_sources", content)
         self.assertIn("frame-timing path/to/clean_frames", readme)
         self.assertIn("frame-timing path/to/clean_frames", readme_zh)
         self.assertIn("/skill frame-timing-skill", readme)
         self.assertIn("/skill frame-timing-skill", readme_zh)
         self.assertIn("output/frame_timing_run", readme)
         self.assertIn("output/frame_timing_run", readme_zh)
-        self.assertIn("git+https://github.com/Taiquan-Zhou/frame-Extraction-and-Processing-skill.git", readme)
-        self.assertIn("https://github.com/Taiquan-Zhou/frame-Extraction-and-Processing-skill", readme)
+        self.assertIn("git+https://github.com/Taiquan-Zhou/frame-timing-skill.git", readme)
+        self.assertIn("https://github.com/Taiquan-Zhou/frame-timing-skill", readme)
         self.assertIn("frame-timing \"<clean_frame_dir>\"", skill)
         self.assertIn("prefer the installed `frame-timing` CLI", skill)
         self.assertIn("Host Project Smoke", usage)
+
+        self.assertNotIn("<your-agent-skills-dir>/frame-timing-skill", readme)
+        self.assertNotIn("repo: Taiquan-Zhou/frame-timing-skill", readme)
+        self.assertNotIn("## AI Coding Tool Use", readme)
+        self.assertNotIn("Codex", readme)
+        self.assertNotIn("for development", readme)
+        self.assertNotIn("## Smoke Test", readme)
+        self.assertNotIn("## 功能测试", readme_zh)
+        self.assertNotIn("From a local checkout", readme)
+        self.assertNotIn("For development", readme)
+        self.assertNotIn("从本地 checkout 安装", readme_zh)
+        self.assertNotIn("开发安装", readme_zh)
         self.assertNotIn("Release Checklist", readme)
         self.assertNotIn("Release Artifact Scope", readme)
         self.assertNotIn("Repository Status", readme)
