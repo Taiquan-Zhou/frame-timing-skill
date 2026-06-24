@@ -29,7 +29,7 @@ def detect_segments(
     min_static_frames: int = 21,
     min_fast_frames: int = 5,
     static_window_min_low_ratio: float = 0.70,
-    static_window_mean_multiplier: float = 1.20,
+    static_window_mean_multiplier: float = 2.00,
 ) -> list[Segment]:
     if not metrics:
         return []
@@ -183,14 +183,13 @@ def _detect_jittered_static_windows(
 ) -> list[Segment]:
     calm_runs: list[list[FrameMetric]] = []
     current: list[FrameMetric] = []
-    hard_break_sources = {
-        source_index
+    hard_break_segments = [
+        segment
         for segment in existing_segments
         if segment.segment_type in {"fast_motion", "very_fast_motion"}
-        for source_index in range(segment.start, segment.end + 1)
-    }
+    ]
     for metric, frame_type in classified_metrics:
-        if metric.source_index in hard_break_sources or frame_type == "very_fast_motion":
+        if _source_in_any_segment(metric.source_index, hard_break_segments) or frame_type == "very_fast_motion":
             if current:
                 calm_runs.append(current)
                 current = []
@@ -214,7 +213,7 @@ def _detect_jittered_static_windows(
         max_motion = max(motions)
         if low_ratio < min_low_ratio:
             continue
-        if mean_motion > static_threshold * max(mean_multiplier, 2.0):
+        if mean_motion > static_threshold * mean_multiplier:
             continue
         if max_motion >= very_fast_threshold:
             continue
@@ -239,3 +238,7 @@ def _detect_jittered_static_windows(
 
 def _overlaps_existing_segment(start: int, end: int, segments: list[Segment]) -> bool:
     return any(start <= segment.end and segment.start <= end for segment in segments)
+
+
+def _source_in_any_segment(source_index: int, segments: list[Segment]) -> bool:
+    return any(segment.start <= source_index <= segment.end for segment in segments)

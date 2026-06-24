@@ -1,5 +1,6 @@
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 import csv
 import re
@@ -165,6 +166,57 @@ class ApplyFrameStrategyTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "Overlapping strategy operations"):
                 apply_strategy(records, strategy, output_dir)
             self.assertFalse(output_dir.exists())
+
+    def test_apply_strategy_select_sources_keeps_exact_sources(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            input_dir = root / "input"
+            output_dir = root / "output"
+            input_dir.mkdir()
+            for index in range(6):
+                _write_image(input_dir / f"frame_{index:06d}_src_{index:06d}.jpg", value=80 + index)
+            records = load_frame_records(input_dir, fps=30.0)
+            strategy = {
+                "version": 2,
+                "operations": [
+                    {
+                        "op": "select_sources",
+                        "range": {"start": 1, "end": 4},
+                        "sources": [1, 4],
+                        "reason": "stable jitter keyframes",
+                    }
+                ],
+            }
+
+            result = apply_strategy(records, strategy, output_dir)
+
+            self.assertEqual(result.output_count, 4)
+            output_records = load_frame_records(output_dir, fps=30.0)
+            self.assertEqual([record.source_index for record in output_records], [0, 1, 4, 5])
+            self.assertEqual([record.is_duplicate for record in output_records], [False, False, False, False])
+
+    def test_overlapping_validation_does_not_expand_sparse_ranges(self):
+        records = [FrameRecord(1_000_000_000, 0, 0.0, Path("frame_000000_src_1000000000.jpg"))]
+        strategy = {
+            "version": 1,
+            "operations": [
+                {
+                    "op": "keep",
+                    "range": {"start": 0, "end": 2_000_000_000},
+                    "reason": "huge sparse range",
+                }
+            ],
+        }
+
+        def guarded_range(start, stop=None, step=1):
+            if stop is not None and abs(stop - start) > 1000:
+                raise AssertionError("range expansion is not allowed for sparse operation spans")
+            return range(start) if stop is None else range(start, stop, step)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch("frame_timing_agent.apply_frame_strategy.range", guarded_range, create=True):
+                with self.assertRaises(FileNotFoundError):
+                    apply_strategy(records, strategy, Path(tmp) / "output")
 
 
 if __name__ == "__main__":

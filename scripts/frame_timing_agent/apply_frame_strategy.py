@@ -139,6 +139,19 @@ def _operation_by_source(operations: list[dict], records: list[FrameRecord]) -> 
         elif op == "mark_review":
             for source in range_sources:
                 operation_map[source] = {"op": "keep", "reason": operation.get("reason", "")}
+        elif op == "select_sources":
+            selected_sources = {int(source) for source in operation.get("sources", [])}
+            invalid_sources = [source for source in selected_sources if source < start or source > end]
+            if invalid_sources:
+                raise ValueError(
+                    "select_sources contains source outside operation range: "
+                    f"{min(invalid_sources)}"
+                )
+            for source in range_sources:
+                operation_map[source] = operation if source in selected_sources else {
+                    "op": "skip",
+                    "reason": operation.get("reason", ""),
+                }
         else:
             raise ValueError(f"Unsupported strategy operation: {op}")
 
@@ -146,15 +159,14 @@ def _operation_by_source(operations: list[dict], records: list[FrameRecord]) -> 
 
 
 def _validate_non_overlapping(operations: list[dict]) -> None:
-    claimed_sources: set[int] = set()
+    claimed_ranges: list[tuple[int, int]] = []
     for operation in operations:
         start = int(operation["range"]["start"])
         end = int(operation["range"]["end"])
-        current_sources = set(range(start, end + 1))
-        overlap = claimed_sources & current_sources
-        if overlap:
-            raise ValueError(f"Overlapping strategy operations at source_index {min(overlap)}")
-        claimed_sources.update(current_sources)
+        for claimed_start, claimed_end in claimed_ranges:
+            if start <= claimed_end and claimed_start <= end:
+                raise ValueError(f"Overlapping strategy operations at source_index {max(start, claimed_start)}")
+        claimed_ranges.append((start, end))
 
 
 def _copy_frame(source: Path, destination: Path) -> None:

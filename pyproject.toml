@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "frame-timing-skill"
-version = "0.1.0"
+version = "0.2.0rc1"
 description = "Audited frame timing optimization skill for already-clean extracted frames."
 readme = "README.md"
 license = "MIT"
@@ -35,9 +35,9 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/Taiquan-Zhou/frame-Extraction-and-Processing-skill"
-Source = "https://github.com/Taiquan-Zhou/frame-Extraction-and-Processing-skill"
-Issues = "https://github.com/Taiquan-Zhou/frame-Extraction-and-Processing-skill/issues"
+Homepage = "https://github.com/Taiquan-Zhou/frame-timing-skill"
+Source = "https://github.com/Taiquan-Zhou/frame-timing-skill"
+Issues = "https://github.com/Taiquan-Zhou/frame-timing-skill/issues"
 
 [project.scripts]
 frame-timing = "frame_timing_agent.simple_cli:main"

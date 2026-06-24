@@ -256,6 +256,10 @@ def _estimate_output_count(metrics: list[FrameMetric], strategy: dict) -> int:
             estimated -= max(0, affected - int(operation.get("count", affected)))
         elif operation.get("op") == "duplicate_range":
             estimated += affected * (int(operation.get("total_instances", 1)) - 1)
+        elif operation.get("op") == "select_sources":
+            selected = {int(source) for source in operation.get("sources", [])}
+            affected_sources = {source_index for source_index in source_indices if start <= source_index <= end}
+            estimated -= max(0, affected - len(selected & affected_sources))
     return estimated
 
 

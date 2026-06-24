@@ -18,7 +18,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--artifact_root", type=Path, default=Path("output") / "frame_timing_run")
     parser.add_argument("--name", default=None, help="Artifact item name. Defaults to the frame directory name.")
     parser.add_argument("--limit_first_n", type=int, default=300)
-    parser.add_argument("--mode", default="aggressive_motion")
+    parser.add_argument("--mode", default="reconstruction_balanced", choices=["reconstruction_balanced"])
     parser.add_argument("--fps", type=float, default=None)
     parser.add_argument("--override_config", type=Path, default=None)
     return parser

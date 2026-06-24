@@ -14,6 +14,8 @@ from frame_timing_agent.apply_frame_strategy import apply_strategy
 from frame_timing_agent.frame_source import load_frame_records
 from frame_timing_agent.frame_strategy import build_strategy
 from frame_timing_agent.human_review import write_human_review
+from frame_timing_agent.jitter_strategy import build_jitter_reduction_strategy, merge_jitter_with_base_strategy
+from frame_timing_agent.motion_estimator import estimate_frame_motion
 from frame_timing_agent.segment_detector import detect_segments
 from frame_timing_agent.strategy_execution_audit import audit_strategy_execution, write_execution_audit
 from frame_timing_agent.strategy_visual_review import write_strategy_visual_review
@@ -41,12 +43,12 @@ def run_timing_agent(
     frames: Path | str,
     artifact_dir: Path | str,
     limit_first_n: int | None = 300,
-    mode: str = "aggressive_motion",
+    mode: str = "reconstruction_balanced",
     write: bool = False,
     fps: float | None = None,
     override_config_path: Path | str | None = None,
 ) -> TimingAgentResult:
-    if mode != "aggressive_motion":
+    if mode != "reconstruction_balanced":
         raise ValueError(f"unsupported timing agent mode: {mode}")
 
     config = load_config()
@@ -68,9 +70,9 @@ def run_timing_agent(
         min_static_frames=int(config["min_static_frames"]),
         min_fast_frames=int(config["min_fast_frames"]),
         static_window_min_low_ratio=float(config.get("static_window_min_low_ratio", 0.70)),
-        static_window_mean_multiplier=float(config.get("static_window_mean_multiplier", 1.20)),
+        static_window_mean_multiplier=float(config.get("static_window_mean_multiplier", 2.0)),
     )
-    strategy = build_strategy(
+    base_strategy = build_strategy(
         segments,
         frame_dir=frames,
         limit_first_n=limit_first_n,
@@ -79,6 +81,16 @@ def run_timing_agent(
         very_fast_motion_total_instances=int(config["very_fast_motion_total_instances"]),
         overrides=override_config.get("overrides"),
     )
+    motion_estimates = estimate_frame_motion(records)
+    jitter_strategy = build_jitter_reduction_strategy(
+        records=records,
+        estimates=motion_estimates,
+        frame_dir=frames,
+        limit_first_n=limit_first_n,
+        max_output_ratio=float(config.get("jitter_max_output_ratio", 0.60)),
+        min_jitter_frames=int(config.get("jitter_min_frames", 5)),
+    )
+    strategy = merge_jitter_with_base_strategy(base_strategy, jitter_strategy, records)
     estimated_output_count = _estimate_output_count(records, strategy)
 
     write_analysis_artifacts(
@@ -139,6 +151,9 @@ def _estimate_output_count(records, strategy: dict) -> int:
             count -= max(0, len(affected) - int(operation["count"]))
         elif operation.get("op") == "duplicate_range":
             count += len(affected) * (int(operation["total_instances"]) - 1)
+        elif operation.get("op") == "select_sources":
+            selected = {int(source) for source in operation.get("sources", [])}
+            count -= max(0, len(affected) - len(selected & set(affected)))
     return count
 
 
@@ -157,7 +172,7 @@ def main() -> None:
     parser.add_argument("--frames", required=True, type=Path)
     parser.add_argument("--artifact_dir", required=True, type=Path)
     parser.add_argument("--limit_first_n", type=int, default=300)
-    parser.add_argument("--mode", default="aggressive_motion")
+    parser.add_argument("--mode", default="reconstruction_balanced", choices=["reconstruction_balanced"])
     parser.add_argument("--fps", type=float, default=None)
     parser.add_argument("--override_config", type=Path, default=None)
     parser.add_argument("--write", action="store_true")

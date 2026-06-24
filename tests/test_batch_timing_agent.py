@@ -301,6 +301,44 @@ class BatchTimingAgentTest(unittest.TestCase):
             self.assertIn("![with_contact contact_000_duplicate_range_2_5]", dashboard)
             self.assertIn("../with_contact/analysis/visual_review/contact_000_duplicate_range_2_5.png", dashboard)
 
+    def test_manifest_config_can_enable_reconstruction_balanced_mode(self):
+        with _tempdir() as tmp:
+            root = Path(tmp)
+            frames = root / "frames"
+            artifact_root = root / "output" / "manifest_jitter_batch"
+            manifest_path = root / "batch_manifest.json"
+            _make_frames(frames, 6)
+            manifest_path.write_text(
+                json.dumps(
+                    {
+                        "artifact_root": str(artifact_root),
+                        "mode": "reconstruction_balanced",
+                        "write": True,
+                        "items": [
+                            {"name": "jitter_item", "frames": str(frames)},
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            config = load_batch_manifest(manifest_path)
+            result = run_batch_timing_agent(
+                config.items,
+                artifact_root=config.artifact_root,
+                limit_first_n=config.limit_first_n,
+                mode=config.mode,
+                write=config.write,
+            )
+
+            self.assertEqual(result.success_count, 1)
+            strategy = json.loads(
+                (artifact_root / "jitter_item" / "analysis" / "strategy.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(strategy["version"], 2)
+            self.assertEqual(strategy["options"]["mode"], "reconstruction_balanced")
+            self.assertEqual(strategy["options"]["jitter_reduction_mode"], "v2")
+
 
 if __name__ == "__main__":
     unittest.main()

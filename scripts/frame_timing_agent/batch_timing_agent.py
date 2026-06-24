@@ -32,7 +32,7 @@ class BatchTimingConfig:
     items: list[BatchTimingItem]
     artifact_root: Path
     limit_first_n: int | None = 300
-    mode: str = "aggressive_motion"
+    mode: str = "reconstruction_balanced"
     write: bool = False
     fps: float | None = None
     override_config_path: Path | None = None
@@ -74,7 +74,7 @@ def run_batch_timing_agent(
     items: Sequence[BatchTimingItem],
     artifact_root: Path | str,
     limit_first_n: int | None = 300,
-    mode: str = "aggressive_motion",
+    mode: str = "reconstruction_balanced",
     write: bool = False,
     fps: float | None = None,
     override_config_path: Path | str | None = None,
@@ -172,7 +172,7 @@ def load_batch_manifest(path: Path | str) -> BatchTimingConfig:
         items=items,
         artifact_root=Path(raw_artifact_root),
         limit_first_n=data.get("limit_first_n", 300),
-        mode=str(data.get("mode", "aggressive_motion")),
+        mode=str(data.get("mode", "reconstruction_balanced")),
         write=bool(data.get("write", False)),
         fps=float(data["fps"]) if data.get("fps") is not None else None,
         override_config_path=Path(raw_override) if raw_override else None,
@@ -462,7 +462,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--frames", action="append", default=None, help="Frame directory, optionally named as name=path.")
     parser.add_argument("--artifact_root", type=Path)
     parser.add_argument("--limit_first_n", type=int, default=300)
-    parser.add_argument("--mode", default="aggressive_motion")
+    parser.add_argument("--mode", default="reconstruction_balanced", choices=["reconstruction_balanced"])
     parser.add_argument("--fps", type=float, default=None)
     parser.add_argument("--override_config", type=Path, default=None)
     parser.add_argument("--write", action="store_true")
