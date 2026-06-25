@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "frame-timing-skill"
-version = "0.2.0rc1"
+version = "0.2.0"
 description = "Audited frame timing optimization skill for already-clean extracted frames."
 readme = "README.md"
 license = "MIT"
