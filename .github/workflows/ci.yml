@@ -70,10 +70,11 @@ jobs:
         shell: pwsh
         run: |
           $text = Get-Content -Raw SKILL.md
-          if (-not $text.StartsWith("---`n")) {
+          $normalized = $text -replace "`r`n", "`n"
+          if (-not $normalized.StartsWith("---`n")) {
             throw "SKILL.md missing YAML frontmatter"
           }
-          $parts = $text -split "---", 3
+          $parts = $normalized -split "---", 3
           $frontmatter = $parts[1]
           if ($frontmatter -notmatch "(?m)^name:\s*frame-timing-skill\s*$") {
             throw "unexpected skill name"
