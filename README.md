@@ -20,8 +20,8 @@ It detects static ranges, fast-motion ranges, and high-frequency camera jitter. 
 
 | Version | Strategy | Main behavior | Reconstruction impact | Status |
 | --- | --- | --- | --- | --- |
-| v1 / 0.1.x | `aggressive_motion` | Detected static and fast-motion ranges, compressed long static sections with `keep_uniform`, and duplicated fast-motion ranges with `duplicate_range`. | Useful for basic frame timing, but severe camera jitter could still be duplicated or mixed into static-like handling. | Replaced by v2. |
-| v2 / 0.2.0rc1 | `reconstruction_balanced` | Adds high-frequency jitter detection, stable keyframe selection, `select_sources`, execution audit, configurable jitter thresholds, and manual-override protection. | Better suited for reconstruction, NeRF, Gaussian Splatting, and photogrammetry because unstable jitter ranges can be reduced without modifying pixels. | Current default. |
+| v1 / 0.1.0 | `aggressive_motion` | Detected static and fast-motion ranges, compressed long static sections with `keep_uniform`, and duplicated fast-motion ranges with `duplicate_range`. | Useful for basic frame timing, but severe camera jitter could still be duplicated or mixed into static-like handling. | Replaced by v2. |
+| v2 / 0.2.0 | `reconstruction_balanced` | Adds high-frequency jitter detection, stable keyframe selection, `select_sources`, execution audit, configurable jitter thresholds, and manual-override protection. | Better suited for reconstruction, NeRF, Gaussian Splatting, and photogrammetry because unstable jitter ranges can be reduced without modifying pixels. | Current default. |
 
 v2 is a strategy upgrade. Output frame counts and `strategy.json` operations can differ from v1. The package still writes byte-identical source-frame copies only; it does not warp, crop, interpolate, or visually stabilize images.
 
