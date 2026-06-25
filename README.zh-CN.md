@@ -20,8 +20,8 @@ Frame Timing Skill 是一个本地 Python package 和通用 Agent Skill，用于
 
 | 版本 | 策略 | 主要行为 | 对重建的影响 | 状态 |
 | --- | --- | --- | --- | --- |
-| v1 / 0.1.x | `aggressive_motion` | 检测静止区间和快速运动区间，用 `keep_uniform` 压缩长静止段，用 `duplicate_range` 复制快速运动段。 | 可以做基础帧节奏处理，但剧烈相机抖动仍可能被复制，或被混入类似静止段的处理逻辑。 | 已被 v2 替代。 |
-| v2 / 0.2.0rc1 | `reconstruction_balanced` | 增加高频抖动检测、稳定关键帧选择、`select_sources`、执行审计、可配置抖动阈值，以及人工 override 保护。 | 更适合重建、NeRF、Gaussian Splatting 和摄影测量，因为它可以减少抖动区间的不稳定帧，同时不修改像素。 | 当前默认策略。 |
+| v1 / 0.1.0 | `aggressive_motion` | 检测静止区间和快速运动区间，用 `keep_uniform` 压缩长静止段，用 `duplicate_range` 复制快速运动段。 | 可以做基础帧节奏处理，但剧烈相机抖动仍可能被复制，或被混入类似静止段的处理逻辑。 | 已被 v2 替代。 |
+| v2 / 0.2.0 | `reconstruction_balanced` | 增加高频抖动检测、稳定关键帧选择、`select_sources`、执行审计、可配置抖动阈值，以及人工 override 保护。 | 更适合重建、NeRF、Gaussian Splatting 和摄影测量，因为它可以减少抖动区间的不稳定帧，同时不修改像素。 | 当前默认策略。 |
 
 v2 是一次策略升级。输出帧数量和 `strategy.json` 操作可能与 v1 不同。本 package 仍然只写出源帧的字节级一致副本；不会 warp、裁剪、插值或视觉稳定化图片。
 
