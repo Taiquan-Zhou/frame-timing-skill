@@ -29,6 +29,19 @@ class FrameStrategyTest(unittest.TestCase):
 
         self.assertEqual(strategy["operations"], [])
 
+    def test_low_motion_review_segment_is_not_compressed(self):
+        strategy = build_strategy(
+            [Segment("low_motion_review", 0, 136, 137, 0.001, "slow camera motion")],
+            frame_dir="input",
+            limit_first_n=570,
+            static_keep_count=40,
+        )
+
+        operation = strategy["operations"][0]
+        self.assertEqual(operation["op"], "mark_review")
+        self.assertEqual(operation["range"], {"start": 0, "end": 136})
+        self.assertNotIn("count", operation)
+
     def test_fast_and_very_fast_use_aggressive_duplication(self):
         strategy = build_strategy(
             [

@@ -64,7 +64,7 @@ class SegmentDetectorTest(unittest.TestCase):
         self.assertAlmostEqual(segment.mean_motion, 0.01)
         self.assertIn("static", segment.reason)
 
-    def test_detect_segments_finds_jittered_long_static_window_before_fast_motion(self):
+    def test_detect_segments_marks_low_motion_window_for_review_before_fast_motion(self):
         calm_motions = [
             0.000000,
             0.005900,
@@ -130,7 +130,7 @@ class SegmentDetectorTest(unittest.TestCase):
 
         segments = detect_segments(metrics, min_static_frames=21, min_fast_frames=5)
 
-        self.assertIn(("static", 0, 54, 55), [
+        self.assertIn(("low_motion_review", 0, 54, 55), [
             (segment.segment_type, segment.start, segment.end, segment.frame_count)
             for segment in segments
         ])

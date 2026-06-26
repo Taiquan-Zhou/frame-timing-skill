@@ -220,13 +220,13 @@ def _detect_jittered_static_windows(
 
         jitter_segments.append(
             Segment(
-                segment_type="static",
+                segment_type="low_motion_review",
                 start=run[0].source_index,
                 end=run[-1].source_index,
                 frame_count=len(run),
                 mean_motion=mean_motion,
                 reason=(
-                    "jittered static window with "
+                    "low-motion window retained for review with "
                     f"low_motion_ratio={low_ratio:.3f}, mean_motion={mean_motion:.6f}, "
                     f"relaxed_static_threshold={relaxed_static_threshold:.6f}, "
                     f"fast_threshold={fast_threshold:.6f}, very_fast_threshold={very_fast_threshold:.6f}"
