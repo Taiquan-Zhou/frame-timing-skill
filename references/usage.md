@@ -65,7 +65,8 @@ result = run_batch_timing_agent(
 )
 ```
 
-Read `result.batch_report` and `result.items[*]` to locate output and review artifacts.
+Read `result.summary_json_path`, `result.summary_csv_path`, `result.review_dashboard_path`, and
+`result.items` to locate output and review artifacts.
 
 ## Host Project Contract
 

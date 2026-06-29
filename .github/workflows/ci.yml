@@ -20,7 +20,10 @@ jobs:
           python-version: "3.12"
 
       - name: Install package and test tools
-        run: python -m pip install . pytest build
+        run: python -m pip install . "pytest>=8,<10" "build>=1.2,<2" "ruff>=0.8,<1"
+
+      - name: Check Python correctness
+        run: python -m ruff check scripts tests
 
       - name: Run tests
         run: python -m pytest
