@@ -3,7 +3,7 @@ from __future__ import annotations
 import math
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import cast
+from typing import TypeGuard, cast
 
 import cv2
 import numpy as np
@@ -23,23 +23,25 @@ class MotionConfig:
     decision_deadband_ratio: float = 0.10
 
     def __post_init__(self) -> None:
-        if self.analysis_width < 32:
+        if isinstance(self.analysis_width, bool) or not isinstance(self.analysis_width, int) or self.analysis_width < 32:
             raise ValueError("analysis_width must be at least 32")
-        if self.max_features < 8:
+        if isinstance(self.max_features, bool) or not isinstance(self.max_features, int) or self.max_features < 8:
             raise ValueError("max_features must be at least 8")
-        if self.forward_backward_error <= 0 or self.ransac_reprojection_threshold <= 0:
+        if not _is_positive_finite_number(self.forward_backward_error) or not _is_positive_finite_number(
+            self.ransac_reprojection_threshold
+        ):
             raise ValueError("motion error thresholds must be positive")
-        if not 0 < self.minimum_inlier_ratio <= 1:
+        if not _is_finite_number(self.minimum_inlier_ratio) or not 0 < self.minimum_inlier_ratio <= 1:
             raise ValueError("minimum_inlier_ratio must be in (0, 1]")
-        if len(self.smoothing_windows_seconds) != 3 or any(
-            not math.isfinite(value) or value <= 0 for value in self.smoothing_windows_seconds
+        if not isinstance(self.smoothing_windows_seconds, tuple) or len(self.smoothing_windows_seconds) != 3 or any(
+            not _is_positive_finite_number(value) for value in self.smoothing_windows_seconds
         ):
             raise ValueError("smoothing_windows_seconds must contain three positive finite values")
         if tuple(sorted(self.smoothing_windows_seconds)) != self.smoothing_windows_seconds:
             raise ValueError("smoothing_windows_seconds must be strictly increasing")
         if len(set(self.smoothing_windows_seconds)) != 3:
             raise ValueError("smoothing_windows_seconds must be strictly increasing")
-        if not 0 <= self.decision_deadband_ratio < 1:
+        if not _is_finite_number(self.decision_deadband_ratio) or not 0 <= self.decision_deadband_ratio < 1:
             raise ValueError("decision_deadband_ratio must be in [0, 1)")
 
 
@@ -99,13 +101,13 @@ def _initial_sample(record: FrameRecord) -> MotionSample:
         scale=1.0,
         magnitude_px=0.0,
         feature_count=0,
-        inlier_ratio=1.0,
-        reprojection_error=0.0,
+        inlier_ratio=0.0,
+        reprojection_error=math.inf,
         normalized_residual_spatial_iqr=0.0,
         normalized_residual_spatial_p90=0.0,
-        inlier_spatial_coverage=1.0,
-        response=1.0,
-        confidence=1.0,
+        inlier_spatial_coverage=0.0,
+        response=0.0,
+        confidence=0.0,
         fallback_reason="initial_frame",
     )
 
@@ -239,18 +241,44 @@ def _estimate_confidence(
     coverage_score = min(1.0, spatial_coverage / 0.5)
     confidence = 0.35 * inlier_ratio + 0.25 * feature_score + 0.20 * reprojection_score + 0.20 * coverage_score
 
+    if has_spatial_uncertainty(
+        inlier_ratio=inlier_ratio,
+        residual_iqr=residual_iqr,
+        residual_p90=residual_p90,
+        spatial_coverage=spatial_coverage,
+        analysis_diagonal=analysis_diagonal,
+        config=config,
+    ):
+        confidence = min(confidence, config.minimum_inlier_ratio - 0.05)
+    return max(0.0, min(1.0, confidence))
+
+
+def has_spatial_uncertainty(
+    *,
+    inlier_ratio: float,
+    residual_iqr: float,
+    residual_p90: float,
+    spatial_coverage: float,
+    analysis_diagonal: float,
+    config: MotionConfig,
+) -> bool:
     normalized_threshold = config.ransac_reprojection_threshold / analysis_diagonal
     lower_limit = 1.0 - config.decision_deadband_ratio
     upper_limit = 1.0 + config.decision_deadband_ratio
-    spatially_uncertain = (
+    return (
         residual_iqr >= 2.0 * normalized_threshold * lower_limit
         or residual_p90 >= 4.0 * normalized_threshold * lower_limit
         or spatial_coverage <= 0.25 * upper_limit
         or inlier_ratio <= config.minimum_inlier_ratio * upper_limit
     )
-    if spatially_uncertain:
-        confidence = min(confidence, config.minimum_inlier_ratio - 0.05)
-    return max(0.0, min(1.0, confidence))
+
+
+def _is_finite_number(value: object) -> TypeGuard[int | float]:
+    return not isinstance(value, bool) and isinstance(value, (int, float)) and math.isfinite(float(value))
+
+
+def _is_positive_finite_number(value: object) -> bool:
+    return _is_finite_number(value) and float(value) > 0
 
 
 def _inlier_grid_coverage(points: npt.NDArray[np.float32], image_shape: tuple[int, ...]) -> float:

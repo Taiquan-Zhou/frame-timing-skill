@@ -67,6 +67,8 @@ def _make_foreground(width: int, height: int) -> np.ndarray:
     cv2.rectangle(image, (left, top), (left + width // 4, top + height // 3), (40, 220, 240), -1)
     for offset in range(0, width // 4, 8):
         cv2.line(image, (left + offset, top), (left + offset, top + height // 3), (255, 40, 120), 1)
+    for offset in range(0, height // 3, 8):
+        cv2.line(image, (left, top + offset), (left + width // 4, top + offset), (40, 30, 255), 1)
     return image
 
 

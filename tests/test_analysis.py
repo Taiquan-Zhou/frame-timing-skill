@@ -11,7 +11,7 @@ from fixtures.generate_motion_sequences import generate_motion_sequence
 from frame_timing_agent.analysis import analyze_records
 from frame_timing_agent.contracts import AnalysisError, AnalysisResult
 from frame_timing_agent.frame_source import FrameRecord
-from frame_timing_agent.motion_model import MotionConfig
+from frame_timing_agent.motion_model import MotionConfig, estimate_camera_motion
 
 
 def _config() -> MotionConfig:
@@ -95,3 +95,33 @@ def test_spatial_uncertainty_is_exposed_as_review_range(tmp_path: Path) -> None:
 
     assert any(item.kind == "review_required" for item in result.ranges)
     assert result.trajectory_summary.spatial_uncertainty_count > 0
+
+
+def test_initial_frame_does_not_inflate_motion_confidence(tmp_path: Path) -> None:
+    records = generate_motion_sequence(
+        tmp_path / "confidence",
+        [(float(index), 0.0, 0.0) for index in range(6)],
+        low_texture=True,
+    )
+    samples = estimate_camera_motion(records, _config())
+
+    result = analyze_records(records, fps=30.0, motion_config=_config())
+
+    expected = float(np.mean([sample.confidence for sample in samples if sample.fallback_reason != "initial_frame"]))
+    assert result.motion_confidence == pytest.approx(expected)
+    assert result.trajectory_summary.mean_confidence == pytest.approx(expected)
+
+
+def test_analyze_records_decisions_are_repeatable_end_to_end(tmp_path: Path) -> None:
+    positions = [index * 0.5 + 2.5 * np.sin(index * np.pi / 2) for index in range(48)]
+    records = generate_motion_sequence(
+        tmp_path / "repeatable_analysis",
+        [(float(position), 0.0, 0.0) for position in positions],
+    )
+
+    runs = [analyze_records(records, fps=30.0, motion_config=_config()) for _ in range(20)]
+
+    expected = [(item.start, item.end, item.kind, item.reason) for item in runs[0].ranges]
+    assert all([(item.start, item.end, item.kind, item.reason) for item in run.ranges] == expected for run in runs[1:])
+    assert all(run.input_digest == runs[0].input_digest for run in runs[1:])
+    assert any(item.kind == "jitter" for item in runs[0].ranges)

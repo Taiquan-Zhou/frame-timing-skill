@@ -738,6 +738,8 @@ git commit -m "feat: enforce strategy safety before execution"
 
 每个阶段只依赖显式输入和文件产物；不使用模块级可变状态。Agent-safe 服务通过 `resolve_strategy_request()` 将已校验的 `StrategyRequest` 解析为 `ResolvedStrategyConfig`，随后在规划器和验证器中传递该类型。分析、计划和验证 JSON 使用原子写入：先写同目录临时文件，再 `replace()`。`service.py` 不导入 `auto_timing_agent.py`、`batch_timing_agent.py` 或 `simple_cli.py`。
 
+接入前记录长序列分析的图像读取次数和耗时；若重复解码成为主要瓶颈，只允许引入有明确内存上限的逐帧共享读取器，不得默认缓存整段原图，也不得为了性能把分析结果写回输入目录。
+
 - [ ] **Step 3: 锁定 v2/v3 隔离边界**
 
 不修改 `auto_timing_agent.py`、`batch_timing_agent.py` 或 `simple_cli.py` 的生产代码。兼容测试锁定以下事实：旧函数签名继续接受 `override_config_path`；无 override 和有 override 的调用都生成 v2 strategy；现有一条命令入口继续生成 v2 产物；legacy 入口不暴露 `PolicyName` 或 `StrategyRequest`。新 service 的公开签名不接受 legacy `mode`、`override_config_path` 或 raw dict。

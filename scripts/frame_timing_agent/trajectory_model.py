@@ -8,7 +8,7 @@ from typing import cast
 import numpy as np
 import numpy.typing as npt
 
-from frame_timing_agent.motion_model import MotionConfig, MotionSample
+from frame_timing_agent.motion_model import MotionConfig, MotionSample, has_spatial_uncertainty
 
 
 @dataclass(frozen=True)
@@ -156,12 +156,18 @@ def _repair_low_confidence_trajectory(
 ) -> npt.NDArray[np.float64]:
     repaired = values.copy()
     for index in range(1, len(values) - 1):
-        if samples[index].confidence < minimum_confidence:
+        if (
+            samples[index].confidence < minimum_confidence
+            and samples[index - 1].confidence >= minimum_confidence
+            and samples[index + 1].confidence >= minimum_confidence
+        ):
             repaired[index] = float(np.median(values[index - 1 : index + 2]))
     return repaired
 
 
 def _weighted_moving_average(values: npt.NDArray[np.float64], window_size: int) -> npt.NDArray[np.float64]:
+    if window_size < 3 or window_size % 2 == 0:
+        raise ValueError("window_size must be an odd integer of at least 3")
     radius = window_size // 2
     weights = np.concatenate(
         (np.arange(1, radius + 2, dtype=np.float64), np.arange(radius, 0, -1, dtype=np.float64))
@@ -259,14 +265,13 @@ def _reversal_rate(
 def _is_spatially_uncertain(sample: MotionSample, analysis_diagonal: float, config: MotionConfig) -> bool:
     if sample.fallback_reason == "initial_frame":
         return False
-    normalized_threshold = config.ransac_reprojection_threshold / analysis_diagonal
-    lower_limit = 1.0 - config.decision_deadband_ratio
-    upper_limit = 1.0 + config.decision_deadband_ratio
-    return (
-        sample.confidence < config.minimum_inlier_ratio
-        or sample.normalized_residual_spatial_iqr >= 2.0 * normalized_threshold * lower_limit
-        or sample.normalized_residual_spatial_p90 >= 4.0 * normalized_threshold * lower_limit
-        or sample.inlier_spatial_coverage <= 0.25 * upper_limit
+    return sample.confidence < config.minimum_inlier_ratio or has_spatial_uncertainty(
+        inlier_ratio=sample.inlier_ratio,
+        residual_iqr=sample.normalized_residual_spatial_iqr,
+        residual_p90=sample.normalized_residual_spatial_p90,
+        spatial_coverage=sample.inlier_spatial_coverage,
+        analysis_diagonal=analysis_diagonal,
+        config=config,
     )
 
 

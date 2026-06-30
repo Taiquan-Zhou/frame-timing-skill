@@ -14,7 +14,11 @@ from frame_timing_agent.motion_model import (
     MotionSample,
     estimate_camera_motion,
 )
-from frame_timing_agent.trajectory_model import decompose_camera_trajectory
+from frame_timing_agent.trajectory_model import (
+    _repair_low_confidence_trajectory,
+    _weighted_moving_average,
+    decompose_camera_trajectory,
+)
 
 
 def _config() -> MotionConfig:
@@ -41,6 +45,7 @@ def test_estimates_known_translation_without_changing_opencv_threads(tmp_path: P
     assert cv2.getNumThreads() == threads_before
     assert len(samples) == len(records)
     assert samples[0].fallback_reason == "initial_frame"
+    assert samples[0].confidence == 0.0
     for sample in samples[2:]:
         assert sample.dx == pytest.approx(1.5, abs=0.5)
         assert sample.dy == pytest.approx(-0.5, abs=0.5)
@@ -102,6 +107,23 @@ def test_spatially_inconsistent_motion_cannot_claim_high_confidence(
     ]
     assert uncertain
     assert all(sample.confidence < 0.45 for sample in uncertain)
+
+
+def test_foreground_parallax_has_more_residual_dispersion_than_pure_translation(tmp_path: Path) -> None:
+    transforms = [(float(index), 0.0, 0.0) for index in range(12)]
+    baseline = generate_motion_sequence(tmp_path / "baseline", transforms)
+    parallax = generate_motion_sequence(
+        tmp_path / "parallax",
+        transforms,
+        foreground_transform=lambda index: (index * 10.0, 0.0, 0.0),
+    )
+
+    baseline_samples = estimate_camera_motion(baseline, _config())
+    parallax_samples = estimate_camera_motion(parallax, _config())
+
+    baseline_p90 = np.median([sample.normalized_residual_spatial_p90 for sample in baseline_samples[1:]])
+    parallax_p90 = np.median([sample.normalized_residual_spatial_p90 for sample in parallax_samples[1:]])
+    assert parallax_p90 > baseline_p90 * 5
 
 
 def _motion_samples(positions: list[float], *, rotation_positions: list[float] | None = None) -> tuple[MotionSample, ...]:
@@ -214,6 +236,74 @@ def test_spatial_threshold_deadband_requires_review() -> None:
 
     assert decisions[30].kind == "review_required"
     assert decisions[30].reason == "spatial_motion_uncertain"
+
+
+def test_inlier_ratio_deadband_uses_same_spatial_uncertainty_rule() -> None:
+    samples = list(_motion_samples([float(index) for index in range(90)]))
+    samples[30] = replace(
+        samples[30],
+        inlier_ratio=_config().minimum_inlier_ratio * 1.05,
+        confidence=0.95,
+    )
+
+    decisions = decompose_camera_trajectory(tuple(samples), 30.0, math.hypot(192, 128), _config())
+
+    assert decisions[30].kind == "review_required"
+    assert decisions[30].reason == "spatial_motion_uncertain"
+
+
+def test_only_isolated_low_confidence_samples_are_median_repaired() -> None:
+    values = np.asarray([0.0, 1.0, 50.0, 3.0, 4.0], dtype=np.float64)
+    isolated = list(_motion_samples(values.tolist()))
+    isolated[2] = replace(isolated[2], confidence=0.4, fallback_reason="low_spatial_confidence")
+    continuous = [replace(sample, confidence=0.4, fallback_reason="insufficient_features") for sample in isolated]
+
+    repaired_isolated = _repair_low_confidence_trajectory(values, tuple(isolated), 0.45)
+    repaired_continuous = _repair_low_confidence_trajectory(values, tuple(continuous), 0.45)
+
+    assert repaired_isolated.tolist() == [0.0, 1.0, 3.0, 3.0, 4.0]
+    assert repaired_continuous.tolist() == values.tolist()
+
+
+def test_continuous_low_confidence_translation_requires_review_not_jitter() -> None:
+    samples = tuple(
+        replace(sample, confidence=0.4, fallback_reason="insufficient_features")
+        for sample in _motion_samples([float(index) for index in range(90)])
+    )
+
+    decisions = decompose_camera_trajectory(samples, 30.0, math.hypot(192, 128), _config())
+
+    assert all(decision.kind == "review_required" for decision in decisions)
+    assert not any(decision.kind == "jitter" for decision in decisions)
+
+
+def test_weighted_moving_average_rejects_invalid_window() -> None:
+    with pytest.raises(ValueError, match="odd integer"):
+        _weighted_moving_average(np.asarray([1.0, 2.0, 3.0]), 1)
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"analysis_width": 31},
+        {"analysis_width": 64.5},
+        {"max_features": 7},
+        {"max_features": True},
+        {"forward_backward_error": float("nan")},
+        {"forward_backward_error": True},
+        {"ransac_reprojection_threshold": float("inf")},
+        {"minimum_inlier_ratio": 0.0},
+        {"minimum_inlier_ratio": float("nan")},
+        {"smoothing_windows_seconds": (0.15, 0.15, 0.75)},
+        {"smoothing_windows_seconds": (0.15, float("nan"), 0.75)},
+        {"smoothing_windows_seconds": (0.15, True, 0.75)},
+        {"decision_deadband_ratio": 1.0},
+        {"decision_deadband_ratio": float("nan")},
+    ],
+)
+def test_motion_config_rejects_invalid_boundaries(kwargs: dict[str, object]) -> None:
+    with pytest.raises(ValueError):
+        MotionConfig(**kwargs)
 
 
 def test_discrete_motion_decisions_are_repeatable() -> None:

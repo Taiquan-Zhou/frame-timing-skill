@@ -54,6 +54,7 @@ def analyze_records(
         for metric, sample, decision in zip(metrics, motion_samples, decisions, strict=True)
     )
     ranges = _build_ranges(decisions)
+    mean_motion_confidence = _mean_estimated_confidence(motion_samples)
     return AnalysisResult(
         schema_version=SCHEMA_VERSION,
         run_id=input_digest[:16],
@@ -62,7 +63,7 @@ def analyze_records(
         fps=float(fps),
         width=width,
         height=height,
-        motion_confidence=float(np.mean([sample.confidence for sample in motion_samples])),
+        motion_confidence=mean_motion_confidence,
         quality_summary=_quality_summary(metrics),
         trajectory_summary=_trajectory_summary(motion_samples, decisions),
         frames=frames,
@@ -185,7 +186,7 @@ def _trajectory_summary(
     decisions: Sequence[MotionDecision],
 ) -> TrajectorySummary:
     return TrajectorySummary(
-        mean_confidence=float(np.mean([sample.confidence for sample in samples])),
+        mean_confidence=_mean_estimated_confidence(samples),
         normalized_residual_p95=float(
             np.quantile([decision.normalized_translation_residual for decision in decisions], 0.95)
         ),
@@ -198,6 +199,11 @@ def _trajectory_summary(
             decision.reason == "multiscale_motion_disagreement" for decision in decisions
         ),
     )
+
+
+def _mean_estimated_confidence(samples: Sequence[MotionSample]) -> float:
+    estimated = [sample.confidence for sample in samples if sample.fallback_reason != "initial_frame"]
+    return float(np.mean(estimated)) if estimated else 0.0
 
 
 def _build_ranges(decisions: Sequence[MotionDecision]) -> tuple[AnalysisRange, ...]:
