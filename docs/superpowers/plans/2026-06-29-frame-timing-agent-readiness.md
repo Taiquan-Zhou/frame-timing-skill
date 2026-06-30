@@ -4,7 +4,7 @@
 
 **Goal:** 将 `frame-timing-skill` 从需要人工理解内部参数的 Alpha pipeline，升级为可被任意 Agent 安全调用、可审计、可回滚，并能保护三维重建覆盖率的确定性工具内核。
 
-**Architecture:** 核心包继续负责帧分析、策略规划、约束验证、无损复制执行和结果审计，不引入任何 LLM SDK。Agent 只能通过稳定的 Python API 或 JSON CLI 选择受约束的策略预设、查看候选方案并提交执行；所有危险参数、低置信度判断和覆盖率限制由包内验证器控制。
+**Architecture:** 核心包继续负责帧分析、策略规划、约束验证、无损复制执行和结果审计，不引入任何 LLM SDK。新增的 Agent-safe v3 Python API 与 JSON CLI 形成独立入口；现有 v2 Python facade、批处理和一条命令 CLI 在 v0.3.0 中冻结行为，不根据可选参数静默切换到 v3。Agent 只能通过 v3 入口选择受约束的策略预设、查看候选方案并提交执行；所有危险参数、低置信度判断和覆盖率限制由包内验证器控制。
 
 **Tech Stack:** Python 3.10-3.12、NumPy、OpenCV、标准库 `dataclasses/enum/json/pathlib/hashlib`；开发工具使用 pytest、pytest-cov、Ruff、mypy、build、twine、pip-audit 和 GitHub Actions。
 
@@ -40,13 +40,14 @@
 - 不实现图像去模糊、生成式补帧、裁剪、透视校正或像素级稳定。
 - 不运行 NeRF、Gaussian Splatting、COLMAP 或其他建模程序。
 - 不允许 LLM 绕过验证器直接调用文件执行器。
+- 不在 v0.3.0 中把现有 v2 facade 或一条命令 CLI 部分迁移到 v3；迁移必须在真实样本验证后作为独立版本变更实施。
 - 不把私有测试视频、绝对路径或大体积运行产物提交到仓库。
 - 不为了减少帧数而牺牲可观测的建模覆盖率。
 
 ## 2. 目标调用流程
 
 ```text
-Agent / Host Project
+Agent / Host Project (v3 only)
         |
         v
 capabilities()      查询版本、策略、参数边界和能力限制
@@ -64,13 +65,15 @@ plan_strategy()     生成一个或多个候选策略
 validate_strategy() 执行硬性覆盖与安全校验
         |
         v
-apply_strategy()    仅接受已验证且摘要匹配的策略
+apply_validated_strategy() 仅接受已验证且摘要匹配的策略
         |
         v
 verify_output()     验证数量、来源哈希、间隔、报告和目录边界
 ```
 
 LLM 负责解释用户目标、选择预设、比较候选方案和处理人工确认。核心包负责计算、阈值自适应、参数合法性、安全约束、执行和审计。
+
+兼容路径与上述流程严格隔离：`run_timing_agent()`、`run_batch_timing_agent()` 和现有 `frame-timing` 命令在 v0.3.0 中继续执行完整的 v2 流程。是否提供 `override_config_path` 只影响 v2 自身，不得成为选择 v2/v3 引擎的路由条件。新代码不得从 v3 `service.py` 反向调用 legacy facade，也不得从 legacy facade 隐式转调 v3 service。
 
 ## 3. 技术栈与依赖政策
 
@@ -111,6 +114,7 @@ LLM 负责解释用户目标、选择预设、比较候选方案和处理人工�
 | `scripts/frame_timing_agent/contracts.py` | 公开枚举、请求、结果、候选方案和验证问题类型 |
 | `scripts/frame_timing_agent/configuration.py` | 策略预设、严格配置解析、边界和交叉字段验证 |
 | `scripts/frame_timing_agent/motion_model.py` | 全局相机变换估计、轨迹构建、置信度和降级路径 |
+| `scripts/frame_timing_agent/analysis.py` | 组合现有质量指标与运动模型，生成不含策略决策的 `AnalysisResult` |
 | `scripts/frame_timing_agent/strategy_planner.py` | 从分析结果生成覆盖优先、平衡、去抖候选策略 |
 | `scripts/frame_timing_agent/strategy_validator.py` | 保留率、连续丢帧、端点、范围、重复和摘要校验 |
 | `scripts/frame_timing_agent/service.py` | analyze/plan/validate/apply/verify 五阶段编排 |
@@ -121,13 +125,14 @@ LLM 负责解释用户目标、选择预设、比较候选方案和处理人工�
 | 文件 | 调整方向 |
 |---|---|
 | `frame_source.py` | 保持加载职责，新增输入摘要和尺寸一致性检查 |
-| `timing_metrics.py` | 保留质量指标，输出统一的 `FrameAnalysis` |
-| `apply_frame_strategy.py` | 只执行验证后的 v3 策略，保留 v2 兼容读取 |
+| `timing_metrics.py` | 保留单帧质量指标；由 `analysis.py` 与运动结果组合为 `FrameAnalysis` |
+| `apply_frame_strategy.py` | 新增仅接受验证结果的 v3 执行函数；现有 v2 `apply_strategy()` 保持兼容行为 |
 | `strategy_execution_audit.py` | 增加覆盖约束和计划摘要一致性审计 |
 | `batch_artifact_health.py` | 调用统一验证器，避免重复规则 |
 | `strategy_visual_review.py` | 继续生成人工审查材料，不参与决策 |
-| `batch_timing_agent.py` | 作为兼容 facade，内部转调 `service.py` |
-| `simple_cli.py` | 保留一条命令默认使用 `coverage_first` |
+| `auto_timing_agent.py` | 冻结为 legacy v2 facade，不转调 `service.py` |
+| `batch_timing_agent.py` | 冻结为 legacy v2 批处理入口，不转调 `service.py` |
+| `simple_cli.py` | 冻结为 legacy v2 一条命令入口；v0.3.0 不改变默认算法和产物版本 |
 
 ### 4.3 迁移完成后删除的旧实现
 
@@ -277,7 +282,25 @@ class ValidationResult:
     issues: tuple[ValidationIssue, ...]
 ```
 
-`candidate_digest` 是候选规范化 JSON 的 SHA-256。`apply_strategy()` 不信任 JSON 中的 `valid=True`，执行时必须重新调用验证器，并校验 `strategy_id/input_digest/candidate_digest` 与当前文件完全一致。验证 JSON 是审计证据，不是可绕过规则的授权令牌。
+`candidate_digest` 是候选规范化 JSON 的 SHA-256。`apply_validated_strategy()` 不信任 JSON 中的 `valid=True`，执行时必须重新调用验证器，并校验 `strategy_id/input_digest/candidate_digest` 与当前文件完全一致。验证 JSON 是审计证据，不是可绕过规则的授权令牌。
+
+### 5.6 执行结果
+
+```python
+@dataclass(frozen=True)
+class ExecutionResult:
+    schema_version: int
+    run_id: str
+    strategy_id: str
+    input_digest: str
+    candidate_digest: str
+    output_frame_count: int
+    selected_sources: tuple[int, ...]
+    output_manifest: str
+    output_digest: str
+```
+
+`output_manifest` 必须是相对于本次 artifact root 的 POSIX 风格路径，不得包含用户绝对路径。`output_digest` 由有序输出文件名、大小和内容 SHA-256 计算，用于 `verify_output()` 检测执行后篡改。
 
 ## 6. 算法设计
 
@@ -359,7 +382,7 @@ class MotionSample:
 
 | 策略 | 默认最低保留率 | 默认最多连续丢弃输入帧 | 行为 |
 |---|---:|---:|---|
-| `coverage_first` | 0.85 | 2 | 只删除高置信度抖动/模糊冗余帧，默认 CLI 使用 |
+| `coverage_first` | 0.85 | 2 | 只删除高置信度抖动/模糊冗余帧，v3 Agent-safe CLI 默认使用 |
 | `balanced` | 0.65 | 4 | 在覆盖保护下减少冗余与明显抖动 |
 | `jitter_reduction` | 0.45 | 7 | 更积极选择稳定关键帧，必须输出中风险或高风险提示 |
 
@@ -393,7 +416,7 @@ from frame_timing_agent import (
     StrategyRequest,
     ValidationResult,
     analyze_frames,
-    apply_strategy,
+    apply_validated_strategy,
     capabilities,
     plan_strategy,
     validate_strategy,
@@ -402,6 +425,8 @@ from frame_timing_agent import (
 ```
 
 `__init__.py` 只导出以上契约，不导出 OpenCV 或内部算法函数。
+
+这些名称只代表 v3 Agent-safe API。legacy `run_timing_agent()`、`run_batch_timing_agent()` 和 v2 `apply_strategy()` 继续从原模块导入，不提升为新的包根稳定接口，也不与 v3 函数共用名称。
 
 ### 7.2 JSON CLI
 
@@ -533,14 +558,18 @@ git add scripts/frame_timing_agent/contracts.py scripts/frame_timing_agent/confi
 git commit -m "feat: add strict agent-facing contracts"
 ```
 
-### Task 3: 实现可靠的相机运动模型
+### Task 3: 实现可靠的相机运动与分析模型
 
 **Files:**
 - Create: `scripts/frame_timing_agent/motion_model.py`
+- Create: `scripts/frame_timing_agent/analysis.py`
 - Create: `tests/test_motion_model.py`
+- Create: `tests/test_analysis.py`
 - Create: `tests/fixtures/generate_motion_sequences.py`
+- Modify: `scripts/frame_timing_agent/contracts.py`
+- Modify: `tests/test_contracts.py`
 
-Task 3 只负责图像运动估计和轨迹分解。它不得读取 `PolicyName`、`ResolvedStrategyConfig`、保留率、连续丢帧限制或 legacy override，也不得选择或删除输出帧。
+Task 3 只负责图像运动估计、轨迹分解和无策略的分析结果组装。它不得读取 `PolicyName`、`ResolvedStrategyConfig`、保留率、连续丢帧限制或 legacy override，也不得选择或删除输出帧。
 
 - [ ] **Step 1: 生成确定性合成序列**
 
@@ -566,13 +595,21 @@ Task 3 只负责图像运动估计和轨迹分解。它不得读取 `PolicyName`
 
 所有窗口长度根据 fps 和帧数计算并限制为奇数；短序列走明确分支，不允许空切片或除零。
 
-- [ ] **Step 6: 验证并提交**
+- [ ] **Step 6: 为无策略分析组合写失败测试**
+
+在 `contracts.py` 增加 5.3 节定义的冻结分析契约。测试 `analyze_records(records: Sequence[FrameRecord], fps: float, motion_config: MotionConfig) -> AnalysisResult` 将现有清晰度、亮度、对比度指标和 `MotionSample` 一一按 `source_index` 合并；输入顺序不稳定时输出必须按源编号排序，重复源编号、尺寸不一致、非法 fps 和运动结果缺失必须返回稳定错误，且不得创建策略或输出帧。
+
+- [ ] **Step 7: 实现纯分析组合层**
+
+`analysis.py` 只调用 `timing_metrics.py` 和 `motion_model.py` 并构造 `AnalysisResult`，不读取 `PolicyName`、`ResolvedStrategyConfig` 或 legacy override，不写文件。路径加载、JSON 落盘和 artifact root 校验留给 Task 6 的 service 边界。
+
+- [ ] **Step 8: 验证并提交**
 
 ```powershell
-python -m pytest tests/test_motion_model.py -v
-python -m ruff check scripts/frame_timing_agent/motion_model.py tests/test_motion_model.py tests/fixtures/generate_motion_sequences.py
-python -m mypy scripts/frame_timing_agent/motion_model.py
-git add scripts/frame_timing_agent/motion_model.py tests/test_motion_model.py tests/fixtures/generate_motion_sequences.py
+python -m pytest tests/test_motion_model.py tests/test_analysis.py tests/test_contracts.py -v
+python -m ruff check scripts/frame_timing_agent/motion_model.py scripts/frame_timing_agent/analysis.py tests/test_motion_model.py tests/test_analysis.py tests/fixtures/generate_motion_sequences.py
+python -m mypy scripts/frame_timing_agent/motion_model.py scripts/frame_timing_agent/analysis.py scripts/frame_timing_agent/contracts.py
+git add scripts/frame_timing_agent/motion_model.py scripts/frame_timing_agent/analysis.py scripts/frame_timing_agent/contracts.py tests/test_motion_model.py tests/test_analysis.py tests/test_contracts.py tests/fixtures/generate_motion_sequences.py
 git commit -m "feat: estimate confidence-aware camera trajectories"
 ```
 
@@ -581,7 +618,8 @@ git commit -m "feat: estimate confidence-aware camera trajectories"
 **Files:**
 - Create: `scripts/frame_timing_agent/strategy_planner.py`
 - Create: `tests/test_strategy_planner.py`
-- Modify: `scripts/frame_timing_agent/timing_metrics.py`
+- Modify: `scripts/frame_timing_agent/contracts.py`
+- Modify: `tests/test_contracts.py`
 
 - [ ] **Step 1: 为三种预设写失败测试**
 
@@ -602,9 +640,9 @@ git commit -m "feat: estimate confidence-aware camera trajectories"
 - [ ] **Step 5: 验证并提交**
 
 ```powershell
-python -m pytest tests/test_strategy_planner.py -v
-python -m ruff check scripts/frame_timing_agent/strategy_planner.py tests/test_strategy_planner.py
-git add scripts/frame_timing_agent/strategy_planner.py scripts/frame_timing_agent/timing_metrics.py tests/test_strategy_planner.py
+python -m pytest tests/test_strategy_planner.py tests/test_contracts.py -v
+python -m ruff check scripts/frame_timing_agent/strategy_planner.py scripts/frame_timing_agent/contracts.py tests/test_strategy_planner.py
+git add scripts/frame_timing_agent/strategy_planner.py scripts/frame_timing_agent/contracts.py tests/test_strategy_planner.py tests/test_contracts.py
 git commit -m "feat: plan reconstruction-safe frame candidates"
 ```
 
@@ -613,7 +651,9 @@ git commit -m "feat: plan reconstruction-safe frame candidates"
 **Files:**
 - Create: `scripts/frame_timing_agent/strategy_validator.py`
 - Create: `tests/test_strategy_validator.py`
+- Modify: `scripts/frame_timing_agent/contracts.py`
 - Modify: `scripts/frame_timing_agent/apply_frame_strategy.py`
+- Modify: `tests/test_contracts.py`
 
 - [ ] **Step 1: 为每条硬约束写失败测试**
 
@@ -625,16 +665,18 @@ git commit -m "feat: plan reconstruction-safe frame candidates"
 
 错误必须有稳定机器码；警告不能替代错误。验证器不得自动篡改候选，规划器需要根据问题重新生成方案。
 
-- [ ] **Step 3: 给执行器增加验证令牌**
+- [ ] **Step 3: 增加独立的已验证执行入口**
 
-执行前重新计算输入摘要，并验证 `strategy_id`。直接传入未验证 dict 的旧 API 标记弃用，但 v0.3.0 内继续支持 v2 历史策略读取。
+新增精确公开签名 `apply_validated_strategy(analysis: AnalysisResult, candidate: StrategyCandidate, validation: ValidationResult, output_dir: Path) -> ExecutionResult`。执行前重新计算输入摘要，验证 `strategy_id`，并拒绝不属于该候选或含错误项的验证结果。v3 service 只能调用该函数。
+
+现有接收 v2 strategy dict 的 `apply_strategy()` 保持名称、签名和行为，供 legacy facade 与历史策略使用；不得用 `if validation is None` 之类的可选参数把 v2/v3 合并成一个函数。弃用和移除 legacy 执行入口留给完成真实迁移后的主版本。
 
 - [ ] **Step 4: 验证并提交**
 
 ```powershell
-python -m pytest tests/test_strategy_validator.py tests/test_apply_frame_strategy.py -v
-python -m mypy scripts/frame_timing_agent/strategy_validator.py scripts/frame_timing_agent/apply_frame_strategy.py
-git add scripts/frame_timing_agent/strategy_validator.py scripts/frame_timing_agent/apply_frame_strategy.py tests/test_strategy_validator.py tests/test_apply_frame_strategy.py
+python -m pytest tests/test_strategy_validator.py tests/test_apply_frame_strategy.py tests/test_contracts.py -v
+python -m mypy scripts/frame_timing_agent/contracts.py scripts/frame_timing_agent/strategy_validator.py scripts/frame_timing_agent/apply_frame_strategy.py
+git add scripts/frame_timing_agent/contracts.py scripts/frame_timing_agent/strategy_validator.py scripts/frame_timing_agent/apply_frame_strategy.py tests/test_strategy_validator.py tests/test_apply_frame_strategy.py tests/test_contracts.py
 git commit -m "feat: enforce strategy safety before execution"
 ```
 
@@ -644,27 +686,30 @@ git commit -m "feat: enforce strategy safety before execution"
 - Create: `scripts/frame_timing_agent/service.py`
 - Create: `tests/test_service.py`
 - Modify: `scripts/frame_timing_agent/__init__.py`
-- Modify: `scripts/frame_timing_agent/auto_timing_agent.py`
-- Modify: `scripts/frame_timing_agent/batch_timing_agent.py`
+- Modify: `tests/test_auto_timing_agent.py`
+- Modify: `tests/test_batch_timing_agent.py`
+- Modify: `tests/test_simple_cli.py`
 
 - [ ] **Step 1: 为 analyze/plan/validate/apply/verify 生命周期写失败测试**
 
-测试新服务入口执行 `parse_strategy_request → resolve_strategy_request → analyze → plan → validate → apply → verify`；分析阶段不创建 `output_frames`，验证失败不能执行，输入变化后执行失败，成功执行后健康检查通过，重复执行结果可复现。新服务入口不得接受 `override_config_path` 或任意底层参数 dict。
+测试新服务入口执行 `StrategyRequest → resolve_strategy_request → analyze → plan → validate → apply_validated_strategy → verify`；分析阶段不创建 `output_frames`，验证失败不能执行，输入变化后执行失败，成功执行后健康检查通过，重复执行结果可复现。Python service 只接收已经构造并自校验的 `StrategyRequest`，不得接受 `override_config_path` 或任意底层参数 dict；JSON 到 `StrategyRequest` 的严格解析属于 Task 7 CLI 适配层。
 
 - [ ] **Step 2: 实现无状态 service 函数**
 
-每个阶段只依赖显式输入和文件产物；不使用模块级可变状态。Agent-safe 服务先把 `StrategyRequest` 解析为 `ResolvedStrategyConfig`，随后只在规划器和验证器之间传递该类型。分析、计划和验证 JSON 使用原子写入：先写同目录临时文件，再 `replace()`。
+每个阶段只依赖显式输入和文件产物；不使用模块级可变状态。Agent-safe 服务通过 `resolve_strategy_request()` 将已校验的 `StrategyRequest` 解析为 `ResolvedStrategyConfig`，随后在规划器和验证器中传递该类型。分析、计划和验证 JSON 使用原子写入：先写同目录临时文件，再 `replace()`。`service.py` 不导入 `auto_timing_agent.py`、`batch_timing_agent.py` 或 `simple_cli.py`。
 
-- [ ] **Step 3: 将旧 facade 转调 service**
+- [ ] **Step 3: 锁定 v2/v3 隔离边界**
 
-不带 raw override 的 `run_timing_agent()` 和 `run_batch_timing_agent()` 映射到 `coverage_first` 并转调新服务。带 `override_config_path` 的调用暂时保留在隔离的 legacy v2 路径并记录弃用警告，不进入 Agent-safe 服务，也不得由新 JSON CLI 暴露。v0.3.0 文档必须明确区分两条路径；移除 legacy override 留给后续主版本。
+不修改 `auto_timing_agent.py`、`batch_timing_agent.py` 或 `simple_cli.py` 的生产代码。兼容测试锁定以下事实：旧函数签名继续接受 `override_config_path`；无 override 和有 override 的调用都生成 v2 strategy；现有一条命令入口继续生成 v2 产物；legacy 入口不暴露 `PolicyName` 或 `StrategyRequest`。新 service 的公开签名不接受 legacy `mode`、`override_config_path` 或 raw dict。
+
+不得根据 `override_config_path is None`、环境变量、产物目录是否存在或调用来源来选择引擎。未来迁移旧 facade 时必须新增显式版本计划、行为对比和弃用周期，不能在本任务内顺带完成。
 
 - [ ] **Step 4: 验证并提交**
 
 ```powershell
-python -m pytest tests/test_service.py tests/test_auto_timing_agent.py tests/test_batch_timing_agent.py -v
+python -m pytest tests/test_service.py tests/test_auto_timing_agent.py tests/test_batch_timing_agent.py tests/test_simple_cli.py -v
 python -m mypy scripts/frame_timing_agent/service.py
-git add scripts/frame_timing_agent/service.py scripts/frame_timing_agent/__init__.py scripts/frame_timing_agent/auto_timing_agent.py scripts/frame_timing_agent/batch_timing_agent.py tests/test_service.py tests/test_auto_timing_agent.py tests/test_batch_timing_agent.py
+git add scripts/frame_timing_agent/service.py scripts/frame_timing_agent/__init__.py tests/test_service.py tests/test_auto_timing_agent.py tests/test_batch_timing_agent.py tests/test_simple_cli.py
 git commit -m "feat: expose staged frame timing service"
 ```
 
@@ -681,7 +726,7 @@ git commit -m "feat: expose staged frame timing service"
 
 - [ ] **Step 2: 实现薄 CLI 适配层**
 
-CLI 只解析参数、调用 service、序列化结果和映射退出码。不得复制分析、规划或验证逻辑。
+CLI 只解析参数和 JSON（使用 `parse_strategy_request()`）、调用 service、序列化结果和映射退出码。不得复制配置约束、分析、规划或验证逻辑。
 
 - [ ] **Step 3: 注册命令**
 
@@ -772,6 +817,8 @@ frame-timing-tool validate --analysis "output/benchmark/test3_cut2/analysis.json
 
 已确认的慢速运动误判静止数必须为 0；验证器违规漏过数必须为 0；所有高风险策略必须要求人工确认。算法效果不满足门槛时不发布 v0.3.0，也不得修改期望结果来迁就实现。
 
+通过这些门槛只允许发布独立的 v3 Agent-safe API/CLI，不自动授权迁移 legacy facade 或 `frame-timing` 默认入口。旧入口迁移需基于本次 benchmark 结果另立计划和版本。
+
 - [ ] **Step 5: 提交 benchmark 工具和格式，不提交私有数据**
 
 ```powershell
@@ -797,7 +844,7 @@ git commit -m "test: add external frame timing benchmark protocol"
 
 - [ ] **Step 2: 更新用户文档**
 
-README 保持两类用户：普通用户使用一条默认命令，开发者查看 Python API 与 Agent JSON CLI。明确本工具做帧选择而非像素修复。
+README 保持两类用户：普通用户的一条默认命令明确标记为 legacy v2 兼容入口；Agent 和开发者使用独立的 v3 Python API 与 JSON CLI。明确本工具做帧选择而非像素修复，也不得把 v2 一条命令描述成 Agent-safe v3。
 
 - [ ] **Step 3: 更新 Skill 工作流**
 
@@ -805,7 +852,7 @@ README 保持两类用户：普通用户使用一条默认命令，开发者查�
 
 - [ ] **Step 4: 编写迁移文档**
 
-说明 v2 兼容范围、v3 不再默认复制帧、旧 override 如何映射、Agent 应如何固定包版本和如何回滚。
+说明 v2 兼容范围、v3 不再生成重复帧、旧 override 不映射到 v3 且只能由 legacy 入口读取、Agent 应如何固定包版本和如何回滚。文档必须明确：v0.3.0 不迁移旧 facade；未来迁移需要显式选择新入口、弃用周期和真实样本对比，不允许按 override 是否存在隐式路由。
 
 - [ ] **Step 5: 验证并提交**
 
@@ -902,7 +949,7 @@ git push origin v0.3.0
 
 - [ ] **Step 5: GitHub Release 内容**
 
-Release 必须说明 Agent-safe 五阶段接口、三种策略、运动模型升级、覆盖保护、v2 兼容范围、已知限制和验证命令。不得宣称实现像素去抖、去模糊或保证建模质量。
+Release 必须说明 Agent-safe 五阶段接口、三种策略、运动模型升级、覆盖保护、v2 兼容范围、两条入口不会自动互相迁移、已知限制和验证命令。不得宣称实现像素去抖、去模糊或保证建模质量。
 
 ## 9. 测试矩阵
 
@@ -912,7 +959,7 @@ Release 必须说明 Agent-safe 五阶段接口、三种策略、运动模型升
 | 合成算法 | 静止、慢速平移、振荡、旋转、主动转向、低纹理、模糊 |
 | 集成 | analyze-plan-validate-apply-verify 完整生命周期 |
 | CLI | JSON、退出码、stderr、安装后命令、跨平台路径 |
-| 兼容 | v2 策略读取、旧 Python facade、原一条命令入口 |
+| 兼容 | v2 策略读取、旧 Python facade、原一条命令入口均保持 v2；v3 入口不接受 override |
 | 安全 | 路径越界、输入变化、恶意 JSON、未知字段、非有限数值 |
 | 产物 | 哈希、数量、间隔、相对路径、无分析文件混入输出 |
 | 真实回归 | 五类人工标注片段和已知 570 帧案例 |
@@ -968,7 +1015,8 @@ Release 必须说明 Agent-safe 五阶段接口、三种策略、运动模型升
 ## 12. 回滚策略
 
 - 每个阶段独立提交，主分支合并前可逐任务审查。
-- v0.3.0 保留 v2 策略读取能力，但默认生成 v3。
+- v0.3.0 同时提供相互隔离的两条路径：新增 Agent-safe API/CLI 只生成 v3；旧 Python facade、批处理和一条命令入口继续生成 v2。
+- 不存在跨项目统一的“默认版本”：调用哪个显式入口就使用哪个契约，禁止根据可选参数隐式选择引擎。
 - Agent 项目固定依赖精确版本；出现回归时回退到上一已验证版本。
 - 每次运行使用独立 `output/<run_id>`，不得覆盖输入或旧结果。
 - 策略、输入摘要、验证结果和输出审计一起保存，支持复现。
@@ -978,7 +1026,7 @@ Release 必须说明 Agent-safe 五阶段接口、三种策略、运动模型升
 
 只有同时满足以下条件，才可以认为 Agent-ready 工作完成：
 
-- 五阶段 Python API 和 JSON CLI 均可从安装后的 wheel 调用。
+- 五阶段 v3 Python API 和 JSON CLI 均可从安装后的 wheel 调用，且与 legacy v2 入口命名和依赖隔离。
 - LLM 无法通过公共接口提交越界参数或绕过验证。
 - 三种策略都有稳定契约、解释、风险和覆盖约束。
 - 慢速平移回归案例不再被静止压缩。
