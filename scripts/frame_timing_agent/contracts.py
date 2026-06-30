@@ -4,8 +4,10 @@ import math
 from dataclasses import dataclass
 from enum import Enum
 
+# Schema versions are enforced at JSON boundaries, not stored on in-memory requests.
 SCHEMA_VERSION = 3
 MAXIMUM_CONSECUTIVE_DROPS = 7
+RETENTION_RATIO_ERROR_MESSAGE = "minimum_retention_ratio must be a finite number in (0, 1]"
 
 
 class ConfigurationError(ValueError):
@@ -45,7 +47,7 @@ class StrategyRequest:
             value = self.minimum_retention_ratio
             if isinstance(value, bool) or not isinstance(value, (int, float)):
                 raise ConfigurationError(
-                    "minimum_retention_ratio must be a finite number in (0, 1]",
+                    RETENTION_RATIO_ERROR_MESSAGE,
                     code="invalid_value",
                     fields=("minimum_retention_ratio",),
                 )
@@ -53,13 +55,13 @@ class StrategyRequest:
                 normalized_value = float(value)
             except (OverflowError, ValueError) as exc:
                 raise ConfigurationError(
-                    "minimum_retention_ratio must be a finite number in (0, 1]",
+                    RETENTION_RATIO_ERROR_MESSAGE,
                     code="invalid_value",
                     fields=("minimum_retention_ratio",),
                 ) from exc
             if not math.isfinite(normalized_value) or not 0 < normalized_value <= 1:
                 raise ConfigurationError(
-                    "minimum_retention_ratio must be a finite number in (0, 1]",
+                    RETENTION_RATIO_ERROR_MESSAGE,
                     code="invalid_value",
                     fields=("minimum_retention_ratio",),
                 )

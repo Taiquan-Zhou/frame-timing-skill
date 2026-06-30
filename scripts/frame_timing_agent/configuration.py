@@ -6,6 +6,7 @@ from types import MappingProxyType
 
 from frame_timing_agent.contracts import (
     MAXIMUM_CONSECUTIVE_DROPS,
+    RETENTION_RATIO_ERROR_MESSAGE,
     SCHEMA_VERSION,
     ConfigurationError,
     PolicyName,
@@ -13,6 +14,8 @@ from frame_timing_agent.contracts import (
 )
 
 _REQUIRED_FIELDS = frozenset({"schema_version", "policy"})
+_POLICY_OPTIONS = ", ".join(policy.value for policy in PolicyName)
+_POLICY_ERROR_MESSAGE = f"policy must be one of: {_POLICY_OPTIONS}"
 _ALLOWED_FIELDS = frozenset(
     {
         "schema_version",
@@ -25,6 +28,8 @@ _ALLOWED_FIELDS = frozenset(
 
 @dataclass(frozen=True)
 class PolicyPreset:
+    """Built-in safety defaults for one policy."""
+
     policy: PolicyName
     minimum_retention_ratio: float
     maximum_consecutive_drops: int
@@ -32,6 +37,8 @@ class PolicyPreset:
 
 @dataclass(frozen=True)
 class ResolvedStrategyConfig:
+    """Concrete safety constraints after applying and validating overrides."""
+
     policy: PolicyName
     minimum_retention_ratio: float
     maximum_consecutive_drops: int
@@ -84,7 +91,7 @@ def parse_strategy_request(data: object) -> StrategyRequest:
     raw_policy = fields["policy"]
     if not isinstance(raw_policy, str):
         raise ConfigurationError(
-            "policy must be one of: coverage_first, balanced, jitter_reduction",
+            _POLICY_ERROR_MESSAGE,
             code="invalid_policy",
             fields=("policy",),
         )
@@ -92,7 +99,7 @@ def parse_strategy_request(data: object) -> StrategyRequest:
         policy = PolicyName(raw_policy)
     except ValueError as exc:
         raise ConfigurationError(
-            "policy must be one of: coverage_first, balanced, jitter_reduction",
+            _POLICY_ERROR_MESSAGE,
             code="invalid_policy",
             fields=("policy",),
         ) from exc
@@ -109,7 +116,7 @@ def _parse_optional_retention_ratio(value: object) -> float | None:
         return None
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ConfigurationError(
-            "minimum_retention_ratio must be a finite number in (0, 1]",
+            RETENTION_RATIO_ERROR_MESSAGE,
             code="invalid_value",
             fields=("minimum_retention_ratio",),
         )
@@ -117,7 +124,7 @@ def _parse_optional_retention_ratio(value: object) -> float | None:
         return float(value)
     except (OverflowError, ValueError) as exc:
         raise ConfigurationError(
-            "minimum_retention_ratio must be a finite number in (0, 1]",
+            RETENTION_RATIO_ERROR_MESSAGE,
             code="invalid_value",
             fields=("minimum_retention_ratio",),
         ) from exc

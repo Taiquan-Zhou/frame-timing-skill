@@ -52,6 +52,9 @@ Agent / Host Project
 capabilities()      查询版本、策略、参数边界和能力限制
         |
         v
+parse + resolve     将 Agent 请求解析为 ResolvedStrategyConfig
+        |
+        v
 analyze_frames()    只分析，不生成建模帧
         |
         v
@@ -537,6 +540,8 @@ git commit -m "feat: add strict agent-facing contracts"
 - Create: `tests/test_motion_model.py`
 - Create: `tests/fixtures/generate_motion_sequences.py`
 
+Task 3 只负责图像运动估计和轨迹分解。它不得读取 `PolicyName`、`ResolvedStrategyConfig`、保留率、连续丢帧限制或 legacy override，也不得选择或删除输出帧。
+
 - [ ] **Step 1: 生成确定性合成序列**
 
 固定随机种子，程序化生成：静止、匀速平移、平移叠加振荡、旋转振荡、主动快速转向、低纹理和模糊突发序列。测试运行时生成到 pytest 临时目录，不提交图片产物。
@@ -580,7 +585,7 @@ git commit -m "feat: estimate confidence-aware camera trajectories"
 
 - [ ] **Step 1: 为三种预设写失败测试**
 
-同一分析结果应生成三个候选；`coverage_first` 保留数不少于 `balanced`，`balanced` 不少于 `jitter_reduction`；候选必须携带指标、原因、风险和置信度。
+对同一分析结果分别传入三种已解析的 `ResolvedStrategyConfig`；`coverage_first` 保留数不少于 `balanced`，`balanced` 不少于 `jitter_reduction`；候选必须携带指标、原因、风险和置信度。
 
 - [ ] **Step 2: 为慢速平移回归写失败测试**
 
@@ -588,11 +593,11 @@ git commit -m "feat: estimate confidence-aware camera trajectories"
 
 - [ ] **Step 3: 为建模覆盖写失败测试**
 
-断言首尾帧保留、无重复、顺序递增、连续丢帧受限；局部低质量帧没有相近替代帧时必须保留。另用天然稀疏源编号输入证明验证器不会把上游采样间隔误判为本阶段连续删帧。
+断言首尾帧保留、无重复、顺序递增、保留率不低于 `minimum_retention_ratio`、连续丢帧不超过 `maximum_consecutive_drops`；局部低质量帧没有相近替代帧时必须保留。另用天然稀疏源编号输入证明规划器不会把上游采样间隔误判为本阶段连续删帧。
 
 - [ ] **Step 4: 实现局部候选选择和评分**
 
-规划器只返回显式 `selected_sources`，v3 不生成 `duplicate_range`。评分由覆盖、残余抖动、质量和置信度组成，并在输出中分别报告，不使用一个无法解释的总分替代各指标。
+精确公开签名为 `plan_strategy(analysis: AnalysisResult, config: ResolvedStrategyConfig) -> StrategyCandidate`。规划器直接消费类型化安全约束，不把它们翻译成 legacy engine config dict。它只返回显式 `selected_sources`，v3 不生成 `duplicate_range`。评分由覆盖、残余抖动、质量和置信度组成，并在输出中分别报告，不使用一个无法解释的总分替代各指标。
 
 - [ ] **Step 5: 验证并提交**
 
@@ -616,7 +621,7 @@ git commit -m "feat: plan reconstruction-safe frame candidates"
 
 - [ ] **Step 2: 实现统一验证器**
 
-精确公开签名为 `validate_strategy(analysis: AnalysisResult, candidate: StrategyCandidate, request: StrategyRequest) -> ValidationResult`。
+精确公开签名为 `validate_strategy(analysis: AnalysisResult, candidate: StrategyCandidate, config: ResolvedStrategyConfig) -> ValidationResult`。验证器必须独立重算保留率和最大连续丢帧数，不能只信任规划器写入候选的汇总字段。
 
 错误必须有稳定机器码；警告不能替代错误。验证器不得自动篡改候选，规划器需要根据问题重新生成方案。
 
@@ -644,15 +649,15 @@ git commit -m "feat: enforce strategy safety before execution"
 
 - [ ] **Step 1: 为 analyze/plan/validate/apply/verify 生命周期写失败测试**
 
-测试分析阶段不创建 `output_frames`，验证失败不能执行，输入变化后执行失败，成功执行后健康检查通过，重复执行结果可复现。
+测试新服务入口执行 `parse_strategy_request → resolve_strategy_request → analyze → plan → validate → apply → verify`；分析阶段不创建 `output_frames`，验证失败不能执行，输入变化后执行失败，成功执行后健康检查通过，重复执行结果可复现。新服务入口不得接受 `override_config_path` 或任意底层参数 dict。
 
 - [ ] **Step 2: 实现无状态 service 函数**
 
-每个阶段只依赖显式输入和文件产物；不使用模块级可变状态。分析、计划和验证 JSON 使用原子写入：先写同目录临时文件，再 `replace()`。
+每个阶段只依赖显式输入和文件产物；不使用模块级可变状态。Agent-safe 服务先把 `StrategyRequest` 解析为 `ResolvedStrategyConfig`，随后只在规划器和验证器之间传递该类型。分析、计划和验证 JSON 使用原子写入：先写同目录临时文件，再 `replace()`。
 
 - [ ] **Step 3: 将旧 facade 转调 service**
 
-`run_timing_agent()` 和 `run_batch_timing_agent()` 保持现有调用可用，但内部使用新流程。旧参数映射到 `coverage_first`，并在结果报告记录兼容调用来源。
+不带 raw override 的 `run_timing_agent()` 和 `run_batch_timing_agent()` 映射到 `coverage_first` 并转调新服务。带 `override_config_path` 的调用暂时保留在隔离的 legacy v2 路径并记录弃用警告，不进入 Agent-safe 服务，也不得由新 JSON CLI 暴露。v0.3.0 文档必须明确区分两条路径；移除 legacy override 留给后续主版本。
 
 - [ ] **Step 4: 验证并提交**
 
