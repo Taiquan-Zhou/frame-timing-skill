@@ -1,0 +1,161 @@
+from __future__ import annotations
+
+from collections.abc import Mapping
+from dataclasses import dataclass
+from types import MappingProxyType
+
+from frame_timing_agent.contracts import SCHEMA_VERSION, ConfigurationError, PolicyName, StrategyRequest
+
+_REQUIRED_FIELDS = frozenset({"schema_version", "policy"})
+_ALLOWED_FIELDS = frozenset(
+    {
+        "schema_version",
+        "policy",
+        "minimum_retention_ratio",
+        "maximum_consecutive_drops",
+    }
+)
+
+
+@dataclass(frozen=True)
+class PolicyPreset:
+    policy: PolicyName
+    minimum_retention_ratio: float
+    maximum_consecutive_drops: int
+
+
+@dataclass(frozen=True)
+class ResolvedStrategyConfig:
+    policy: PolicyName
+    minimum_retention_ratio: float
+    maximum_consecutive_drops: int
+
+
+_POLICY_PRESETS: Mapping[PolicyName, PolicyPreset] = MappingProxyType(
+    {
+        PolicyName.COVERAGE_FIRST: PolicyPreset(PolicyName.COVERAGE_FIRST, 0.85, 2),
+        PolicyName.BALANCED: PolicyPreset(PolicyName.BALANCED, 0.65, 4),
+        PolicyName.JITTER_REDUCTION: PolicyPreset(PolicyName.JITTER_REDUCTION, 0.45, 7),
+    }
+)
+
+
+def parse_strategy_request(data: object) -> StrategyRequest:
+    if not isinstance(data, Mapping):
+        raise ConfigurationError("strategy request must be an object", code="invalid_request_type")
+    fields: dict[str, object] = {}
+    for key, value in data.items():
+        if not isinstance(key, str):
+            raise ConfigurationError("strategy request field names must be strings", code="invalid_field_name")
+        fields[key] = value
+
+    unknown_fields = set(fields) - _ALLOWED_FIELDS
+    if unknown_fields:
+        names = ", ".join(sorted(unknown_fields))
+        raise ConfigurationError(
+            f"unknown strategy request field: {names}",
+            code="unknown_field",
+            fields=tuple(sorted(unknown_fields)),
+        )
+
+    missing_fields = _REQUIRED_FIELDS - set(fields)
+    if missing_fields:
+        names = ", ".join(sorted(missing_fields))
+        raise ConfigurationError(
+            f"missing strategy request field: {names}",
+            code="missing_field",
+            fields=tuple(sorted(missing_fields)),
+        )
+
+    schema_version = fields["schema_version"]
+    if isinstance(schema_version, bool) or not isinstance(schema_version, int) or schema_version != SCHEMA_VERSION:
+        raise ConfigurationError(
+            f"schema_version must be {SCHEMA_VERSION}",
+            code="unsupported_schema_version",
+            fields=("schema_version",),
+        )
+
+    raw_policy = fields["policy"]
+    if not isinstance(raw_policy, str):
+        raise ConfigurationError(
+            "policy must be one of: coverage_first, balanced, jitter_reduction",
+            code="invalid_policy",
+            fields=("policy",),
+        )
+    try:
+        policy = PolicyName(raw_policy)
+    except ValueError as exc:
+        raise ConfigurationError(
+            "policy must be one of: coverage_first, balanced, jitter_reduction",
+            code="invalid_policy",
+            fields=("policy",),
+        ) from exc
+
+    return StrategyRequest(
+        policy=policy,
+        minimum_retention_ratio=_parse_optional_retention_ratio(fields.get("minimum_retention_ratio")),
+        maximum_consecutive_drops=_parse_optional_consecutive_drops(fields.get("maximum_consecutive_drops")),
+    )
+
+
+def _parse_optional_retention_ratio(value: object) -> float | None:
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ConfigurationError(
+            "minimum_retention_ratio must be a finite number in (0, 1]",
+            code="invalid_value",
+            fields=("minimum_retention_ratio",),
+        )
+    try:
+        return float(value)
+    except (OverflowError, ValueError) as exc:
+        raise ConfigurationError(
+            "minimum_retention_ratio must be a finite number in (0, 1]",
+            code="invalid_value",
+            fields=("minimum_retention_ratio",),
+        ) from exc
+
+
+def _parse_optional_consecutive_drops(value: object) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ConfigurationError(
+            "maximum_consecutive_drops must be a non-negative integer",
+            code="invalid_value",
+            fields=("maximum_consecutive_drops",),
+        )
+    return value
+
+
+def resolve_strategy_request(request: StrategyRequest) -> ResolvedStrategyConfig:
+    if not isinstance(request, StrategyRequest):
+        raise ConfigurationError("request must be a StrategyRequest", code="invalid_request_type")
+    preset = _POLICY_PRESETS[request.policy]
+
+    minimum_retention_ratio = request.minimum_retention_ratio
+    if minimum_retention_ratio is None:
+        minimum_retention_ratio = preset.minimum_retention_ratio
+    elif minimum_retention_ratio < preset.minimum_retention_ratio:
+        raise ConfigurationError(
+            f"minimum_retention_ratio is weaker than the policy safety limit {preset.minimum_retention_ratio}",
+            code="unsafe_override",
+            fields=("minimum_retention_ratio",),
+        )
+
+    maximum_consecutive_drops = request.maximum_consecutive_drops
+    if maximum_consecutive_drops is None:
+        maximum_consecutive_drops = preset.maximum_consecutive_drops
+    elif maximum_consecutive_drops > preset.maximum_consecutive_drops:
+        raise ConfigurationError(
+            f"maximum_consecutive_drops is weaker than the policy safety limit {preset.maximum_consecutive_drops}",
+            code="unsafe_override",
+            fields=("maximum_consecutive_drops",),
+        )
+
+    return ResolvedStrategyConfig(
+        policy=request.policy,
+        minimum_retention_ratio=minimum_retention_ratio,
+        maximum_consecutive_drops=maximum_consecutive_drops,
+    )

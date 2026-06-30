@@ -499,29 +499,29 @@ git commit -m "chore: establish agent readiness quality gates"
 - Create: `tests/test_configuration.py`
 - Modify: `scripts/frame_timing_agent/__init__.py`
 
-- [ ] **Step 1: 为枚举、JSON 往返和不可变性写失败测试**
+- [x] **Step 1: 为枚举、JSON 往返和不可变性写失败测试**
 
 覆盖三种 `PolicyName`、稳定 `schema_version=3`、未知字段拒绝、缺失必填字段、非有限浮点数和序列化顺序。
 
-- [ ] **Step 2: 为配置边界和交叉约束写失败测试**
+- [x] **Step 2: 为配置边界和交叉约束写失败测试**
 
 至少覆盖：保留率不在 `(0, 1]`、连续丢帧上限小于 0、尝试提交 `preserve_endpoints` 或 `allow_low_confidence_removal` 等禁止字段、未知策略名称和宽松参数超过预设安全边界。
 
-- [ ] **Step 3: 运行测试确认失败**
+- [x] **Step 3: 运行测试确认失败**
 
 ```powershell
 python -m pytest tests/test_contracts.py tests/test_configuration.py -v
 ```
 
-- [ ] **Step 4: 实现最小契约和严格解析器**
+- [x] **Step 4: 实现最小契约和严格解析器**
 
 解析器必须显式比较输入键集合，错误信息包含字段名和允许范围；不得使用 `dict.update()` 静默接收未知参数。
 
-- [ ] **Step 5: 从包根导出稳定 API 类型**
+- [x] **Step 5: 从包根导出稳定 API 类型**
 
 `__all__` 只包含公开契约和后续 service 函数，内部模块保持私有实现状态。
 
-- [ ] **Step 6: 验证并提交**
+- [x] **Step 6: 验证并提交**
 
 ```powershell
 python -m pytest tests/test_contracts.py tests/test_configuration.py -v
