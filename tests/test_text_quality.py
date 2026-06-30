@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+from dataclasses import fields
 from pathlib import Path
 
 import pytest
-
+from frame_timing_agent.batch_timing_agent import BatchTimingResult
 
 ROOT = Path(__file__).resolve().parents[1]
+# Regression guard for previously observed UTF-8/GBK mojibake, not a general encoding detector.
 KNOWN_MOJIBAKE_SAMPLES = (
     "闃舵",
     "鏂囨。",
@@ -53,9 +55,9 @@ def test_normal_english_and_chinese_are_not_flagged(text: str) -> None:
 
 def test_usage_reference_names_real_batch_result_fields() -> None:
     usage = (ROOT / "references" / "usage.md").read_text(encoding="utf-8")
+    result_fields = {field.name for field in fields(BatchTimingResult)}
 
     assert "result.batch_report" not in usage
-    assert "result.summary_json_path" in usage
-    assert "result.summary_csv_path" in usage
-    assert "result.review_dashboard_path" in usage
-    assert "result.items" in usage
+    for field_name in ("summary_json_path", "summary_csv_path", "review_dashboard_path", "items"):
+        assert field_name in result_fields
+        assert f"result.{field_name}" in usage

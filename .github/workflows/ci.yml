@@ -23,9 +23,10 @@ jobs:
         run: python -m pip install . "pytest>=8,<10" "build>=1.2,<2" "ruff>=0.8,<1"
 
       - name: Check Python correctness
-        run: |
-          python -m ruff check scripts tests
-          python -m ruff format --check tests/test_text_quality.py
+        run: python -m ruff check scripts tests
+
+      - name: Check quality test formatting
+        run: python -m ruff format --check tests/test_text_quality.py
 
       - name: Run tests
         run: python -m pytest
@@ -38,6 +39,7 @@ jobs:
         run: |
           $dist = Join-Path $env:RUNNER_TEMP "dist-audit"
           python -m build --outdir $dist
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $env:DIST_AUDIT_DIR = $dist
           @'
           import os
@@ -70,6 +72,7 @@ jobs:
               if bad:
                   raise SystemExit(f"{archive.name} contains non-release files: {bad}")
           '@ | python -
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Validate skill metadata
         shell: pwsh
@@ -96,6 +99,10 @@ jobs:
           New-Item -ItemType Directory -Force -Path $hostDir | Out-Null
           Set-Location $hostDir
           python -m pip install $source
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           frame-timing-demo --output_dir output\demo_frames\sample --count 12
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           frame-timing output\demo_frames\sample --artifact_root output\ci_demo --limit_first_n 12
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           frame-timing-health --artifact_root output\ci_demo
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

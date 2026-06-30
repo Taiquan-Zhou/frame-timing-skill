@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import math
 
 import pytest
@@ -36,7 +37,7 @@ def test_parse_strategy_request_round_trips_serialized_contract() -> None:
         maximum_consecutive_drops=2,
     )
 
-    parsed = parse_strategy_request(original.to_dict())
+    parsed = parse_strategy_request(json.loads(json.dumps(original.to_dict())))
 
     assert parsed == original
 
@@ -130,6 +131,51 @@ def test_configuration_errors_expose_machine_readable_metadata() -> None:
 
 
 @pytest.mark.parametrize(
+    ("payload", "code", "fields"),
+    [
+        (None, "invalid_request_type", ()),
+        ({1: "invalid"}, "invalid_field_name", ()),
+        (
+            {"schema_version": 3, "policy": "coverage_first", "unexpected": True},
+            "unknown_field",
+            ("unexpected",),
+        ),
+        ({"schema_version": 3}, "missing_field", ("policy",)),
+        ({"schema_version": 2, "policy": "coverage_first"}, "unsupported_schema_version", ("schema_version",)),
+        ({"schema_version": 3, "policy": "unknown"}, "invalid_policy", ("policy",)),
+        (
+            {"schema_version": 3, "policy": "coverage_first", "minimum_retention_ratio": True},
+            "invalid_value",
+            ("minimum_retention_ratio",),
+        ),
+    ],
+)
+def test_configuration_error_codes_cover_public_parse_failures(
+    payload: object,
+    code: str,
+    fields: tuple[str, ...],
+) -> None:
+    from frame_timing_agent import ConfigurationError
+
+    with pytest.raises(ConfigurationError) as captured:
+        parse_strategy_request(payload)
+
+    assert captured.value.code == code
+    assert captured.value.fields == fields
+
+
+def test_consecutive_drop_type_error_describes_global_range() -> None:
+    with pytest.raises(ValueError, match=r"\[0, 7\]"):
+        parse_strategy_request(
+            {
+                "schema_version": 3,
+                "policy": "coverage_first",
+                "maximum_consecutive_drops": 1.5,
+            }
+        )
+
+
+@pytest.mark.parametrize(
     "payload",
     [
         {"schema_version": 3, "policy": "coverage_first", "minimum_retention_ratio": 0.84},
@@ -160,3 +206,15 @@ def test_resolve_accepts_more_conservative_overrides() -> None:
 
     assert resolved.minimum_retention_ratio == 0.9
     assert resolved.maximum_consecutive_drops == 1
+
+
+@pytest.mark.parametrize("policy", list(PolicyName))
+def test_resolve_accepts_overrides_equal_to_policy_limits(policy: PolicyName) -> None:
+    defaults = resolve_strategy_request(StrategyRequest(policy=policy))
+    request = StrategyRequest(
+        policy=policy,
+        minimum_retention_ratio=defaults.minimum_retention_ratio,
+        maximum_consecutive_drops=defaults.maximum_consecutive_drops,
+    )
+
+    assert resolve_strategy_request(request) == defaults

@@ -4,7 +4,13 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
 
-from frame_timing_agent.contracts import SCHEMA_VERSION, ConfigurationError, PolicyName, StrategyRequest
+from frame_timing_agent.contracts import (
+    MAXIMUM_CONSECUTIVE_DROPS,
+    SCHEMA_VERSION,
+    ConfigurationError,
+    PolicyName,
+    StrategyRequest,
+)
 
 _REQUIRED_FIELDS = frozenset({"schema_version", "policy"})
 _ALLOWED_FIELDS = frozenset(
@@ -122,7 +128,7 @@ def _parse_optional_consecutive_drops(value: object) -> int | None:
         return None
     if isinstance(value, bool) or not isinstance(value, int):
         raise ConfigurationError(
-            "maximum_consecutive_drops must be a non-negative integer",
+            f"maximum_consecutive_drops must be an integer in [0, {MAXIMUM_CONSECUTIVE_DROPS}]",
             code="invalid_value",
             fields=("maximum_consecutive_drops",),
         )
