@@ -155,3 +155,23 @@ class AnalysisResult:
     frames: tuple[FrameAnalysis, ...]
     ranges: tuple[AnalysisRange, ...]
     warnings: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class StrategyCandidate:
+    schema_version: int
+    strategy_id: str
+    input_digest: str
+    policy: PolicyName
+    request: StrategyRequest
+    selected_sources: tuple[int, ...]
+    estimated_output_count: int
+    retention_ratio: float
+    maximum_consecutive_drops: int
+    maximum_source_index_gap: int
+    maximum_time_gap_seconds: float
+    estimated_jitter_reduction: float
+    estimated_quality_change: float
+    confidence: float
+    risk_level: RiskLevel
+    reasons: tuple[str, ...]

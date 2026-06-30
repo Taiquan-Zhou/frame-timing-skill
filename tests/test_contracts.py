@@ -6,7 +6,7 @@ from dataclasses import FrozenInstanceError
 import frame_timing_agent
 import pytest
 from frame_timing_agent import PolicyName, RiskLevel, StrategyRequest, ValidationSeverity
-from frame_timing_agent.contracts import AnalysisRange, QualitySummary, TrajectorySummary
+from frame_timing_agent.contracts import AnalysisRange, QualitySummary, StrategyCandidate, TrajectorySummary
 
 
 def test_public_enum_values_are_stable() -> None:
@@ -99,3 +99,31 @@ def test_analysis_summary_contracts_are_frozen() -> None:
         trajectory.fallback_count = 1
     with pytest.raises(FrozenInstanceError):
         analysis_range.kind = "jitter"
+
+
+def test_strategy_candidate_contract_is_frozen() -> None:
+    candidate = StrategyCandidate(
+        schema_version=3,
+        strategy_id="strategy-id",
+        input_digest="sha256:input",
+        policy=PolicyName.BALANCED,
+        request=StrategyRequest(
+            policy=PolicyName.BALANCED,
+            minimum_retention_ratio=0.65,
+            maximum_consecutive_drops=4,
+        ),
+        selected_sources=(0, 2, 4),
+        estimated_output_count=3,
+        retention_ratio=0.6,
+        maximum_consecutive_drops=1,
+        maximum_source_index_gap=2,
+        maximum_time_gap_seconds=0.1,
+        estimated_jitter_reduction=0.5,
+        estimated_quality_change=0.1,
+        confidence=0.9,
+        risk_level=RiskLevel.MEDIUM,
+        reasons=("high_confidence_jitter_removed",),
+    )
+
+    with pytest.raises(FrozenInstanceError):
+        candidate.risk_level = RiskLevel.HIGH
