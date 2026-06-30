@@ -6,6 +6,7 @@ from dataclasses import FrozenInstanceError
 import frame_timing_agent
 import pytest
 from frame_timing_agent import PolicyName, RiskLevel, StrategyRequest, ValidationSeverity
+from frame_timing_agent.contracts import AnalysisRange, QualitySummary, TrajectorySummary
 
 
 def test_public_enum_values_are_stable() -> None:
@@ -85,3 +86,16 @@ def test_package_root_exports_only_task_two_public_contracts() -> None:
     assert required_exports <= set(frame_timing_agent.__all__)
     assert not {"PolicyPreset", "ResolvedStrategyConfig"} & set(frame_timing_agent.__all__)
     assert all(hasattr(frame_timing_agent, name) for name in required_exports)
+
+
+def test_analysis_summary_contracts_are_frozen() -> None:
+    quality = QualitySummary(1.0, 2.0, 3.0, 4.0, 0)
+    trajectory = TrajectorySummary(0.9, 0.01, 0.1, 0, 0, 0)
+    analysis_range = AnalysisRange(0, 3, "active_motion", 0.9, "coherent_active_motion")
+
+    with pytest.raises(FrozenInstanceError):
+        quality.low_quality_count = 1
+    with pytest.raises(FrozenInstanceError):
+        trajectory.fallback_count = 1
+    with pytest.raises(FrozenInstanceError):
+        analysis_range.kind = "jitter"

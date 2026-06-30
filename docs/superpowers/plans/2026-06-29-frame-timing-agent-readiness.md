@@ -114,6 +114,7 @@ LLM 负责解释用户目标、选择预设、比较候选方案和处理人工�
 | `scripts/frame_timing_agent/contracts.py` | 公开枚举、请求、结果、候选方案和验证问题类型 |
 | `scripts/frame_timing_agent/configuration.py` | 策略预设、严格配置解析、边界和交叉字段验证 |
 | `scripts/frame_timing_agent/motion_model.py` | 全局相机变换估计、轨迹构建、置信度和降级路径 |
+| `scripts/frame_timing_agent/trajectory_model.py` | 三尺度轨迹分解、抖动共识和不确定性否决 |
 | `scripts/frame_timing_agent/analysis.py` | 组合现有质量指标与运动模型，生成不含策略决策的 `AnalysisResult` |
 | `scripts/frame_timing_agent/strategy_planner.py` | 从分析结果生成覆盖优先、平衡、去抖候选策略 |
 | `scripts/frame_timing_agent/strategy_validator.py` | 保留率、连续丢帧、端点、范围、重复和摘要校验 |
@@ -371,14 +372,14 @@ class MotionSample:
 
 v0.3.0 的内部默认窗口固定为 `(0.15, 0.35, 0.75)` 秒，`decision_deadband_ratio` 固定为 `0.10`。它们不是 Agent 可调参数，也不得按单个输入搜索最优值；Task 3 合成测试验证基本分离能力，Task 9 真实冒烟集只允许把行为调整得更保守。若这些默认值无法跨验收类型成立，则停止发布并重新设计运动模型，不能针对案例名称或帧区间增加例外。
 
-空间不确定性门禁由已有 RANSAC 阈值派生：`normalized_residual_spatial_iqr > 2 * ransac_reprojection_threshold / analysis_diagonal` 或 `inlier_spatial_coverage < 0.25` 时禁止自动删除。阈值附近同样应用 `decision_deadband_ratio`；门禁只能降低置信度，不能证明画面一定存在或不存在视差。
+空间不确定性门禁由已有 RANSAC 阈值派生：`normalized_residual_spatial_iqr > 2 * ransac_reprojection_threshold / analysis_diagonal`、`normalized_residual_spatial_p90 > 4 * ransac_reprojection_threshold / analysis_diagonal` 或 `inlier_spatial_coverage < 0.25` 时禁止自动删除。阈值附近同样应用 `decision_deadband_ratio`；门禁只能降低置信度，不能证明画面一定存在或不存在视差。
 
 ### 6.2 主动运动与抖动分离
 
 不能再用“低运动等于静止”或“方向反转等于全部抖动”。采用离线轨迹分解：
 
 - 将相邻仿射变换累积为全局轨迹。
-- 使用鲁棒局部中位数消除孤立异常，并分别用短、中、长三个按秒定义的窗口计算中心加权移动平均；窗口根据 fps 转换为奇数帧数并限制在序列长度内。
+- 只对明确低置信度的孤立运动估计使用三点局部中位数替换；高置信度轨迹不得预先中值滤波，以免抹掉真实高频振荡。随后分别用短、中、长三个按秒定义的窗口计算中心加权移动平均；窗口根据 fps 转换为奇数帧数并限制在序列长度内。
 - 分别计算三个尺度下原轨迹相对低频轨迹的高频残差。三个尺度都满足振荡条件时才形成高置信度抖动候选；只有两个尺度同意时生成 `review_required`；其余情况按主动运动或不确定处理并保留。
 - 使用图像对角线归一化平移残差，旋转残差单独归一化。
 - 每个阈值使用显式 deadband；数值落在边界带内时不得删除。抖动分数同时考虑残差速度、残差加速度、方向反转、跨尺度一致性和估计置信度。
@@ -584,6 +585,7 @@ git commit -m "feat: add strict agent-facing contracts"
 
 **Files:**
 - Create: `scripts/frame_timing_agent/motion_model.py`
+- Create: `scripts/frame_timing_agent/trajectory_model.py`
 - Create: `scripts/frame_timing_agent/analysis.py`
 - Create: `tests/test_motion_model.py`
 - Create: `tests/test_analysis.py`
@@ -593,15 +595,15 @@ git commit -m "feat: add strict agent-facing contracts"
 
 Task 3 只负责图像运动估计、轨迹分解和无策略的分析结果组装。它不得读取 `PolicyName`、`ResolvedStrategyConfig`、保留率、连续丢帧限制或 legacy override，也不得选择或删除输出帧。
 
-- [ ] **Step 1: 生成确定性合成序列**
+- [x] **Step 1: 生成确定性合成序列**
 
 固定随机种子，程序化生成：静止、匀速平移、平移叠加振荡、旋转振荡、主动快速转向、前后景不同位移的视差、独立运动前景、低纹理和模糊突发序列。测试运行时生成到 pytest 临时目录，不提交图片产物。
 
-- [ ] **Step 2: 为仿射估计写失败测试**
+- [x] **Step 2: 为仿射估计写失败测试**
 
 断言已知平移误差不超过 0.5 像素、已知旋转误差不超过 0.2 度；低纹理序列必须进入明确的 fallback，不能伪造高置信度。视差和独立运动前景必须提高空间残差不确定性并降低置信度，但测试不得要求算法把两者准确分类。
 
-- [ ] **Step 3: 实现特征、LK 光流和 RANSAC 估计**
+- [x] **Step 3: 实现特征、LK 光流和 RANSAC 估计**
 
 实现纯函数接口：
 
@@ -609,33 +611,33 @@ Task 3 只负责图像运动估计、轨迹分解和无策略的分析结果组�
 
 函数不写文件，不依赖全局配置，不修改输入图像，也不得在库函数内部调用 `cv2.setNumThreads()`、`cv2.setRNGSeed()` 或修改其他进程级 OpenCV 状态。特征和匹配点在进入 RANSAC 前按稳定键排序；所有安全阈值设置 deadband，边界带结果降为不确定而不是删除。
 
-- [ ] **Step 4: 为轨迹分解写失败测试**
+- [x] **Step 4: 为轨迹分解写失败测试**
 
 匀速平移的高频残差必须接近零；平移叠加振荡必须在三个尺度一致时检测到高置信度振荡区间；主动快速转向不能被判为抖动。构造仅部分尺度同意、视差空间色散高和低内点覆盖三类样本，断言均进入 `review_required` 或保留路径。
 
-- [ ] **Step 5: 实现轨迹累积、鲁棒平滑和置信度**
+- [x] **Step 5: 实现轨迹累积、鲁棒平滑和置信度**
 
 三个窗口长度根据 fps 和帧数计算并限制为严格递增的奇数；短序列不足以支持三个尺度时走低置信度保留分支，不允许空切片、重复窗口或除零。不得通过搜索当前样本上的“最佳窗口”来迁就期望结果。
 
-- [ ] **Step 6: 为决策级可复现性写失败测试**
+- [x] **Step 6: 为决策级可复现性写失败测试**
 
 同一合成输入在同一进程连续分析 20 次，允许原始 OpenCV 浮点结果在数值容差内变化，但 `AnalysisRange.kind`、`review_required` 区间和所有可删除/不可删除判断必须一致。Windows/Ubuntu CI 比较这些离散分析决策，不比较仿射矩阵的逐位浮点表示。测试同时断言调用前后的 `cv2.getNumThreads()` 不变。
 
-- [ ] **Step 7: 为无策略分析组合写失败测试**
+- [x] **Step 7: 为无策略分析组合写失败测试**
 
 在 `contracts.py` 增加 5.3 节定义的冻结分析契约。测试 `analyze_records(records: Sequence[FrameRecord], fps: float, motion_config: MotionConfig) -> AnalysisResult` 将现有清晰度、亮度、对比度指标和 `MotionSample` 一一按 `source_index` 合并；输入顺序不稳定时输出必须按源编号排序，重复源编号、尺寸不一致、非法 fps 和运动结果缺失必须返回稳定错误，且不得创建策略或输出帧。
 
-- [ ] **Step 8: 实现纯分析组合层**
+- [x] **Step 8: 实现纯分析组合层**
 
 `analysis.py` 只调用 `timing_metrics.py` 和 `motion_model.py` 并构造 `AnalysisResult`，不读取 `PolicyName`、`ResolvedStrategyConfig` 或 legacy override，不写文件。路径加载、JSON 落盘和 artifact root 校验留给 Task 6 的 service 边界。
 
-- [ ] **Step 9: 验证并提交**
+- [x] **Step 9: 验证并提交**
 
 ```powershell
 python -m pytest tests/test_motion_model.py tests/test_analysis.py tests/test_contracts.py -v
-python -m ruff check scripts/frame_timing_agent/motion_model.py scripts/frame_timing_agent/analysis.py tests/test_motion_model.py tests/test_analysis.py tests/fixtures/generate_motion_sequences.py
-python -m mypy scripts/frame_timing_agent/motion_model.py scripts/frame_timing_agent/analysis.py scripts/frame_timing_agent/contracts.py
-git add scripts/frame_timing_agent/motion_model.py scripts/frame_timing_agent/analysis.py scripts/frame_timing_agent/contracts.py tests/test_motion_model.py tests/test_analysis.py tests/test_contracts.py tests/fixtures/generate_motion_sequences.py
+python -m ruff check scripts/frame_timing_agent/motion_model.py scripts/frame_timing_agent/trajectory_model.py scripts/frame_timing_agent/analysis.py tests/test_motion_model.py tests/test_analysis.py tests/fixtures/generate_motion_sequences.py
+python -m mypy scripts/frame_timing_agent/motion_model.py scripts/frame_timing_agent/trajectory_model.py scripts/frame_timing_agent/analysis.py scripts/frame_timing_agent/contracts.py
+git add scripts/frame_timing_agent/motion_model.py scripts/frame_timing_agent/trajectory_model.py scripts/frame_timing_agent/analysis.py scripts/frame_timing_agent/contracts.py tests/test_motion_model.py tests/test_analysis.py tests/test_contracts.py tests/fixtures/generate_motion_sequences.py
 git commit -m "feat: estimate confidence-aware camera trajectories"
 ```
 

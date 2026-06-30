@@ -17,6 +17,13 @@ class ConfigurationError(ValueError):
         self.fields = fields
 
 
+class AnalysisError(ValueError):
+    def __init__(self, message: str, *, code: str, fields: tuple[str, ...] = ()) -> None:
+        super().__init__(message)
+        self.code = code
+        self.fields = fields
+
+
 class PolicyName(str, Enum):
     COVERAGE_FIRST = "coverage_first"
     BALANCED = "balanced"
@@ -82,3 +89,69 @@ class StrategyRequest:
             "minimum_retention_ratio": self.minimum_retention_ratio,
             "maximum_consecutive_drops": self.maximum_consecutive_drops,
         }
+
+
+@dataclass(frozen=True)
+class FrameAnalysis:
+    source_index: int
+    output_index: int
+    timestamp_sec: float
+    sharpness: float
+    brightness: float
+    contrast: float
+    dx: float
+    dy: float
+    rotation_deg: float
+    scale: float
+    motion_confidence: float
+    normalized_residual_spatial_iqr: float
+    normalized_residual_spatial_p90: float
+    inlier_spatial_coverage: float
+    jitter_score: float
+    jitter_confidence: float
+    low_quality_candidate: bool
+
+
+@dataclass(frozen=True)
+class QualitySummary:
+    sharpness_p10: float
+    sharpness_median: float
+    brightness_median: float
+    contrast_median: float
+    low_quality_count: int
+
+
+@dataclass(frozen=True)
+class TrajectorySummary:
+    mean_confidence: float
+    normalized_residual_p95: float
+    rotation_residual_p95: float
+    fallback_count: int
+    spatial_uncertainty_count: int
+    multiscale_disagreement_count: int
+
+
+@dataclass(frozen=True)
+class AnalysisRange:
+    start: int
+    end: int
+    kind: str
+    confidence: float
+    reason: str
+
+
+@dataclass(frozen=True)
+class AnalysisResult:
+    schema_version: int
+    run_id: str
+    input_digest: str
+    frame_count: int
+    fps: float
+    width: int
+    height: int
+    motion_confidence: float
+    quality_summary: QualitySummary
+    trajectory_summary: TrajectorySummary
+    frames: tuple[FrameAnalysis, ...]
+    ranges: tuple[AnalysisRange, ...]
+    warnings: tuple[str, ...]

@@ -43,7 +43,7 @@ def _iter_frame_paths(frame_dir: Path) -> list[Path]:
 
 
 def _build_filename_records(frame_dir: Path, fps: float) -> list[FrameRecord]:
-    records = []
+    records: list[FrameRecord] = []
     for path in _iter_frame_paths(frame_dir):
         source_index = _parse_source_index_from_path(path)
         records.append(
@@ -59,7 +59,7 @@ def _build_filename_records(frame_dir: Path, fps: float) -> list[FrameRecord]:
 
 def _build_selected_records(frame_dir: Path, fps: float) -> list[FrameRecord]:
     selected_path = frame_dir / "selected_frames.txt"
-    records = []
+    records: list[FrameRecord] = []
     with selected_path.open("r", encoding="utf-8", newline="") as handle:
         reader = csv.DictReader(handle, delimiter="\t")
         for row in reader:

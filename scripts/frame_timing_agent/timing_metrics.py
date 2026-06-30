@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
+from typing import cast
 
 import cv2
 import numpy as np
+import numpy.typing as npt
 
 from frame_timing_agent.frame_source import FrameRecord
 
@@ -21,14 +24,17 @@ class FrameMetric:
     bad_quality_candidate: bool
 
 
-def _load_gray_image(path) -> np.ndarray:
+def _load_gray_image(path: Path) -> npt.NDArray[np.uint8]:
     image = cv2.imread(str(path), cv2.IMREAD_GRAYSCALE)
     if image is None:
         raise ValueError(f"Cannot read frame image: {path}")
-    return image
+    return cast(npt.NDArray[np.uint8], image)
 
 
-def _compute_motion_score(current_gray_normalized: np.ndarray, previous_gray_normalized: np.ndarray) -> float:
+def _compute_motion_score(
+    current_gray_normalized: npt.NDArray[np.float32],
+    previous_gray_normalized: npt.NDArray[np.float32],
+) -> float:
     if current_gray_normalized.shape != previous_gray_normalized.shape:
         raise ValueError(
             "frame size mismatch: "
@@ -39,7 +45,7 @@ def _compute_motion_score(current_gray_normalized: np.ndarray, previous_gray_nor
 
 def compute_frame_metrics(records: list[FrameRecord]) -> list[FrameMetric]:
     metrics: list[FrameMetric] = []
-    previous_gray_normalized: np.ndarray | None = None
+    previous_gray_normalized: npt.NDArray[np.float32] | None = None
 
     for record in records:
         gray = _load_gray_image(record.path)
