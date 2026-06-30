@@ -117,6 +117,7 @@ LLM 负责解释用户目标、选择预设、比较候选方案和处理人工�
 | `scripts/frame_timing_agent/analysis.py` | 组合现有质量指标与运动模型，生成不含策略决策的 `AnalysisResult` |
 | `scripts/frame_timing_agent/strategy_planner.py` | 从分析结果生成覆盖优先、平衡、去抖候选策略 |
 | `scripts/frame_timing_agent/strategy_validator.py` | 保留率、连续丢帧、端点、范围、重复和摘要校验 |
+| `scripts/frame_timing_agent/serialization.py` | 规范化 JSON 字节序列化和摘要计算，不包含业务判断 |
 | `scripts/frame_timing_agent/service.py` | analyze/plan/validate/apply/verify 五阶段编排 |
 | `scripts/frame_timing_agent/tool_cli.py` | 面向 Agent 的稳定 JSON CLI，不包含业务算法 |
 
@@ -195,7 +196,11 @@ class FrameAnalysis:
     rotation_deg: float
     scale: float
     motion_confidence: float
+    normalized_residual_spatial_iqr: float
+    normalized_residual_spatial_p90: float
+    inlier_spatial_coverage: float
     jitter_score: float
+    jitter_confidence: float
     low_quality_candidate: bool
 
 @dataclass(frozen=True)
@@ -212,6 +217,8 @@ class TrajectorySummary:
     normalized_residual_p95: float
     rotation_residual_p95: float
     fallback_count: int
+    spatial_uncertainty_count: int
+    multiscale_disagreement_count: int
 
 @dataclass(frozen=True)
 class AnalysisRange:
@@ -282,7 +289,9 @@ class ValidationResult:
     issues: tuple[ValidationIssue, ...]
 ```
 
-`candidate_digest` 是候选规范化 JSON 的 SHA-256。`apply_validated_strategy()` 不信任 JSON 中的 `valid=True`，执行时必须重新调用验证器，并校验 `strategy_id/input_digest/candidate_digest` 与当前文件完全一致。验证 JSON 是审计证据，不是可绕过规则的授权令牌。
+`candidate_digest` 是候选规范化 JSON UTF-8 字节的 SHA-256。规范化规则固定为：先把 dataclass、Enum、tuple 和相对路径转换为只包含 JSON 基础类型的对象，再调用 `json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False).encode("utf-8")`。不得为了摘要临时 `round()` 浮点数；所有数值必须在契约构造时完成有限值校验。`apply_validated_strategy()` 不信任 JSON 中的 `valid=True`，执行时必须重新调用验证器，并校验 `strategy_id/input_digest/candidate_digest` 与当前文件完全一致。验证 JSON 是审计证据，不是可绕过规则的授权令牌。
+
+摘要用于保护同一次分析与执行之间的产物完整性，不用于证明两次独立算法运行的浮点结果逐位相同。执行时读取候选后按同一规范重新序列化并计算摘要；空白、键顺序等非语义差异不会改变摘要，字段值变化必须改变摘要。
 
 ### 5.6 执行结果
 
@@ -313,16 +322,18 @@ class ExecutionResult:
 3. `calcOpticalFlowPyrLK` 跟踪相邻帧。
 4. 前后向光流误差过滤错误匹配。
 5. `estimateAffinePartial2D(source_points, target_points, method=cv2.RANSAC)` 估计平移、旋转和尺度。
-6. 记录内点率、重投影误差、特征数量和变换置信度。
-7. 特征不足时降级到 `phaseCorrelate` 平移估计，并明确标记低置信度。
-8. 两种方法均失败时保留帧，不产生删除建议。
+6. 对通过前后向检查的全部匹配计算相对拟合变换的残差向量；残差除以分析图像对角线后记录稳健空间 IQR 和 P90。把分析画面分为固定 `4 x 4` 网格，以含至少一个内点的网格数除以 16 得到内点空间覆盖率；不把单个方差当成视差分类器。
+7. 记录内点率、重投影误差、特征数量和变换置信度。高空间色散、内点集中在局部区域、独立运动物体、滚动快门和视差都必须降低置信度并触发保留/复核，不得直接产生删除建议。
+8. 特征不足时降级到 `phaseCorrelate` 平移估计，并明确标记低置信度。
+9. 两种方法均失败时保留帧，不产生删除建议。
 
 每帧运动记录至少包含：
 
 ```text
 dx, dy, rotation_deg, scale, magnitude_px,
 feature_count, inlier_ratio, reprojection_error,
-response, confidence, fallback_reason
+normalized_residual_spatial_iqr, normalized_residual_spatial_p90,
+inlier_spatial_coverage, response, confidence, fallback_reason
 ```
 
 内部运动类型使用以下精确字段：
@@ -335,7 +346,8 @@ class MotionConfig:
     forward_backward_error: float
     ransac_reprojection_threshold: float
     minimum_inlier_ratio: float
-    smoothing_window_seconds: float
+    smoothing_windows_seconds: tuple[float, float, float]
+    decision_deadband_ratio: float
 
 @dataclass(frozen=True)
 class MotionSample:
@@ -349,20 +361,28 @@ class MotionSample:
     feature_count: int
     inlier_ratio: float
     reprojection_error: float
+    normalized_residual_spatial_iqr: float
+    normalized_residual_spatial_p90: float
+    inlier_spatial_coverage: float
     response: float
     confidence: float
     fallback_reason: str | None
 ```
+
+v0.3.0 的内部默认窗口固定为 `(0.15, 0.35, 0.75)` 秒，`decision_deadband_ratio` 固定为 `0.10`。它们不是 Agent 可调参数，也不得按单个输入搜索最优值；Task 3 合成测试验证基本分离能力，Task 9 真实冒烟集只允许把行为调整得更保守。若这些默认值无法跨验收类型成立，则停止发布并重新设计运动模型，不能针对案例名称或帧区间增加例外。
+
+空间不确定性门禁由已有 RANSAC 阈值派生：`normalized_residual_spatial_iqr > 2 * ransac_reprojection_threshold / analysis_diagonal` 或 `inlier_spatial_coverage < 0.25` 时禁止自动删除。阈值附近同样应用 `decision_deadband_ratio`；门禁只能降低置信度，不能证明画面一定存在或不存在视差。
 
 ### 6.2 主动运动与抖动分离
 
 不能再用“低运动等于静止”或“方向反转等于全部抖动”。采用离线轨迹分解：
 
 - 将相邻仿射变换累积为全局轨迹。
-- 使用鲁棒局部中位数消除孤立异常，再使用中心加权移动平均得到低频主动轨迹。
-- 原轨迹减去低频轨迹得到高频残差。
+- 使用鲁棒局部中位数消除孤立异常，并分别用短、中、长三个按秒定义的窗口计算中心加权移动平均；窗口根据 fps 转换为奇数帧数并限制在序列长度内。
+- 分别计算三个尺度下原轨迹相对低频轨迹的高频残差。三个尺度都满足振荡条件时才形成高置信度抖动候选；只有两个尺度同意时生成 `review_required`；其余情况按主动运动或不确定处理并保留。
 - 使用图像对角线归一化平移残差，旋转残差单独归一化。
-- 抖动分数同时考虑残差速度、残差加速度、方向反转和估计置信度。
+- 每个阈值使用显式 deadband；数值落在边界带内时不得删除。抖动分数同时考虑残差速度、残差加速度、方向反转、跨尺度一致性和估计置信度。
+- 任一帧具有高空间残差色散或低内点空间覆盖率时，压低 `jitter_confidence` 并保留；该规则只是否决删除，不声称区分视差、动态物体或滚动快门。
 - 连续低置信度帧不判定为抖动，而是生成 `review_required` 范围。
 
 静止段必须同时满足：低频轨迹位移小、高频残差小、持续时间足够、特征置信度合格。持续慢速平移会有低残差但非零低频位移，因此不会被判定为静止。
@@ -387,6 +407,8 @@ class MotionSample:
 | `jitter_reduction` | 0.45 | 7 | 更积极选择稳定关键帧，必须输出中风险或高风险提示 |
 
 这些是安全边界，不是承诺达到某个视觉质量。真实样本回归结果可以提高保留率，不能低于对应边界。用户显式指定的边界必须比预设更保守或经过验证器批准。
+
+这里的“覆盖”仅指通过保留率、连续丢帧、端点和时间间隔约束避免明显破坏已有视角连续性，属于覆盖保护，不是基于三维几何、视差或基线分布的覆盖优化。视角感知选择不属于 v0.3.0，留给经过独立设计和数据验证的后续版本。
 
 ### 6.5 选择约束
 
@@ -573,11 +595,11 @@ Task 3 只负责图像运动估计、轨迹分解和无策略的分析结果组�
 
 - [ ] **Step 1: 生成确定性合成序列**
 
-固定随机种子，程序化生成：静止、匀速平移、平移叠加振荡、旋转振荡、主动快速转向、低纹理和模糊突发序列。测试运行时生成到 pytest 临时目录，不提交图片产物。
+固定随机种子，程序化生成：静止、匀速平移、平移叠加振荡、旋转振荡、主动快速转向、前后景不同位移的视差、独立运动前景、低纹理和模糊突发序列。测试运行时生成到 pytest 临时目录，不提交图片产物。
 
 - [ ] **Step 2: 为仿射估计写失败测试**
 
-断言已知平移误差不超过 0.5 像素、已知旋转误差不超过 0.2 度；低纹理序列必须进入明确的 fallback，不能伪造高置信度。
+断言已知平移误差不超过 0.5 像素、已知旋转误差不超过 0.2 度；低纹理序列必须进入明确的 fallback，不能伪造高置信度。视差和独立运动前景必须提高空间残差不确定性并降低置信度，但测试不得要求算法把两者准确分类。
 
 - [ ] **Step 3: 实现特征、LK 光流和 RANSAC 估计**
 
@@ -585,25 +607,29 @@ Task 3 只负责图像运动估计、轨迹分解和无策略的分析结果组�
 
 精确公开签名为 `estimate_camera_motion(records: Sequence[FrameRecord], config: MotionConfig) -> tuple[MotionSample, ...]`。
 
-函数不写文件，不依赖全局配置，不修改输入图像。
+函数不写文件，不依赖全局配置，不修改输入图像，也不得在库函数内部调用 `cv2.setNumThreads()`、`cv2.setRNGSeed()` 或修改其他进程级 OpenCV 状态。特征和匹配点在进入 RANSAC 前按稳定键排序；所有安全阈值设置 deadband，边界带结果降为不确定而不是删除。
 
 - [ ] **Step 4: 为轨迹分解写失败测试**
 
-匀速平移的高频残差必须接近零；平移叠加振荡必须检测到振荡区间；主动快速转向不能被判为抖动。
+匀速平移的高频残差必须接近零；平移叠加振荡必须在三个尺度一致时检测到高置信度振荡区间；主动快速转向不能被判为抖动。构造仅部分尺度同意、视差空间色散高和低内点覆盖三类样本，断言均进入 `review_required` 或保留路径。
 
 - [ ] **Step 5: 实现轨迹累积、鲁棒平滑和置信度**
 
-所有窗口长度根据 fps 和帧数计算并限制为奇数；短序列走明确分支，不允许空切片或除零。
+三个窗口长度根据 fps 和帧数计算并限制为严格递增的奇数；短序列不足以支持三个尺度时走低置信度保留分支，不允许空切片、重复窗口或除零。不得通过搜索当前样本上的“最佳窗口”来迁就期望结果。
 
-- [ ] **Step 6: 为无策略分析组合写失败测试**
+- [ ] **Step 6: 为决策级可复现性写失败测试**
+
+同一合成输入在同一进程连续分析 20 次，允许原始 OpenCV 浮点结果在数值容差内变化，但 `AnalysisRange.kind`、`review_required` 区间和所有可删除/不可删除判断必须一致。Windows/Ubuntu CI 比较这些离散分析决策，不比较仿射矩阵的逐位浮点表示。测试同时断言调用前后的 `cv2.getNumThreads()` 不变。
+
+- [ ] **Step 7: 为无策略分析组合写失败测试**
 
 在 `contracts.py` 增加 5.3 节定义的冻结分析契约。测试 `analyze_records(records: Sequence[FrameRecord], fps: float, motion_config: MotionConfig) -> AnalysisResult` 将现有清晰度、亮度、对比度指标和 `MotionSample` 一一按 `source_index` 合并；输入顺序不稳定时输出必须按源编号排序，重复源编号、尺寸不一致、非法 fps 和运动结果缺失必须返回稳定错误，且不得创建策略或输出帧。
 
-- [ ] **Step 7: 实现纯分析组合层**
+- [ ] **Step 8: 实现纯分析组合层**
 
 `analysis.py` 只调用 `timing_metrics.py` 和 `motion_model.py` 并构造 `AnalysisResult`，不读取 `PolicyName`、`ResolvedStrategyConfig` 或 legacy override，不写文件。路径加载、JSON 落盘和 artifact root 校验留给 Task 6 的 service 边界。
 
-- [ ] **Step 8: 验证并提交**
+- [ ] **Step 9: 验证并提交**
 
 ```powershell
 python -m pytest tests/test_motion_model.py tests/test_analysis.py tests/test_contracts.py -v
@@ -623,7 +649,7 @@ git commit -m "feat: estimate confidence-aware camera trajectories"
 
 - [ ] **Step 1: 为三种预设写失败测试**
 
-对同一分析结果分别传入三种已解析的 `ResolvedStrategyConfig`；`coverage_first` 保留数不少于 `balanced`，`balanced` 不少于 `jitter_reduction`；候选必须携带指标、原因、风险和置信度。
+使用足够长且同时包含冗余段与振荡段的分析结果，分别传入三种已解析的 `ResolvedStrategyConfig`；`coverage_first` 保留数不少于 `balanced`，`balanced` 不少于 `jitter_reduction`；候选必须携带指标、原因、风险和置信度。短序列允许三种策略结果相同，测试不得用无区分力样本证明策略层级有效。
 
 - [ ] **Step 2: 为慢速平移回归写失败测试**
 
@@ -631,11 +657,13 @@ git commit -m "feat: estimate confidence-aware camera trajectories"
 
 - [ ] **Step 3: 为建模覆盖写失败测试**
 
-断言首尾帧保留、无重复、顺序递增、保留率不低于 `minimum_retention_ratio`、连续丢帧不超过 `maximum_consecutive_drops`；局部低质量帧没有相近替代帧时必须保留。另用天然稀疏源编号输入证明规划器不会把上游采样间隔误判为本阶段连续删帧。
+断言首尾帧保留、无重复、顺序递增、保留率不低于 `minimum_retention_ratio`、连续丢帧不超过 `maximum_consecutive_drops`；局部低质量帧没有相近替代帧时必须保留。另用天然稀疏源编号输入证明规划器不会把上游采样间隔误判为本阶段连续删帧。高空间残差色散、低内点空间覆盖、跨尺度判断分歧或 deadband 内的帧必须保留并进入原因/复核范围，不能仅因 `jitter_score` 高而删除。
 
 - [ ] **Step 4: 实现局部候选选择和评分**
 
-精确公开签名为 `plan_strategy(analysis: AnalysisResult, config: ResolvedStrategyConfig) -> StrategyCandidate`。规划器直接消费类型化安全约束，不把它们翻译成 legacy engine config dict。它只返回显式 `selected_sources`，v3 不生成 `duplicate_range`。评分由覆盖、残余抖动、质量和置信度组成，并在输出中分别报告，不使用一个无法解释的总分替代各指标。
+精确公开签名为 `plan_strategy(analysis: AnalysisResult, config: ResolvedStrategyConfig) -> StrategyCandidate`。规划器直接消费类型化安全约束，不把它们翻译成 legacy engine config dict。它只返回显式 `selected_sources`，v3 不生成 `duplicate_range`。评分由覆盖、残余抖动、质量和置信度组成，并在输出中分别报告，不使用一个无法解释的总分替代各指标。空间不确定性和多尺度分歧只能否决删除或提高风险，不能作为积极删帧证据。
+
+同一 `AnalysisResult` 连续规划 20 次必须得到完全相同的 `selected_sources`、风险等级和原因码；候选中的诊断浮点值不承担跨 OpenCV 版本逐位一致承诺。
 
 - [ ] **Step 5: 验证并提交**
 
@@ -650,33 +678,43 @@ git commit -m "feat: plan reconstruction-safe frame candidates"
 
 **Files:**
 - Create: `scripts/frame_timing_agent/strategy_validator.py`
+- Create: `scripts/frame_timing_agent/serialization.py`
 - Create: `tests/test_strategy_validator.py`
+- Create: `tests/test_serialization.py`
 - Modify: `scripts/frame_timing_agent/contracts.py`
 - Modify: `scripts/frame_timing_agent/apply_frame_strategy.py`
 - Modify: `tests/test_contracts.py`
 
-- [ ] **Step 1: 为每条硬约束写失败测试**
+- [ ] **Step 1: 为规范化 JSON 和摘要写失败测试**
+
+测试键顺序、空白和输入 dict 插入顺序不影响规范化字节；Unicode 保持 UTF-8；NaN/Inf、绝对路径和不受支持对象被拒绝；字段值变化必须改变摘要。候选写入、读取、重新规范化后的摘要必须一致，不允许用 `round()` 截断诊断浮点值来制造稳定。
+
+- [ ] **Step 2: 实现独立序列化边界**
+
+`serialization.py` 只实现 `canonical_json_bytes(payload: object) -> bytes` 和 `sha256_digest(payload: object) -> str`，严格执行 5.5 节规则。业务模块不得各自复制 `json.dumps()` 摘要逻辑，`output_digest` 继续按有序文件清单和文件内容计算，不经过 JSON 浮点规范化。
+
+- [ ] **Step 3: 为每条硬约束写失败测试**
 
 分别测试摘要不匹配、来源不存在、重复来源、乱序、保留率不足、连续丢帧超限、端点缺失、低置信度删除和输出目录越界。
 
-- [ ] **Step 2: 实现统一验证器**
+- [ ] **Step 4: 实现统一验证器**
 
 精确公开签名为 `validate_strategy(analysis: AnalysisResult, candidate: StrategyCandidate, config: ResolvedStrategyConfig) -> ValidationResult`。验证器必须独立重算保留率和最大连续丢帧数，不能只信任规划器写入候选的汇总字段。
 
-错误必须有稳定机器码；警告不能替代错误。验证器不得自动篡改候选，规划器需要根据问题重新生成方案。
+错误必须有稳定机器码；警告不能替代错误。验证器不得自动篡改候选，规划器需要根据问题重新生成方案。验证器还要把高空间残差色散、低内点空间覆盖和跨尺度分歧区间的删除视为错误，而不是相信候选的高 `jitter_score`。
 
-- [ ] **Step 3: 增加独立的已验证执行入口**
+- [ ] **Step 5: 增加独立的已验证执行入口**
 
 新增精确公开签名 `apply_validated_strategy(analysis: AnalysisResult, candidate: StrategyCandidate, validation: ValidationResult, output_dir: Path) -> ExecutionResult`。执行前重新计算输入摘要，验证 `strategy_id`，并拒绝不属于该候选或含错误项的验证结果。v3 service 只能调用该函数。
 
 现有接收 v2 strategy dict 的 `apply_strategy()` 保持名称、签名和行为，供 legacy facade 与历史策略使用；不得用 `if validation is None` 之类的可选参数把 v2/v3 合并成一个函数。弃用和移除 legacy 执行入口留给完成真实迁移后的主版本。
 
-- [ ] **Step 4: 验证并提交**
+- [ ] **Step 6: 验证并提交**
 
 ```powershell
-python -m pytest tests/test_strategy_validator.py tests/test_apply_frame_strategy.py tests/test_contracts.py -v
-python -m mypy scripts/frame_timing_agent/contracts.py scripts/frame_timing_agent/strategy_validator.py scripts/frame_timing_agent/apply_frame_strategy.py
-git add scripts/frame_timing_agent/contracts.py scripts/frame_timing_agent/strategy_validator.py scripts/frame_timing_agent/apply_frame_strategy.py tests/test_strategy_validator.py tests/test_apply_frame_strategy.py tests/test_contracts.py
+python -m pytest tests/test_serialization.py tests/test_strategy_validator.py tests/test_apply_frame_strategy.py tests/test_contracts.py -v
+python -m mypy scripts/frame_timing_agent/contracts.py scripts/frame_timing_agent/serialization.py scripts/frame_timing_agent/strategy_validator.py scripts/frame_timing_agent/apply_frame_strategy.py
+git add scripts/frame_timing_agent/contracts.py scripts/frame_timing_agent/serialization.py scripts/frame_timing_agent/strategy_validator.py scripts/frame_timing_agent/apply_frame_strategy.py tests/test_serialization.py tests/test_strategy_validator.py tests/test_apply_frame_strategy.py tests/test_contracts.py
 git commit -m "feat: enforce strategy safety before execution"
 ```
 
@@ -692,7 +730,7 @@ git commit -m "feat: enforce strategy safety before execution"
 
 - [ ] **Step 1: 为 analyze/plan/validate/apply/verify 生命周期写失败测试**
 
-测试新服务入口执行 `StrategyRequest → resolve_strategy_request → analyze → plan → validate → apply_validated_strategy → verify`；分析阶段不创建 `output_frames`，验证失败不能执行，输入变化后执行失败，成功执行后健康检查通过，重复执行结果可复现。Python service 只接收已经构造并自校验的 `StrategyRequest`，不得接受 `override_config_path` 或任意底层参数 dict；JSON 到 `StrategyRequest` 的严格解析属于 Task 7 CLI 适配层。
+测试新服务入口执行 `StrategyRequest → resolve_strategy_request → analyze → plan → validate → apply_validated_strategy → verify`；分析阶段不创建 `output_frames`，验证失败不能执行，输入变化后执行失败，成功执行后健康检查通过。重复执行同一已保存且已验证的候选必须得到相同 `selected_sources`、输出文件字节和 `output_digest`；重新运行分析只承诺离散判断和选帧结果稳定，不承诺 OpenCV 中间浮点逐位一致。Python service 只接收已经构造并自校验的 `StrategyRequest`，不得接受 `override_config_path` 或任意底层参数 dict；JSON 到 `StrategyRequest` 的严格解析属于 Task 7 CLI 适配层。
 
 - [ ] **Step 2: 实现无状态 service 函数**
 
@@ -783,7 +821,7 @@ git add scripts/frame_timing_agent/strategy_execution_audit.py scripts/frame_tim
 git commit -m "feat: audit agent strategy lifecycle"
 ```
 
-### Task 9: 真实样本影子验证
+### Task 9: 真实样本发布验收与冒烟验证
 
 **Files:**
 - Create: `benchmarks/case_schema.json`
@@ -794,7 +832,7 @@ git commit -m "feat: audit agent strategy lifecycle"
 
 - [ ] **Step 1: 定义不包含私有路径的 benchmark 结果格式**
 
-记录案例 ID、输入摘要、帧数、策略、输出数、保留率、最大连续丢帧数、最大时间间隔、抖动估计、人工结论和版本；不提交原始图片。
+记录案例 ID、输入摘要、帧数、分辨率、fps、设备类别、运动类型、前后景深度结构、光照、策略、输出数、保留率、最大连续丢帧数、最大时间间隔、抖动估计、复核请求率、人工结论和版本；不提交原始图片或绝对路径。结果只表示当前验收集中的观察，不计算或宣称总体准确率。
 
 - [ ] **Step 2: 对已知 580/570 帧案例运行三种策略**
 
@@ -807,15 +845,15 @@ frame-timing-tool plan --analysis "output/benchmark/test3_cut2/analysis.json" --
 frame-timing-tool validate --analysis "output/benchmark/test3_cut2/analysis.json" --strategy "output/benchmark/test3_cut2/strategy.json"
 ```
 
-验收：0-136 和 424-579 不得判为静止；任何删帧都必须来自高置信度抖动/质量替代判断，并满足覆盖约束。
+验收：0-136 和 424-579 不得判为静止；任何删帧都必须来自高置信度抖动/质量替代判断，并满足覆盖约束。报告措辞必须写“当前验收集中观察到 0 个慢速运动静止误判”，不得写成对未知视频的零误判保证。
 
-- [ ] **Step 3: 人工复核至少五类真实片段**
+- [ ] **Step 3: 人工复核至少七类真实片段**
 
-案例必须覆盖慢速平移、明显手持抖动、快速主动转向、低纹理场景和模糊突发。每类记录“正确检测、误检、漏检、建模覆盖风险”。
+案例必须覆盖慢速平移、明显手持抖动、快速主动转向、低纹理场景、模糊突发、前后景明显视差和独立运动前景；视差类至少包含横向移动或前向移动之一。每类记录“正确检测、误检、漏检、复核请求和建模覆盖风险”。该集合是发布验收与冒烟回归集，不是统计验证集；新增设备、分辨率、fps、光照或深度结构后持续追加案例，不回写算法期望迎合现有结果。
 
 - [ ] **Step 4: 设置发布门槛**
 
-已确认的慢速运动误判静止数必须为 0；验证器违规漏过数必须为 0；所有高风险策略必须要求人工确认。算法效果不满足门槛时不发布 v0.3.0，也不得修改期望结果来迁就实现。
+当前验收集内已确认的慢速运动误判静止数、视差/动态前景不确定区间自动删除数和验证器违规漏过数必须均为 0；所有高风险策略必须要求人工确认。算法效果不满足门槛时不发布 v0.3.0，也不得修改期望结果来迁就实现。
 
 通过这些门槛只允许发布独立的 v3 Agent-safe API/CLI，不自动授权迁移 legacy facade 或 `frame-timing` 默认入口。旧入口迁移需基于本次 benchmark 结果另立计划和版本。
 
@@ -844,7 +882,7 @@ git commit -m "test: add external frame timing benchmark protocol"
 
 - [ ] **Step 2: 更新用户文档**
 
-README 保持两类用户：普通用户的一条默认命令明确标记为 legacy v2 兼容入口；Agent 和开发者使用独立的 v3 Python API 与 JSON CLI。明确本工具做帧选择而非像素修复，也不得把 v2 一条命令描述成 Agent-safe v3。
+README 保持两类用户：普通用户的一条默认命令明确标记为 legacy v2 兼容入口；Agent 和开发者使用独立的 v3 Python API 与 JSON CLI。明确本工具做帧选择而非像素修复，也不得把 v2 一条命令描述成 Agent-safe v3。明确 v0.3.0 只提供覆盖保护，不执行基于三维几何、视差或相机基线的覆盖优化。
 
 - [ ] **Step 3: 更新 Skill 工作流**
 
@@ -949,20 +987,21 @@ git push origin v0.3.0
 
 - [ ] **Step 5: GitHub Release 内容**
 
-Release 必须说明 Agent-safe 五阶段接口、三种策略、运动模型升级、覆盖保护、v2 兼容范围、两条入口不会自动互相迁移、已知限制和验证命令。不得宣称实现像素去抖、去模糊或保证建模质量。
+Release 必须说明 Agent-safe 五阶段接口、三种策略、运动模型升级、覆盖保护但非覆盖优化、v2 兼容范围、两条入口不会自动互相迁移、验收集仅为冒烟级、已知限制和验证命令。不得宣称实现像素去抖、去模糊、统计准确率、未知视频零误判或保证建模质量。
 
 ## 9. 测试矩阵
 
 | 层级 | 必测内容 |
 |---|---|
 | 单元 | 配置边界、契约序列化、轨迹估计、规划评分、每条验证规则 |
-| 合成算法 | 静止、慢速平移、振荡、旋转、主动转向、低纹理、模糊 |
+| 合成算法 | 静止、慢速平移、多尺度振荡、旋转、主动转向、视差、独立运动前景、低纹理、模糊 |
 | 集成 | analyze-plan-validate-apply-verify 完整生命周期 |
 | CLI | JSON、退出码、stderr、安装后命令、跨平台路径 |
 | 兼容 | v2 策略读取、旧 Python facade、原一条命令入口均保持 v2；v3 入口不接受 override |
-| 安全 | 路径越界、输入变化、恶意 JSON、未知字段、非有限数值 |
-| 产物 | 哈希、数量、间隔、相对路径、无分析文件混入输出 |
-| 真实回归 | 五类人工标注片段和已知 570 帧案例 |
+| 安全 | 路径越界、输入变化、恶意 JSON、未知字段、非有限数值、空间不确定区间禁止删除 |
+| 产物 | 规范化 JSON 摘要、内容哈希、数量、间隔、相对路径、无分析文件混入输出 |
+| 可复现 | 同环境离散分析决策和 `selected_sources` 稳定；不要求 OpenCV 中间浮点跨平台逐位一致 |
+| 真实回归 | 七类人工标注冒烟片段和已知 570 帧案例，不宣称统计代表性 |
 
 所有随机测试固定种子。测试不得依赖机器当前时间、文件枚举自然顺序、用户目录或网络。
 
@@ -972,6 +1011,8 @@ Release 必须说明 Agent-safe 五阶段接口、三种策略、运动模型升
 
 - 慢速主动运动是否可能再次落入静止规则。
 - 抖动残差是否经过图像尺寸和 fps 归一化。
+- 空间残差色散和内点覆盖是否只用于否决删除，而未被误当作可靠视差分类器。
+- 三个时间尺度判断分歧时是否默认保留。
 - 低特征、短序列、缺帧和不同尺寸是否有明确行为。
 - 策略估计数量是否与实际执行数量一致。
 - 输入摘要变化是否阻止执行。
@@ -981,6 +1022,7 @@ Release 必须说明 Agent-safe 五阶段接口、三种策略、运动模型升
 - 是否保留首尾帧和视角连续性。
 - 是否存在大于策略限制的源帧间隔。
 - 是否把快速主动运动误当高频抖动。
+- 前后景视差、独立运动物体和滚动快门是否触发低置信度保留或复核。
 - 是否生成重复帧或修改像素。
 - 低置信度范围是否默认保留。
 
@@ -990,6 +1032,8 @@ Release 必须说明 Agent-safe 五阶段接口、三种策略、运动模型升
 - 文件是否职责单一，是否出现新的循环依赖。
 - CLI 是否只是适配层。
 - 是否引入无必要依赖、全局状态或隐藏 I/O。
+- 库调用是否修改 OpenCV 线程数、RNG 或其他进程级状态。
+- JSON 摘要是否全部经过唯一的规范化序列化函数。
 - 报告、README、Skill 和代码是否一致。
 
 ### 安全与隐私
@@ -1004,6 +1048,9 @@ Release 必须说明 Agent-safe 五阶段接口、三种策略、运动模型升
 - 不通过降低断言、删除失败测试或扩大误差容忍来制造通过。
 - 不针对 `test3_cut2` 文件名、路径、帧数或具体区间硬编码。
 - 不把“输出帧更少”当作算法更好的证明。
+- 不把空间残差色散直接命名为视差检测结果，也不把一个小型冒烟集写成统计准确率证明。
+- 不通过运行时搜索“最佳平滑窗口”来拟合当前样本；多尺度分歧必须保留。
+- 不在可复用库函数中修改 OpenCV 线程数或其他进程级全局状态。
 - 不使用 LLM 判断替代可重复的数值验证器。
 - 不在执行阶段静默修正危险策略；必须返回结构化错误并重新规划。
 - 不吞掉异常后返回 `status=ok`。
@@ -1030,10 +1077,11 @@ Release 必须说明 Agent-safe 五阶段接口、三种策略、运动模型升
 - LLM 无法通过公共接口提交越界参数或绕过验证。
 - 三种策略都有稳定契约、解释、风险和覆盖约束。
 - 慢速平移回归案例不再被静止压缩。
-- 抖动序列能检测，主动转向序列不被误删。
+- 抖动序列能检测，主动转向、视差和独立运动前景的不确定区间不被自动删除。
+- 同环境重复分析的离散判断和 `selected_sources` 稳定；候选与执行摘要遵循唯一规范化字节规则。
 - 所有输出帧保持源文件字节一致。
 - 测试、覆盖率、Ruff、mypy、构建、twine 和依赖审计通过。
 - Windows/Ubuntu 和 Python 3.10/3.12 CI 通过。
-- 五类真实样本完成人工影子复核。
+- 七类真实样本完成冒烟级人工复核，发布材料不把结果描述为统计保证。
 - README、中文 README、Skill、API 文档、迁移说明和 Changelog 一致。
 - 独立代码审查无未解决的 Critical 或 Important 问题。
