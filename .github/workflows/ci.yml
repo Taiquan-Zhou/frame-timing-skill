@@ -23,7 +23,9 @@ jobs:
         run: python -m pip install . "pytest>=8,<10" "build>=1.2,<2" "ruff>=0.8,<1"
 
       - name: Check Python correctness
-        run: python -m ruff check scripts tests
+        run: |
+          python -m ruff check scripts tests
+          python -m ruff format --check tests/test_text_quality.py
 
       - name: Run tests
         run: python -m pytest

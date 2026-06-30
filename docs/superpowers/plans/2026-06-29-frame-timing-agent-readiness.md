@@ -444,7 +444,7 @@ frame-timing-tool verify --artifact-root output/frame_timing_run
 - Modify: `scripts/frame_timing_agent/batch_artifact_health.py`
 - Modify: `scripts/frame_timing_agent/human_review.py`
 
-- [ ] **Step 1: 创建隔离开发 worktree**
+- [x] **Step 1: 创建隔离开发 worktree**
 
 ```powershell
 $repo = (git rev-parse --show-toplevel)
@@ -455,11 +455,11 @@ git worktree add $target -b codex/frame-timing-agent-readiness main
 
 预期：主工作区内容不变，新 worktree 位于独立分支。
 
-- [ ] **Step 2: 写失败测试，扫描乱码和错误公共文档字段**
+- [x] **Step 2: 写失败测试，扫描乱码和错误公共文档字段**
 
 测试以 UTF-8 严格模式读取 `scripts/frame_timing_agent/*.py`、`README*.md`、`SKILL.md` 和 `references/*.md`，拒绝 Unicode 替换字符和典型错误转码片段，并断言文档不再引用 `result.batch_report`。
 
-- [ ] **Step 3: 运行失败测试**
+- [x] **Step 3: 运行失败测试**
 
 ```powershell
 python -m pytest tests/test_text_quality.py -v
@@ -467,19 +467,19 @@ python -m pytest tests/test_text_quality.py -v
 
 预期：当前 `result.batch_report` 文档引用导致失败；UTF-8 检查作为跨平台回归保护。
 
-- [ ] **Step 4: 修复 UTF-8 文本和文档字段**
+- [x] **Step 4: 修复 UTF-8 文本和文档字段**
 
 只修复被测试证明存在的问题，不改变算法；Python API 文档改为实际存在的 `summary_json_path`、`summary_csv_path`、`review_dashboard_path` 和 `items`。PowerShell 文档中的中文读取示例显式使用 `-Encoding utf8`。
 
-- [ ] **Step 5: 增加开发依赖和工具配置**
+- [x] **Step 5: 增加开发依赖和工具配置**
 
 在 `pyproject.toml` 增加 `dev` 可选依赖和 Ruff 基础规则。经基线扫描，完整规则会产生 363 个既有格式/风格问题，mypy 会产生 7 个既有类型问题；为避免本任务形成大面积无关改动，首阶段只对全仓库启用 `E4/E7/E9/F` 正确性规则。Task 2 起，每个新增模块单独通过完整 Ruff 和 mypy；Task 11 在旧模块迁移完成后再对全仓库启用完整规则。
 
-- [ ] **Step 6: 修复基础门禁发现的两个真实问题并核对缓存**
+- [x] **Step 6: 修复基础门禁发现的两个真实问题并核对缓存**
 
 删除 `batch_artifact_health.py` 中未使用的 `os` 导入和 `human_review.py` 中未使用的 `json` 导入。运行 `git ls-files | Select-String '__pycache__|\.pytest_cache|\.tmp_tests'`，确认可再生成缓存未被 Git 跟踪；本任务不删除测试刚生成的本地缓存，因为它们已被 `.gitignore` 正确隔离。
 
-- [ ] **Step 7: 完整验证并提交**
+- [x] **Step 7: 完整验证并提交**
 
 ```powershell
 python -m ruff check --select E4,E7,E9,F scripts tests
