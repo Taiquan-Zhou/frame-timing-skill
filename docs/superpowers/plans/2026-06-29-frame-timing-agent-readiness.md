@@ -649,25 +649,25 @@ git commit -m "feat: estimate confidence-aware camera trajectories"
 - Modify: `scripts/frame_timing_agent/contracts.py`
 - Modify: `tests/test_contracts.py`
 
-- [ ] **Step 1: 为三种预设写失败测试**
+- [x] **Step 1: 为三种预设写失败测试**
 
 使用足够长且同时包含冗余段与振荡段的分析结果，分别传入三种已解析的 `ResolvedStrategyConfig`；`coverage_first` 保留数不少于 `balanced`，`balanced` 不少于 `jitter_reduction`；候选必须携带指标、原因、风险和置信度。短序列允许三种策略结果相同，测试不得用无区分力样本证明策略层级有效。
 
-- [ ] **Step 2: 为慢速平移回归写失败测试**
+- [x] **Step 2: 为慢速平移回归写失败测试**
 
 构造 570 帧持续慢速运动，断言不会被压缩成 40 帧，也不会生成 `static` 操作。
 
-- [ ] **Step 3: 为建模覆盖写失败测试**
+- [x] **Step 3: 为建模覆盖写失败测试**
 
 断言首尾帧保留、无重复、顺序递增、保留率不低于 `minimum_retention_ratio`、连续丢帧不超过 `maximum_consecutive_drops`；局部低质量帧没有相近替代帧时必须保留。另用天然稀疏源编号输入证明规划器不会把上游采样间隔误判为本阶段连续删帧。高空间残差色散、低内点空间覆盖、跨尺度判断分歧或 deadband 内的帧必须保留并进入原因/复核范围，不能仅因 `jitter_score` 高而删除。
 
-- [ ] **Step 4: 实现局部候选选择和评分**
+- [x] **Step 4: 实现局部候选选择和评分**
 
 精确公开签名为 `plan_strategy(analysis: AnalysisResult, config: ResolvedStrategyConfig) -> StrategyCandidate`。规划器直接消费类型化安全约束，不把它们翻译成 legacy engine config dict。它只返回显式 `selected_sources`，v3 不生成 `duplicate_range`。评分由覆盖、残余抖动、质量和置信度组成，并在输出中分别报告，不使用一个无法解释的总分替代各指标。空间不确定性和多尺度分歧只能否决删除或提高风险，不能作为积极删帧证据。
 
 同一 `AnalysisResult` 连续规划 20 次必须得到完全相同的 `selected_sources`、风险等级和原因码；候选中的诊断浮点值不承担跨 OpenCV 版本逐位一致承诺。
 
-- [ ] **Step 5: 验证并提交**
+- [x] **Step 5: 验证并提交**
 
 ```powershell
 python -m pytest tests/test_strategy_planner.py tests/test_contracts.py -v
@@ -683,40 +683,41 @@ git commit -m "feat: plan reconstruction-safe frame candidates"
 - Create: `scripts/frame_timing_agent/serialization.py`
 - Create: `tests/test_strategy_validator.py`
 - Create: `tests/test_serialization.py`
+- Modify: `scripts/frame_timing_agent/analysis.py`
 - Modify: `scripts/frame_timing_agent/contracts.py`
 - Modify: `scripts/frame_timing_agent/apply_frame_strategy.py`
 - Modify: `tests/test_contracts.py`
 
-- [ ] **Step 1: 为规范化 JSON 和摘要写失败测试**
+- [x] **Step 1: 为规范化 JSON 和摘要写失败测试**
 
 测试键顺序、空白和输入 dict 插入顺序不影响规范化字节；Unicode 保持 UTF-8；NaN/Inf、绝对路径和不受支持对象被拒绝；字段值变化必须改变摘要。候选写入、读取、重新规范化后的摘要必须一致，不允许用 `round()` 截断诊断浮点值来制造稳定。
 
-- [ ] **Step 2: 实现独立序列化边界**
+- [x] **Step 2: 实现独立序列化边界**
 
 `serialization.py` 只实现 `canonical_json_bytes(payload: object) -> bytes` 和 `sha256_digest(payload: object) -> str`，严格执行 5.5 节规则。业务模块不得各自复制 `json.dumps()` 摘要逻辑，`output_digest` 继续按有序文件清单和文件内容计算，不经过 JSON 浮点规范化。
 
-- [ ] **Step 3: 为每条硬约束写失败测试**
+- [x] **Step 3: 为每条硬约束写失败测试**
 
 分别测试摘要不匹配、来源不存在、重复来源、乱序、保留率不足、连续丢帧超限、端点缺失、低置信度删除和输出目录越界。
 
-- [ ] **Step 4: 实现统一验证器**
+- [x] **Step 4: 实现统一验证器**
 
 精确公开签名为 `validate_strategy(analysis: AnalysisResult, candidate: StrategyCandidate, config: ResolvedStrategyConfig) -> ValidationResult`。验证器必须独立重算保留率和最大连续丢帧数，不能只信任规划器写入候选的汇总字段。
 
 错误必须有稳定机器码；警告不能替代错误。验证器不得自动篡改候选，规划器需要根据问题重新生成方案。验证器还要把高空间残差色散、低内点空间覆盖和跨尺度分歧区间的删除视为错误，而不是相信候选的高 `jitter_score`。
 
-- [ ] **Step 5: 增加独立的已验证执行入口**
+- [x] **Step 5: 增加独立的已验证执行入口**
 
-新增精确公开签名 `apply_validated_strategy(analysis: AnalysisResult, candidate: StrategyCandidate, validation: ValidationResult, output_dir: Path) -> ExecutionResult`。执行前重新计算输入摘要，验证 `strategy_id`，并拒绝不属于该候选或含错误项的验证结果。v3 service 只能调用该函数。
+新增精确公开签名 `apply_validated_strategy(records: Sequence[FrameRecord], analysis: AnalysisResult, candidate: StrategyCandidate, validation: ValidationResult, output_dir: Path) -> ExecutionResult`。`records` 是执行时显式、只读的源帧映射；没有该参数就无法重算输入摘要或定位待复制文件。执行前后均重新计算输入摘要，验证 `strategy_id`，并拒绝不属于该候选或含错误项的验证结果。v3 service 只能调用该函数。
 
 现有接收 v2 strategy dict 的 `apply_strategy()` 保持名称、签名和行为，供 legacy facade 与历史策略使用；不得用 `if validation is None` 之类的可选参数把 v2/v3 合并成一个函数。弃用和移除 legacy 执行入口留给完成真实迁移后的主版本。
 
-- [ ] **Step 6: 验证并提交**
+- [x] **Step 6: 验证并提交**
 
 ```powershell
 python -m pytest tests/test_serialization.py tests/test_strategy_validator.py tests/test_apply_frame_strategy.py tests/test_contracts.py -v
 python -m mypy scripts/frame_timing_agent/contracts.py scripts/frame_timing_agent/serialization.py scripts/frame_timing_agent/strategy_validator.py scripts/frame_timing_agent/apply_frame_strategy.py
-git add scripts/frame_timing_agent/contracts.py scripts/frame_timing_agent/serialization.py scripts/frame_timing_agent/strategy_validator.py scripts/frame_timing_agent/apply_frame_strategy.py tests/test_serialization.py tests/test_strategy_validator.py tests/test_apply_frame_strategy.py tests/test_contracts.py
+git add scripts/frame_timing_agent/analysis.py scripts/frame_timing_agent/contracts.py scripts/frame_timing_agent/serialization.py scripts/frame_timing_agent/strategy_validator.py scripts/frame_timing_agent/apply_frame_strategy.py tests/test_serialization.py tests/test_strategy_validator.py tests/test_apply_frame_strategy.py tests/test_contracts.py
 git commit -m "feat: enforce strategy safety before execution"
 ```
 

@@ -1,13 +1,25 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 import hashlib
 import json
 import re
 import shutil
+from typing import Any
 
+from frame_timing_agent.analysis import compute_input_digest
+from frame_timing_agent.configuration import resolve_strategy_request
+from frame_timing_agent.contracts import (
+    SCHEMA_VERSION,
+    AnalysisResult,
+    ExecutionResult,
+    StrategyCandidate,
+    ValidationResult,
+)
 from frame_timing_agent.frame_source import FrameRecord
+from frame_timing_agent.strategy_validator import validate_strategy
 
 
 FRAME_OUTPUT_PATTERN = re.compile(r"^frame_\d{6}_src_\d{6}(?:_dup_\d{2})?$", re.IGNORECASE)
@@ -46,7 +58,7 @@ def choose_uniform_sources(source_indices: list[int], count: int) -> list[int]:
     return sorted(deduped)
 
 
-def apply_strategy(records: list[FrameRecord], strategy: dict, output_dir: Path | str) -> ApplyResult:
+def apply_strategy(records: list[FrameRecord], strategy: dict[str, Any], output_dir: Path | str) -> ApplyResult:
     output_dir = Path(output_dir)
     sorted_records = sorted(records, key=lambda record: (record.source_index, record.instance_id, record.output_index))
     operation_map = _operation_by_source(strategy.get("operations", []), sorted_records)
@@ -71,8 +83,7 @@ def apply_strategy(records: list[FrameRecord], strategy: dict, output_dir: Path 
         for instance_id in range(total_instances):
             suffix = "" if instance_id == 0 else f"_dup_{instance_id:02d}"
             destination_name = (
-                f"frame_{output_index:06d}_src_{record.source_index:06d}"
-                f"{suffix}{record.path.suffix.lower()}"
+                f"frame_{output_index:06d}_src_{record.source_index:06d}{suffix}{record.path.suffix.lower()}"
             )
             destination_path = output_dir / destination_name
             source_hash = source_hashes.get(record.path)
@@ -112,10 +123,80 @@ def apply_strategy(records: list[FrameRecord], strategy: dict, output_dir: Path 
     )
 
 
-def _operation_by_source(operations: list[dict], records: list[FrameRecord]) -> dict[int, dict]:
+def apply_validated_strategy(
+    records: Sequence[FrameRecord],
+    analysis: AnalysisResult,
+    candidate: StrategyCandidate,
+    validation: ValidationResult,
+    output_dir: Path,
+) -> ExecutionResult:
+    normalized_records = sorted(
+        records, key=lambda record: (record.source_index, record.instance_id, record.output_index)
+    )
+    if not normalized_records:
+        raise ValueError("validated execution requires at least one frame record")
+    output_dir = Path(output_dir)
+    _validate_output_boundary(normalized_records, output_dir)
+
+    current_input_digest = compute_input_digest(normalized_records)
+    if current_input_digest != analysis.input_digest:
+        raise ValueError("input digest mismatch: source frames changed after analysis")
+
+    config = resolve_strategy_request(candidate.request)
+    current_validation = validate_strategy(analysis, candidate, config)
+    if not current_validation.valid:
+        raise ValueError("fresh validation failed; candidate cannot be executed")
+    if not validation.valid:
+        raise ValueError("validation is not valid")
+    if validation.strategy_id != candidate.strategy_id:
+        raise ValueError("validation strategy_id does not match candidate")
+    if validation.input_digest != analysis.input_digest:
+        raise ValueError("validation input digest does not match analysis")
+    if validation.candidate_digest != current_validation.candidate_digest:
+        raise ValueError("validation candidate digest does not match candidate")
+    if validation.issues != current_validation.issues:
+        raise ValueError("validation issues do not match fresh validation")
+
+    strategy = {
+        "version": SCHEMA_VERSION,
+        "operations": [
+            {
+                "op": "select_sources",
+                "range": {
+                    "start": normalized_records[0].source_index,
+                    "end": normalized_records[-1].source_index,
+                },
+                "sources": list(candidate.selected_sources),
+                "reason": "validated_v3_candidate",
+            }
+        ],
+    }
+    try:
+        applied = apply_strategy(normalized_records, strategy, output_dir)
+    except Exception:
+        if output_dir.is_dir():
+            _clear_previous_outputs(output_dir)
+        raise
+    if compute_input_digest(normalized_records) != analysis.input_digest:
+        _clear_previous_outputs(output_dir)
+        raise ValueError("input frames changed during execution")
+    return ExecutionResult(
+        schema_version=SCHEMA_VERSION,
+        run_id=analysis.run_id,
+        strategy_id=candidate.strategy_id,
+        input_digest=analysis.input_digest,
+        candidate_digest=current_validation.candidate_digest,
+        output_frame_count=applied.output_count,
+        selected_sources=candidate.selected_sources,
+        output_manifest=applied.manifest_path.relative_to(output_dir).as_posix(),
+        output_digest=_output_digest(output_dir, applied),
+    )
+
+
+def _operation_by_source(operations: list[dict[str, Any]], records: list[FrameRecord]) -> dict[int, dict[str, Any]]:
     _validate_non_overlapping(operations)
     available_sources = {record.source_index for record in records}
-    operation_map: dict[int, dict] = {}
+    operation_map: dict[int, dict[str, Any]] = {}
 
     for operation in operations:
         op = operation["op"]
@@ -126,10 +207,14 @@ def _operation_by_source(operations: list[dict], records: list[FrameRecord]) -> 
         if op == "keep_uniform":
             kept_sources = set(choose_uniform_sources(range_sources, int(operation["count"])))
             for source in range_sources:
-                operation_map[source] = operation if source in kept_sources else {
-                    "op": "skip",
-                    "reason": operation.get("reason", ""),
-                }
+                operation_map[source] = (
+                    operation
+                    if source in kept_sources
+                    else {
+                        "op": "skip",
+                        "reason": operation.get("reason", ""),
+                    }
+                )
         elif op == "duplicate_range":
             for source in range_sources:
                 operation_map[source] = operation
@@ -143,22 +228,23 @@ def _operation_by_source(operations: list[dict], records: list[FrameRecord]) -> 
             selected_sources = {int(source) for source in operation.get("sources", [])}
             invalid_sources = [source for source in selected_sources if source < start or source > end]
             if invalid_sources:
-                raise ValueError(
-                    "select_sources contains source outside operation range: "
-                    f"{min(invalid_sources)}"
-                )
+                raise ValueError(f"select_sources contains source outside operation range: {min(invalid_sources)}")
             for source in range_sources:
-                operation_map[source] = operation if source in selected_sources else {
-                    "op": "skip",
-                    "reason": operation.get("reason", ""),
-                }
+                operation_map[source] = (
+                    operation
+                    if source in selected_sources
+                    else {
+                        "op": "skip",
+                        "reason": operation.get("reason", ""),
+                    }
+                )
         else:
             raise ValueError(f"Unsupported strategy operation: {op}")
 
     return operation_map
 
 
-def _validate_non_overlapping(operations: list[dict]) -> None:
+def _validate_non_overlapping(operations: list[dict[str, Any]]) -> None:
     claimed_ranges: list[tuple[int, int]] = []
     for operation in operations:
         start = int(operation["range"]["start"])
@@ -172,6 +258,28 @@ def _validate_non_overlapping(operations: list[dict]) -> None:
 def _copy_frame(source: Path, destination: Path) -> None:
     destination.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(source, destination)
+
+
+def _validate_output_boundary(records: Sequence[FrameRecord], output_dir: Path) -> None:
+    resolved_output = output_dir.resolve()
+    for record in records:
+        source_parent = record.path.resolve(strict=True).parent
+        if (
+            resolved_output == source_parent
+            or resolved_output.is_relative_to(source_parent)
+            or source_parent.is_relative_to(resolved_output)
+        ):
+            raise ValueError("output directory must not overlap an input directory")
+
+
+def _output_digest(output_dir: Path, applied: ApplyResult) -> str:
+    generated_paths = [applied.selected_frames_path, applied.manifest_path]
+    generated_paths.extend(path for path in output_dir.iterdir() if path.is_file() and _is_generated_output_frame(path))
+    digest = hashlib.sha256()
+    for path in sorted(generated_paths, key=lambda item: item.name):
+        identity = f"{path.relative_to(output_dir).as_posix()}\0{path.stat().st_size}\0{_file_sha256(path)}\n"
+        digest.update(identity.encode("utf-8"))
+    return f"sha256:{digest.hexdigest()}"
 
 
 def _file_sha256(path: Path) -> str:
@@ -190,4 +298,6 @@ def _clear_previous_outputs(output_dir: Path) -> None:
 
 
 def _is_generated_output_frame(path: Path) -> bool:
-    return path.suffix.lower() in {".jpg", ".jpeg", ".png", ".bmp"} and FRAME_OUTPUT_PATTERN.match(path.stem) is not None
+    return (
+        path.suffix.lower() in {".jpg", ".jpeg", ".png", ".bmp"} and FRAME_OUTPUT_PATTERN.match(path.stem) is not None
+    )

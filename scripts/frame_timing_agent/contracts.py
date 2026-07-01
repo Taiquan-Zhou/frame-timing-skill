@@ -175,3 +175,33 @@ class StrategyCandidate:
     confidence: float
     risk_level: RiskLevel
     reasons: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class ValidationIssue:
+    code: str
+    severity: ValidationSeverity
+    message: str
+    source_range: tuple[int, int] | None = None
+
+
+@dataclass(frozen=True)
+class ValidationResult:
+    valid: bool
+    strategy_id: str
+    input_digest: str
+    candidate_digest: str
+    issues: tuple[ValidationIssue, ...]
+
+
+@dataclass(frozen=True)
+class ExecutionResult:
+    schema_version: int
+    run_id: str
+    strategy_id: str
+    input_digest: str
+    candidate_digest: str
+    output_frame_count: int
+    selected_sources: tuple[int, ...]
+    output_manifest: str
+    output_digest: str

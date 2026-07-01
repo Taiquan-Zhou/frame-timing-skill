@@ -36,7 +36,7 @@ def analyze_records(
         raise AnalysisError("fps must be a positive finite number", code="invalid_fps", fields=("fps",))
     normalized_records = _validate_and_sort_records(records)
     width, height = _validate_dimensions(normalized_records)
-    input_digest = _input_digest(normalized_records)
+    input_digest = compute_input_digest(normalized_records)
     metrics = compute_frame_metrics(normalized_records)
     motion_samples = estimate_camera_motion(normalized_records, motion_config)
     analysis_height = max(1, round(height * motion_config.analysis_width / width))
@@ -68,9 +68,7 @@ def analyze_records(
         trajectory_summary=_trajectory_summary(motion_samples, decisions),
         frames=frames,
         ranges=ranges,
-        warnings=tuple(
-            sorted({item.reason for item in ranges if item.kind == "review_required"})
-        ),
+        warnings=tuple(sorted({item.reason for item in ranges if item.kind == "review_required"})),
     )
 
 
@@ -119,9 +117,9 @@ def _validate_dimensions(records: Sequence[FrameRecord]) -> tuple[int, int]:
     return expected
 
 
-def _input_digest(records: Sequence[FrameRecord]) -> str:
+def compute_input_digest(records: Sequence[FrameRecord]) -> str:
     digest = hashlib.sha256()
-    for record in records:
+    for record in sorted(records, key=lambda item: (item.source_index, item.path.name)):
         file_digest = _file_sha256(record.path)
         stat = record.path.stat()
         identity = f"{record.source_index}\0{record.path.name}\0{stat.st_size}\0{file_digest}\n"

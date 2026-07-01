@@ -6,7 +6,15 @@ from dataclasses import FrozenInstanceError
 import frame_timing_agent
 import pytest
 from frame_timing_agent import PolicyName, RiskLevel, StrategyRequest, ValidationSeverity
-from frame_timing_agent.contracts import AnalysisRange, QualitySummary, StrategyCandidate, TrajectorySummary
+from frame_timing_agent.contracts import (
+    AnalysisRange,
+    ExecutionResult,
+    QualitySummary,
+    StrategyCandidate,
+    TrajectorySummary,
+    ValidationIssue,
+    ValidationResult,
+)
 
 
 def test_public_enum_values_are_stable() -> None:
@@ -127,3 +135,20 @@ def test_strategy_candidate_contract_is_frozen() -> None:
 
     with pytest.raises(FrozenInstanceError):
         candidate.risk_level = RiskLevel.HIGH
+
+
+def test_validation_contracts_are_frozen() -> None:
+    issue = ValidationIssue("unsafe", ValidationSeverity.ERROR, "unsafe candidate", (1, 2))
+    result = ValidationResult(False, "strategy", "input", "candidate", (issue,))
+
+    with pytest.raises(FrozenInstanceError):
+        issue.code = "changed"
+    with pytest.raises(FrozenInstanceError):
+        result.valid = True
+
+
+def test_execution_result_contract_is_frozen() -> None:
+    result = ExecutionResult(3, "run", "strategy", "input", "candidate", 2, (0, 1), "run_manifest.json", "output")
+
+    with pytest.raises(FrozenInstanceError):
+        result.output_frame_count = 0
