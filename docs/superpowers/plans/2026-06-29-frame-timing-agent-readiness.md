@@ -729,7 +729,9 @@ git commit -m "feat: enforce strategy safety before execution"
 - Create: `tests/test_service.py`
 - Modify: `scripts/frame_timing_agent/__init__.py`
 - Modify: `scripts/frame_timing_agent/apply_frame_strategy.py`
+- Modify: `scripts/frame_timing_agent/analysis.py`
 - Modify: `scripts/frame_timing_agent/contracts.py`
+- Modify: `scripts/frame_timing_agent/frame_source.py`
 - Modify: `tests/test_auto_timing_agent.py`
 - Modify: `tests/test_batch_timing_agent.py`
 - Modify: `tests/test_contracts.py`
@@ -743,7 +745,9 @@ git commit -m "feat: enforce strategy safety before execution"
 
 每个阶段只依赖显式输入和文件产物；不使用模块级可变状态。Agent-safe 服务通过 `resolve_strategy_request()` 将已校验的 `StrategyRequest` 解析为 `ResolvedStrategyConfig`，随后在规划器和验证器中传递该类型。分析、计划和验证 JSON 使用原子写入：先写同目录临时文件，再 `replace()`。`service.py` 不导入 `auto_timing_agent.py`、`batch_timing_agent.py` 或 `simple_cli.py`。
 
-公开签名固定为 `analyze_frames(frame_dir, artifact_root, *, fps=30.0)`、`plan_strategy(analysis, request, artifact_root)`、`validate_strategy(analysis, candidate, request, artifact_root)`、`apply_validated_strategy(frame_dir, analysis, candidate, validation, output_dir)` 和 `verify_output(analysis, candidate, execution, output_dir)`。输出健康检查独立位于 `output_verifier.py`，service 只负责阶段编排与原子产物写入。
+公开签名固定为 `analyze_frames(frame_dir, artifact_root, *, fps=30.0)`、`plan_strategy(analysis, request, artifact_root)`、`validate_strategy(analysis, candidate, request, artifact_root)`、`apply_validated_strategy(frame_dir, analysis, candidate, validation, output_dir)` 和 `verify_output(frame_dir, analysis, candidate, execution, output_dir)`。输出健康检查独立位于 `output_verifier.py`，service 只负责阶段编排与原子产物写入。`verify_output()` 必须重新读取 `frame_dir` 并重算输入摘要，逐帧将输出与真实源文件比较；`selected_frames.txt` 和调用方提供的 `output_digest` 都不是独立信任锚。输出目录或输出帧不得通过符号链接或硬链接别名指向输入。
+
+`analyze_frames()`、`load_frame_records()` 和 `analyze_records()` 共用同一 FPS 规范化规则；布尔值、非数值类型、非有限数、非正数和无法转换为有限浮点数的超大整数必须稳定返回 `AnalysisError(code="invalid_fps", fields=("fps",))`，且不得写入分析产物。
 
 接入前记录长序列分析的图像读取次数和耗时；若重复解码成为主要瓶颈，只允许引入有明确内存上限的逐帧共享读取器，不得默认缓存整段原图，也不得为了性能把分析结果写回输入目录。
 

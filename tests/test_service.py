@@ -1,18 +1,19 @@
 from __future__ import annotations
 
+import hashlib
 import inspect
 import json
+import os
 from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
 
 import cv2
+import frame_timing_agent
 import numpy as np
 import pytest
-
-import frame_timing_agent
 from frame_timing_agent.apply_frame_strategy import compute_output_digest
-from frame_timing_agent.contracts import PolicyName, StrategyRequest
+from frame_timing_agent.contracts import AnalysisError, PolicyName, StrategyRequest
 from frame_timing_agent.service import (
     analyze_frames,
     apply_validated_strategy,
@@ -49,6 +50,24 @@ def _output_bytes(output_dir: Path) -> dict[str, bytes]:
     return {path.name: path.read_bytes() for path in sorted(output_dir.iterdir()) if path.is_file()}
 
 
+@pytest.mark.parametrize(
+    "fps",
+    [True, "30", float("nan"), float("inf"), 10**1000, 0, -1],
+    ids=["bool", "string", "nan", "inf", "huge-int", "zero", "negative"],
+)
+def test_analyze_frames_rejects_invalid_fps_with_stable_error(tmp_path: Path, fps: object) -> None:
+    frame_dir = tmp_path / "frames"
+    artifact_root = tmp_path / "output" / "invalid_fps"
+    _write_frames(frame_dir)
+
+    with pytest.raises(AnalysisError) as captured:
+        analyze_frames(frame_dir, artifact_root, fps=fps)  # type: ignore[arg-type]
+
+    assert captured.value.code == "invalid_fps"
+    assert captured.value.fields == ("fps",)
+    assert not (artifact_root / "analysis.json").exists()
+
+
 def test_five_stage_service_writes_isolated_artifacts_and_verifies_output(tmp_path: Path) -> None:
     frame_dir = tmp_path / "clean_frames"
     artifact_root = tmp_path / "output" / "service_run"
@@ -64,7 +83,7 @@ def test_five_stage_service_writes_isolated_artifacts_and_verifies_output(tmp_pa
     validation = validate_strategy(analysis, candidate, request, artifact_root)
     assert validation.valid
     execution = apply_validated_strategy(frame_dir, analysis, candidate, validation, output_dir)
-    health = verify_output(analysis, candidate, execution, output_dir)
+    health = verify_output(frame_dir, analysis, candidate, execution, output_dir)
 
     assert (artifact_root / "strategy.json").is_file()
     assert (artifact_root / "validation.json").is_file()
@@ -141,7 +160,7 @@ def test_verify_output_reports_content_tampering(tmp_path: Path) -> None:
     output_image = next(path for path in output_dir.iterdir() if path.suffix == ".png")
     output_image.write_bytes(b"tampered")
 
-    health = verify_output(analysis, candidate, execution, output_dir)
+    health = verify_output(frame_dir, analysis, candidate, execution, output_dir)
 
     assert not health.valid
     assert {issue.code for issue in health.issues} >= {"output_digest_mismatch", "source_hash_mismatch"}
@@ -154,6 +173,13 @@ def test_capabilities_and_public_signatures_exclude_legacy_overrides() -> None:
     assert payload["api_version"] == 3
     assert payload["policies"] == ["coverage_first", "balanced", "jitter_reduction"]
     assert "coverage_protection_not_viewpoint_optimization" in payload["limitations"]
+    assert tuple(inspect.signature(verify_output).parameters) == (
+        "frame_dir",
+        "analysis",
+        "candidate",
+        "execution",
+        "output_dir",
+    )
     for function in (analyze_frames, plan_strategy, validate_strategy, apply_validated_strategy, verify_output):
         parameters = inspect.signature(function).parameters
         assert "mode" not in parameters
@@ -193,7 +219,7 @@ def test_verify_output_rejects_unregistered_image_even_if_execution_digest_is_re
     assert cv2.imwrite(str(output_dir / "review_reference.png"), extra)
     forged = replace(execution, output_digest=execution.output_digest)
 
-    health = verify_output(analysis, candidate, forged, output_dir)
+    health = verify_output(frame_dir, analysis, candidate, forged, output_dir)
 
     assert not health.valid
     assert {issue.code for issue in health.issues} >= {"unexpected_output_entry", "output_image_count_mismatch"}
@@ -260,7 +286,7 @@ def test_verify_output_rejects_manifest_path_not_owned_by_output_directory(tmp_p
     )
     forged = replace(execution, output_manifest="other_manifest.json")
 
-    health = verify_output(analysis, candidate, forged, output_dir)
+    health = verify_output(frame_dir, analysis, candidate, forged, output_dir)
 
     assert not health.valid
     assert "unsafe_output_manifest" in {issue.code for issue in health.issues}
@@ -296,7 +322,93 @@ def test_verify_output_rejects_filename_source_identity_rewrite_with_forged_dige
     selected_path.write_text(selected_text.replace(original_name, forged_name), encoding="utf-8")
     forged_execution = replace(execution, output_digest=compute_output_digest(output_dir))
 
-    health = verify_output(analysis, candidate, forged_execution, output_dir)
+    health = verify_output(frame_dir, analysis, candidate, forged_execution, output_dir)
 
     assert not health.valid
     assert "output_record_identity_mismatch" in {issue.code for issue in health.issues}
+
+
+def test_verify_output_rejects_content_tampering_when_manifest_and_digest_are_forged(tmp_path: Path) -> None:
+    frame_dir = tmp_path / "frames"
+    artifact_root = tmp_path / "output" / "forged_content"
+    output_dir = artifact_root / "output_frames"
+    _write_frames(frame_dir)
+    analysis, candidate, validation = _run_until_validation(frame_dir, artifact_root)
+    execution = apply_validated_strategy(frame_dir, analysis, candidate, validation, output_dir)
+    output_image = next(path for path in output_dir.iterdir() if path.suffix == ".png")
+    selected_path = output_dir / "selected_frames.txt"
+    original_bytes = output_image.read_bytes()
+    forged_bytes = b"forged-output-content"
+    output_image.write_bytes(forged_bytes)
+    selected_path.write_text(
+        selected_path.read_text(encoding="utf-8").replace(
+            hashlib.sha256(original_bytes).hexdigest(),
+            hashlib.sha256(forged_bytes).hexdigest(),
+        ),
+        encoding="utf-8",
+    )
+    forged_execution = replace(execution, output_digest=compute_output_digest(output_dir))
+
+    health = verify_output(frame_dir, analysis, candidate, forged_execution, output_dir)
+
+    assert not health.valid
+    assert {issue.code for issue in health.issues} >= {"source_hash_mismatch", "source_manifest_hash_mismatch"}
+
+
+def test_verify_output_rejects_output_frame_hardlinked_to_input(tmp_path: Path) -> None:
+    frame_dir = tmp_path / "frames"
+    artifact_root = tmp_path / "output" / "hardlink"
+    output_dir = artifact_root / "output_frames"
+    _write_frames(frame_dir)
+    expected_source = next(frame_dir.glob("*_src_000000.png"))
+    alias_source = next(frame_dir.glob("*_src_000001.png"))
+    alias_source.write_bytes(expected_source.read_bytes())
+    analysis, candidate, validation = _run_until_validation(frame_dir, artifact_root)
+    execution = apply_validated_strategy(frame_dir, analysis, candidate, validation, output_dir)
+    source_index = candidate.selected_sources[0]
+    output_image = next(output_dir.glob(f"*_src_{source_index:06d}.png"))
+    output_image.unlink()
+    os.link(alias_source, output_image)
+    forged_execution = replace(execution, output_digest=compute_output_digest(output_dir))
+
+    health = verify_output(frame_dir, analysis, candidate, forged_execution, output_dir)
+
+    assert not health.valid
+    assert "output_aliases_input" in {issue.code for issue in health.issues}
+
+
+def test_verify_output_rejects_input_changed_after_execution(tmp_path: Path) -> None:
+    frame_dir = tmp_path / "frames"
+    artifact_root = tmp_path / "output" / "input_drift"
+    output_dir = artifact_root / "output_frames"
+    _write_frames(frame_dir)
+    analysis, candidate, validation = _run_until_validation(frame_dir, artifact_root)
+    execution = apply_validated_strategy(frame_dir, analysis, candidate, validation, output_dir)
+    changed = np.full((48, 64, 3), 17, dtype=np.uint8)
+    assert cv2.imwrite(str(next(frame_dir.glob("*_src_000007.png"))), changed)
+
+    health = verify_output(frame_dir, analysis, candidate, execution, output_dir)
+
+    assert not health.valid
+    assert "input_digest_mismatch" in {issue.code for issue in health.issues}
+
+
+def test_verify_output_reports_unreadable_output_directory(tmp_path: Path) -> None:
+    frame_dir = tmp_path / "frames"
+    artifact_root = tmp_path / "output" / "unreadable"
+    output_dir = artifact_root / "output_frames"
+    _write_frames(frame_dir)
+    analysis, candidate, validation = _run_until_validation(frame_dir, artifact_root)
+    execution = apply_validated_strategy(frame_dir, analysis, candidate, validation, output_dir)
+    original_iterdir = Path.iterdir
+
+    def guarded_iterdir(path: Path):
+        if path == output_dir:
+            raise PermissionError("output directory is unreadable")
+        return original_iterdir(path)
+
+    with patch.object(Path, "iterdir", guarded_iterdir):
+        health = verify_output(frame_dir, analysis, candidate, execution, output_dir)
+
+    assert not health.valid
+    assert "output_directory_unreadable" in {issue.code for issue in health.issues}

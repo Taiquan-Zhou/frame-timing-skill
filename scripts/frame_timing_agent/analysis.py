@@ -17,7 +17,7 @@ from frame_timing_agent.contracts import (
     QualitySummary,
     TrajectorySummary,
 )
-from frame_timing_agent.frame_source import FrameRecord
+from frame_timing_agent.frame_source import FrameRecord, normalize_fps
 from frame_timing_agent.motion_model import (
     MotionConfig,
     MotionSample,
@@ -32,8 +32,7 @@ def analyze_records(
     fps: float,
     motion_config: MotionConfig,
 ) -> AnalysisResult:
-    if not math.isfinite(fps) or fps <= 0:
-        raise AnalysisError("fps must be a positive finite number", code="invalid_fps", fields=("fps",))
+    fps = normalize_fps(fps)
     normalized_records = _validate_and_sort_records(records)
     width, height = _validate_dimensions(normalized_records)
     input_digest = compute_input_digest(normalized_records)
@@ -60,7 +59,7 @@ def analyze_records(
         run_id=input_digest[:16],
         input_digest=input_digest,
         frame_count=len(frames),
-        fps=float(fps),
+        fps=fps,
         width=width,
         height=height,
         motion_confidence=mean_motion_confidence,

@@ -5,6 +5,7 @@ import hashlib
 import json
 from pathlib import Path, PureWindowsPath
 
+from frame_timing_agent.analysis import compute_input_digest
 from frame_timing_agent.apply_frame_strategy import FRAME_OUTPUT_PATTERN, compute_output_digest
 from frame_timing_agent.configuration import resolve_strategy_request
 from frame_timing_agent.contracts import (
@@ -16,17 +17,19 @@ from frame_timing_agent.contracts import (
     ValidationIssue,
     ValidationSeverity,
 )
-from frame_timing_agent.frame_source import SUPPORTED_EXTENSIONS, load_frame_records
+from frame_timing_agent.frame_source import SUPPORTED_EXTENSIONS, FrameRecord, load_frame_records
 from frame_timing_agent.serialization import sha256_digest
 from frame_timing_agent.strategy_validator import validate_strategy
 
 
 def verify_output(
+    frame_dir: Path | str,
     analysis: AnalysisResult,
     candidate: StrategyCandidate,
     execution: ExecutionResult,
     output_dir: Path | str,
 ) -> OutputVerificationResult:
+    frame_dir = Path(frame_dir)
     output_dir = Path(output_dir)
     issues: list[ValidationIssue] = []
     if not output_dir.is_dir():
@@ -36,7 +39,9 @@ def verify_output(
             (_error("missing_output_directory", "output directory does not exist"),),
         )
 
+    _check_output_location(frame_dir, output_dir, issues)
     _check_execution_identity(analysis, candidate, execution, issues)
+    source_records = _load_source_records(frame_dir, analysis, issues)
     config = resolve_strategy_request(candidate.request)
     if not validate_strategy(analysis, candidate, config).valid:
         issues.append(_error("candidate_validation_failed", "candidate no longer passes strategy validation"))
@@ -49,7 +54,8 @@ def verify_output(
 
     _check_output_boundary(output_dir, issues)
     _check_manifest(output_dir, execution, issues)
-    _check_source_hashes(output_dir, rows, issues)
+    if source_records is not None:
+        _check_source_hashes(output_dir, rows, source_records, issues)
     if not any(issue.code == "unsafe_output_path" for issue in issues):
         _check_output_record_identity(output_dir, analysis.fps, candidate, issues)
     try:
@@ -60,6 +66,46 @@ def verify_output(
     if output_digest != execution.output_digest:
         issues.append(_error("output_digest_mismatch", "output content digest does not match execution result"))
     return OutputVerificationResult(not issues, output_digest, tuple(issues))
+
+
+def _check_output_location(frame_dir: Path, output_dir: Path, issues: list[ValidationIssue]) -> None:
+    if output_dir.is_symlink():
+        issues.append(_error("unsafe_output_directory", "output directory must not be a symbolic link"))
+        return
+    try:
+        resolved_frames = frame_dir.resolve(strict=True)
+        resolved_output = output_dir.resolve(strict=True)
+    except (OSError, RuntimeError) as exc:
+        issues.append(
+            _error("output_location_invalid", f"cannot resolve input or output directory: {type(exc).__name__}")
+        )
+        return
+    if (
+        resolved_output == resolved_frames
+        or resolved_output.is_relative_to(resolved_frames)
+        or resolved_frames.is_relative_to(resolved_output)
+    ):
+        issues.append(_error("unsafe_output_directory", "output directory must not overlap the input frame directory"))
+
+
+def _load_source_records(
+    frame_dir: Path,
+    analysis: AnalysisResult,
+    issues: list[ValidationIssue],
+) -> dict[int, FrameRecord] | None:
+    try:
+        records = load_frame_records(frame_dir, fps=analysis.fps)
+        input_digest = compute_input_digest(records)
+    except (FileNotFoundError, OSError, UnicodeError, ValueError) as exc:
+        issues.append(_error("source_input_invalid", f"cannot verify input frames: {type(exc).__name__}"))
+        return None
+    records_by_source = {record.source_index: record for record in records}
+    if len(records_by_source) != len(records):
+        issues.append(_error("source_input_invalid", "input frames contain duplicate source indices"))
+        return None
+    if input_digest != analysis.input_digest:
+        issues.append(_error("input_digest_mismatch", "current input frames do not match analysis"))
+    return records_by_source
 
 
 def _check_execution_identity(
@@ -103,7 +149,14 @@ def _selected_sources(rows: list[dict[str, str]], issues: list[ValidationIssue])
 def _check_output_boundary(output_dir: Path, issues: list[ValidationIssue]) -> None:
     allowed_names = {"selected_frames.txt", "run_manifest.json"}
     image_count = 0
-    for path in output_dir.iterdir():
+    try:
+        entries = list(output_dir.iterdir())
+    except OSError as exc:
+        issues.append(_error("output_directory_unreadable", f"cannot inspect output directory: {type(exc).__name__}"))
+        return
+    for path in entries:
+        if path.is_symlink():
+            issues.append(_error("unsafe_output_link", f"output entry must not be a symbolic link: {path.name}"))
         if path.is_file() and path.suffix.lower() in SUPPORTED_EXTENSIONS:
             image_count += 1
         is_generated_frame = (
@@ -152,9 +205,27 @@ def _check_manifest(output_dir: Path, execution: ExecutionResult, issues: list[V
 def _check_source_hashes(
     output_dir: Path,
     rows: list[dict[str, str]],
+    source_records: dict[int, FrameRecord],
     issues: list[ValidationIssue],
 ) -> None:
+    source_hashes: dict[int, str] = {}
+    source_paths = tuple(record.path for record in source_records.values())
+    try:
+        source_identities = {_file_identity(path) for path in source_paths}
+    except OSError as exc:
+        issues.append(_error("source_input_invalid", f"cannot inspect input frames: {type(exc).__name__}"))
+        return
+    identities_are_reliable = all(inode != 0 for _, inode in source_identities)
     for row in rows:
+        try:
+            source_index = int(row["source_index"])
+        except (KeyError, TypeError, ValueError) as exc:
+            issues.append(_error("selected_manifest_invalid", f"invalid source index: {type(exc).__name__}"))
+            continue
+        source_record = source_records.get(source_index)
+        if source_record is None:
+            issues.append(_error("unknown_source", f"selected source does not exist in input: {source_index}"))
+            continue
         raw_path = row.get("path", "")
         relative = Path(raw_path)
         windows_path = PureWindowsPath(raw_path)
@@ -169,12 +240,44 @@ def _check_source_hashes(
             continue
         frame_path = output_dir / relative
         try:
-            actual_hash = _file_sha256(frame_path)
+            if frame_path.is_symlink():
+                issues.append(
+                    _error("unsafe_output_link", f"output frame must not be a symbolic link: {relative.as_posix()}")
+                )
+                continue
+            if _aliases_input(frame_path, source_paths, source_identities, identities_are_reliable):
+                issues.append(_error("output_aliases_input", f"output frame aliases its input: {relative.as_posix()}"))
+            output_hash = _file_sha256(frame_path)
+            source_hash = source_hashes.get(source_index)
+            if source_hash is None:
+                source_hash = _file_sha256(source_record.path)
+                source_hashes[source_index] = source_hash
         except (FileNotFoundError, OSError) as exc:
-            issues.append(_error("output_frame_missing", f"cannot read output frame: {exc}"))
+            issues.append(_error("output_frame_missing", f"cannot read output or source frame: {type(exc).__name__}"))
             continue
-        if actual_hash != row.get("source_sha256"):
+        if row.get("source_sha256") != source_hash:
+            issues.append(
+                _error("source_manifest_hash_mismatch", f"recorded source hash is invalid: {relative.as_posix()}")
+            )
+        if output_hash != source_hash:
             issues.append(_error("source_hash_mismatch", f"output frame bytes changed: {relative.as_posix()}"))
+
+
+def _aliases_input(
+    output_path: Path,
+    source_paths: tuple[Path, ...],
+    source_identities: set[tuple[int, int]],
+    identities_are_reliable: bool,
+) -> bool:
+    output_identity = _file_identity(output_path)
+    if identities_are_reliable and output_identity[1] != 0:
+        return output_identity in source_identities
+    return any(output_path.samefile(source_path) for source_path in source_paths)
+
+
+def _file_identity(path: Path) -> tuple[int, int]:
+    stat = path.stat()
+    return stat.st_dev, stat.st_ino
 
 
 def _check_output_record_identity(
