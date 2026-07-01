@@ -14,6 +14,7 @@ from frame_timing_agent.contracts import (
     ValidationSeverity,
 )
 from frame_timing_agent.serialization import sha256_digest
+from frame_timing_agent.strategy_planner import plan_strategy
 
 _MINIMUM_DECISION_CONFIDENCE = 0.5
 
@@ -25,6 +26,7 @@ def validate_strategy(
 ) -> ValidationResult:
     issues: list[ValidationIssue] = []
     candidate_digest = _candidate_digest(candidate, issues)
+    expected_candidate = plan_strategy(analysis, config)
     frames = analysis.frames
     available_sources = tuple(frame.source_index for frame in frames)
     available_set = set(available_sources)
@@ -52,6 +54,14 @@ def validate_strategy(
         issues.append(_error("request_mismatch", "candidate request does not match resolved strategy constraints"))
     if not candidate.strategy_id:
         issues.append(_error("invalid_strategy_id", "candidate strategy_id must not be empty"))
+    elif candidate.strategy_id != expected_candidate.strategy_id:
+        issues.append(_error("strategy_id_mismatch", "candidate strategy_id does not match the planned strategy"))
+    if candidate.risk_level is not expected_candidate.risk_level:
+        issues.append(_error("risk_level_mismatch", "candidate risk_level does not match the planned strategy"))
+    if _candidate_diagnostics_do_not_match(candidate, expected_candidate):
+        issues.append(
+            _error("candidate_diagnostic_mismatch", "candidate diagnostics do not match the planned strategy")
+        )
 
     if invalid_source_type:
         issues.append(_error("invalid_source_type", "selected_sources must contain only integers"))
@@ -214,6 +224,28 @@ def _candidate_metrics_do_not_match(
         or candidate.maximum_consecutive_drops != actual_maximum_drops
         or candidate.maximum_source_index_gap != maximum_source_gap
         or not math.isclose(candidate.maximum_time_gap_seconds, maximum_time_gap, rel_tol=0.0, abs_tol=1e-12)
+    )
+
+
+def _candidate_diagnostics_do_not_match(
+    candidate: StrategyCandidate,
+    expected: StrategyCandidate,
+) -> bool:
+    return (
+        not math.isclose(
+            candidate.estimated_jitter_reduction,
+            expected.estimated_jitter_reduction,
+            rel_tol=0.0,
+            abs_tol=1e-12,
+        )
+        or not math.isclose(
+            candidate.estimated_quality_change,
+            expected.estimated_quality_change,
+            rel_tol=0.0,
+            abs_tol=1e-12,
+        )
+        or not math.isclose(candidate.confidence, expected.confidence, rel_tol=0.0, abs_tol=1e-12)
+        or candidate.reasons != expected.reasons
     )
 
 

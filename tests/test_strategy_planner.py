@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import math
+from dataclasses import replace
 
 import pytest
-
 from frame_timing_agent.configuration import ResolvedStrategyConfig, resolve_strategy_request
 from frame_timing_agent.contracts import (
     SCHEMA_VERSION,
@@ -150,6 +150,35 @@ def test_candidate_enforces_reconstruction_coverage_using_input_positions() -> N
     assert candidate.maximum_source_index_gap >= 10
 
 
+def test_more_conservative_retention_override_keeps_more_frames() -> None:
+    analysis = _analysis(
+        120,
+        ranges=(AnalysisRange(1, 118, "jitter", 0.95, "multiscale_jitter_consensus"),),
+    )
+    loose = ResolvedStrategyConfig(PolicyName.JITTER_REDUCTION, 0.45, 7)
+    strict = ResolvedStrategyConfig(PolicyName.JITTER_REDUCTION, 0.90, 7)
+
+    loose_candidate = plan_strategy(analysis, loose)
+    strict_candidate = plan_strategy(analysis, strict)
+
+    assert strict_candidate.estimated_output_count > loose_candidate.estimated_output_count
+    assert strict_candidate.retention_ratio >= strict.minimum_retention_ratio
+    assert loose_candidate.retention_ratio >= loose.minimum_retention_ratio
+
+
+def test_consecutive_drop_override_is_enforced_and_reported() -> None:
+    analysis = _analysis(
+        120,
+        ranges=(AnalysisRange(1, 118, "jitter", 0.95, "multiscale_jitter_consensus"),),
+    )
+    config = ResolvedStrategyConfig(PolicyName.JITTER_REDUCTION, 0.45, 1)
+
+    candidate = plan_strategy(analysis, config)
+
+    assert candidate.maximum_consecutive_drops <= config.maximum_consecutive_drops
+    assert "consecutive_drop_limit_applied" in candidate.reasons
+
+
 @pytest.mark.parametrize("kind", ["active_motion", "jitter"])
 def test_low_quality_frame_without_safe_substitute_is_retained(kind: str) -> None:
     analysis = _analysis(
@@ -177,6 +206,33 @@ def test_low_quality_frame_with_local_safe_substitute_can_be_removed() -> None:
     assert {9, 11} & set(candidate.selected_sources)
     assert "low_quality_with_substitute_removed" in candidate.reasons
     assert "redundant_static_removed" not in candidate.reasons
+
+
+@pytest.mark.parametrize("kind", ["static", "jitter"])
+def test_low_confidence_range_vetoes_low_quality_removal(kind: str) -> None:
+    frame_count = 31
+    center = frame_count // 2
+    high_confidence_sources = {center - 1, center, center + 1}
+    confidences = tuple(0.95 if source in high_confidence_sources else 0.45 for source in range(frame_count))
+    range_confidence = sum(confidences) / frame_count
+    analysis = _analysis(
+        frame_count,
+        ranges=(AnalysisRange(0, frame_count - 1, kind, range_confidence, "low_confidence_range"),),
+        low_quality_sources=frozenset({center}),
+    )
+    analysis = replace(
+        analysis,
+        frames=tuple(
+            replace(frame, motion_confidence=confidences[position]) for position, frame in enumerate(analysis.frames)
+        ),
+    )
+
+    candidate = plan_strategy(analysis, _config(PolicyName.COVERAGE_FIRST))
+
+    assert range_confidence < 0.5
+    assert center in candidate.selected_sources
+    assert "low_confidence_frames_retained" in candidate.reasons
+    assert "low_quality_with_substitute_removed" not in candidate.reasons
 
 
 @pytest.mark.parametrize(
@@ -224,6 +280,22 @@ def test_static_thinning_does_not_claim_jitter_reduction_when_mean_jitter_is_unc
 
     assert candidate.estimated_output_count < analysis.frame_count
     assert candidate.estimated_jitter_reduction == pytest.approx(0.0)
+
+
+def test_initial_placeholder_does_not_reduce_candidate_confidence() -> None:
+    analysis = _analysis(
+        3,
+        ranges=(AnalysisRange(0, 2, "active_motion", 0.95, "coherent_active_motion"),),
+    )
+    analysis = replace(
+        analysis,
+        frames=(replace(analysis.frames[0], motion_confidence=0.0), *analysis.frames[1:]),
+        motion_confidence=0.95,
+    )
+
+    candidate = plan_strategy(analysis, _config(PolicyName.COVERAGE_FIRST))
+
+    assert candidate.confidence == pytest.approx(analysis.motion_confidence)
 
 
 def test_planning_is_decision_deterministic_across_repeated_runs() -> None:

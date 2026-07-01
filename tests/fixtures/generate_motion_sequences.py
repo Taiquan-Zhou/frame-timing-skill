@@ -5,9 +5,7 @@ from pathlib import Path
 
 import cv2
 import numpy as np
-
 from frame_timing_agent.frame_source import FrameRecord
-
 
 Transform = tuple[float, float, float]
 

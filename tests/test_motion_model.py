@@ -7,7 +7,6 @@ from pathlib import Path
 import cv2
 import numpy as np
 import pytest
-
 from fixtures.generate_motion_sequences import generate_motion_sequence
 from frame_timing_agent.motion_model import (
     MotionConfig,
@@ -99,10 +98,8 @@ def test_spatially_inconsistent_motion_cannot_claim_high_confidence(
     uncertain = [
         sample
         for sample in samples[1:]
-        if sample.normalized_residual_spatial_iqr
-        > 2 * _config().ransac_reprojection_threshold / math.hypot(192, 128)
-        or sample.normalized_residual_spatial_p90
-        > 4 * _config().ransac_reprojection_threshold / math.hypot(192, 128)
+        if sample.normalized_residual_spatial_iqr > 2 * _config().ransac_reprojection_threshold / math.hypot(192, 128)
+        or sample.normalized_residual_spatial_p90 > 4 * _config().ransac_reprojection_threshold / math.hypot(192, 128)
         or sample.inlier_spatial_coverage < 0.25
     ]
     assert uncertain
@@ -126,7 +123,11 @@ def test_foreground_parallax_has_more_residual_dispersion_than_pure_translation(
     assert parallax_p90 > baseline_p90 * 5
 
 
-def _motion_samples(positions: list[float], *, rotation_positions: list[float] | None = None) -> tuple[MotionSample, ...]:
+def _motion_samples(
+    positions: list[float],
+    *,
+    rotation_positions: list[float] | None = None,
+) -> tuple[MotionSample, ...]:
     rotations = rotation_positions or [0.0] * len(positions)
     samples: list[MotionSample] = []
     for index, position in enumerate(positions):
@@ -150,7 +151,7 @@ def _motion_samples(positions: list[float], *, rotation_positions: list[float] |
                 normalized_residual_spatial_p90=0.0002,
                 inlier_spatial_coverage=0.75,
                 response=0.95,
-                confidence=0.95,
+                confidence=0.0 if index == 0 else 0.95,
                 fallback_reason="initial_frame" if index == 0 else None,
             )
         )
@@ -165,6 +166,23 @@ def test_uniform_translation_is_active_motion_not_jitter() -> None:
     assert len(decisions) == len(positions)
     assert not any(decision.kind == "jitter" for decision in decisions)
     assert sum(decision.kind == "active_motion" for decision in decisions) >= 70
+
+
+def test_sustained_subthreshold_translation_is_not_static() -> None:
+    positions = [index * 0.1 for index in range(570)]
+
+    decisions = decompose_camera_trajectory(_motion_samples(positions), 30.0, math.hypot(192, 128), _config())
+
+    assert not any(decision.kind == "static" for decision in decisions)
+    assert sum(decision.kind == "active_motion" for decision in decisions) >= 550
+
+
+def test_stationary_trajectory_remains_static() -> None:
+    positions = [0.0] * 120
+
+    decisions = decompose_camera_trajectory(_motion_samples(positions), 30.0, math.hypot(192, 128), _config())
+
+    assert all(decision.kind == "static" for decision in decisions)
 
 
 def test_multiscale_oscillation_produces_high_confidence_jitter() -> None:
@@ -291,9 +309,11 @@ def test_weighted_moving_average_rejects_invalid_window() -> None:
         {"max_features": True},
         {"forward_backward_error": float("nan")},
         {"forward_backward_error": True},
+        {"forward_backward_error": 10**1000},
         {"ransac_reprojection_threshold": float("inf")},
         {"minimum_inlier_ratio": 0.0},
         {"minimum_inlier_ratio": float("nan")},
+        {"minimum_inlier_ratio": 10**1000},
         {"smoothing_windows_seconds": (0.15, 0.15, 0.75)},
         {"smoothing_windows_seconds": (0.15, float("nan"), 0.75)},
         {"smoothing_windows_seconds": (0.15, True, 0.75)},
@@ -310,10 +330,7 @@ def test_discrete_motion_decisions_are_repeatable() -> None:
     positions = [index * 0.5 + 2.5 * math.sin(index * math.pi / 2) for index in range(90)]
     samples = _motion_samples(positions)
 
-    runs = [
-        decompose_camera_trajectory(samples, 30.0, math.hypot(192, 128), _config())
-        for _ in range(20)
-    ]
+    runs = [decompose_camera_trajectory(samples, 30.0, math.hypot(192, 128), _config()) for _ in range(20)]
 
     expected = [(decision.kind, decision.reason) for decision in runs[0]]
     assert all([(decision.kind, decision.reason) for decision in run] == expected for run in runs[1:])

@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-from dataclasses import FrozenInstanceError
+import json
+import math
+from dataclasses import FrozenInstanceError, asdict
 from pathlib import Path
 
 import cv2
 import numpy as np
 import pytest
-
 from fixtures.generate_motion_sequences import generate_motion_sequence
 from frame_timing_agent.analysis import analyze_records
 from frame_timing_agent.contracts import AnalysisError, AnalysisResult
@@ -110,6 +111,24 @@ def test_initial_frame_does_not_inflate_motion_confidence(tmp_path: Path) -> Non
     expected = float(np.mean([sample.confidence for sample in samples if sample.fallback_reason != "initial_frame"]))
     assert result.motion_confidence == pytest.approx(expected)
     assert result.trajectory_summary.mean_confidence == pytest.approx(expected)
+
+
+def test_fallback_analysis_contains_only_strict_json_numbers(tmp_path: Path) -> None:
+    records = generate_motion_sequence(
+        tmp_path / "strict_json_fallback",
+        [(0.0, 0.0, 0.0), (1.0, 0.0, 0.0)],
+        low_texture=True,
+    )
+
+    result = analyze_records(records, fps=30.0, motion_config=_config())
+
+    assert result.trajectory_summary.fallback_count == 1
+    assert all(
+        math.isfinite(value)
+        for frame in result.frames
+        for value in (frame.normalized_residual_spatial_iqr, frame.normalized_residual_spatial_p90)
+    )
+    json.dumps(asdict(result), allow_nan=False)
 
 
 def test_analyze_records_decisions_are_repeatable_end_to_end(tmp_path: Path) -> None:

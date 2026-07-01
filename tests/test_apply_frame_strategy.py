@@ -1,14 +1,13 @@
+import csv
+import re
 import tempfile
 import unittest
 from dataclasses import replace
-from unittest.mock import patch
 from pathlib import Path
-import csv
-import re
+from unittest.mock import patch
 
 import cv2
 import numpy as np
-
 from frame_timing_agent.analysis import compute_input_digest
 from frame_timing_agent.apply_frame_strategy import (
     _copy_frame,
@@ -332,6 +331,26 @@ class ApplyFrameStrategyTest(unittest.TestCase):
 
             with self.assertRaisesRegex(ValueError, "validation"):
                 apply_validated_strategy(records, analysis, tampered_candidate, validation, output_dir)
+
+            self.assertFalse(output_dir.exists())
+
+    def test_apply_validated_strategy_rejects_fresh_validation_for_tampered_strategy_id(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _, records, analysis, candidate, _ = _validated_context(root)
+            output_dir = root / "output"
+            tampered_candidate = replace(candidate, strategy_id=f"sha256:{'0' * 64}")
+            config = resolve_strategy_request(tampered_candidate.request)
+            fresh_validation = validate_strategy(analysis, tampered_candidate, config)
+
+            with self.assertRaisesRegex(ValueError, "fresh validation failed"):
+                apply_validated_strategy(
+                    records,
+                    analysis,
+                    tampered_candidate,
+                    fresh_validation,
+                    output_dir,
+                )
 
             self.assertFalse(output_dir.exists())
 

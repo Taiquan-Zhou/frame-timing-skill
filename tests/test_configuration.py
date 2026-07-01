@@ -5,7 +5,7 @@ import math
 
 import pytest
 from frame_timing_agent import PolicyName, StrategyRequest
-from frame_timing_agent.configuration import parse_strategy_request, resolve_strategy_request
+from frame_timing_agent.configuration import ResolvedStrategyConfig, parse_strategy_request, resolve_strategy_request
 
 
 @pytest.mark.parametrize(
@@ -218,3 +218,53 @@ def test_resolve_accepts_overrides_equal_to_policy_limits(policy: PolicyName) ->
     )
 
     assert resolve_strategy_request(request) == defaults
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "code"),
+    [
+        ({"policy": "balanced", "minimum_retention_ratio": 0.65, "maximum_consecutive_drops": 4}, "invalid_value"),
+        (
+            {
+                "policy": PolicyName.BALANCED,
+                "minimum_retention_ratio": math.nan,
+                "maximum_consecutive_drops": 4,
+            },
+            "invalid_value",
+        ),
+        (
+            {
+                "policy": PolicyName.BALANCED,
+                "minimum_retention_ratio": 0.65,
+                "maximum_consecutive_drops": True,
+            },
+            "invalid_value",
+        ),
+        (
+            {
+                "policy": PolicyName.COVERAGE_FIRST,
+                "minimum_retention_ratio": 0.45,
+                "maximum_consecutive_drops": 2,
+            },
+            "unsafe_override",
+        ),
+        (
+            {
+                "policy": PolicyName.COVERAGE_FIRST,
+                "minimum_retention_ratio": 0.85,
+                "maximum_consecutive_drops": 7,
+            },
+            "unsafe_override",
+        ),
+    ],
+)
+def test_resolved_config_rejects_invalid_direct_construction(
+    kwargs: dict[str, object],
+    code: str,
+) -> None:
+    from frame_timing_agent import ConfigurationError
+
+    with pytest.raises(ConfigurationError) as captured:
+        ResolvedStrategyConfig(**kwargs)
+
+    assert captured.value.code == code

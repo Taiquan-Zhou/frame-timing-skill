@@ -11,6 +11,8 @@ import numpy.typing as npt
 
 from frame_timing_agent.frame_source import FrameRecord
 
+_FALLBACK_NORMALIZED_RESIDUAL = 1.0
+
 
 @dataclass(frozen=True)
 class MotionConfig:
@@ -23,7 +25,11 @@ class MotionConfig:
     decision_deadband_ratio: float = 0.10
 
     def __post_init__(self) -> None:
-        if isinstance(self.analysis_width, bool) or not isinstance(self.analysis_width, int) or self.analysis_width < 32:
+        if (
+            isinstance(self.analysis_width, bool)
+            or not isinstance(self.analysis_width, int)
+            or self.analysis_width < 32
+        ):
             raise ValueError("analysis_width must be at least 32")
         if isinstance(self.max_features, bool) or not isinstance(self.max_features, int) or self.max_features < 8:
             raise ValueError("max_features must be at least 8")
@@ -33,8 +39,10 @@ class MotionConfig:
             raise ValueError("motion error thresholds must be positive")
         if not _is_finite_number(self.minimum_inlier_ratio) or not 0 < self.minimum_inlier_ratio <= 1:
             raise ValueError("minimum_inlier_ratio must be in (0, 1]")
-        if not isinstance(self.smoothing_windows_seconds, tuple) or len(self.smoothing_windows_seconds) != 3 or any(
-            not _is_positive_finite_number(value) for value in self.smoothing_windows_seconds
+        if (
+            not isinstance(self.smoothing_windows_seconds, tuple)
+            or len(self.smoothing_windows_seconds) != 3
+            or any(not _is_positive_finite_number(value) for value in self.smoothing_windows_seconds)
         ):
             raise ValueError("smoothing_windows_seconds must contain three positive finite values")
         if tuple(sorted(self.smoothing_windows_seconds)) != self.smoothing_windows_seconds:
@@ -83,7 +91,8 @@ def estimate_camera_motion(
         current_gray = _load_analysis_gray(record, config.analysis_width)
         if current_gray.shape != previous_gray.shape:
             raise ValueError(
-                f"frame size mismatch after analysis resize: previous={previous_gray.shape}, current={current_gray.shape}"
+                "frame size mismatch after analysis resize: "
+                f"previous={previous_gray.shape}, current={current_gray.shape}"
             )
         samples.append(_estimate_pair(previous_gray, current_gray, record, config, analysis_diagonal))
         previous_gray = current_gray
@@ -274,7 +283,12 @@ def has_spatial_uncertainty(
 
 
 def _is_finite_number(value: object) -> TypeGuard[int | float]:
-    return not isinstance(value, bool) and isinstance(value, (int, float)) and math.isfinite(float(value))
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    try:
+        return math.isfinite(float(value))
+    except (OverflowError, ValueError):
+        return False
 
 
 def _is_positive_finite_number(value: object) -> bool:
@@ -314,8 +328,8 @@ def _phase_fallback(
         feature_count=0,
         inlier_ratio=0.0,
         reprojection_error=math.inf,
-        normalized_residual_spatial_iqr=math.inf,
-        normalized_residual_spatial_p90=math.inf,
+        normalized_residual_spatial_iqr=_FALLBACK_NORMALIZED_RESIDUAL,
+        normalized_residual_spatial_p90=_FALLBACK_NORMALIZED_RESIDUAL,
         inlier_spatial_coverage=0.0,
         response=max(0.0, min(1.0, response)),
         confidence=min(0.4, max(0.0, response) * 0.4),

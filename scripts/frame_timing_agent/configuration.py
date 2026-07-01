@@ -35,6 +35,15 @@ class PolicyPreset:
     maximum_consecutive_drops: int
 
 
+_POLICY_PRESETS: Mapping[PolicyName, PolicyPreset] = MappingProxyType(
+    {
+        PolicyName.COVERAGE_FIRST: PolicyPreset(PolicyName.COVERAGE_FIRST, 0.85, 2),
+        PolicyName.BALANCED: PolicyPreset(PolicyName.BALANCED, 0.65, 4),
+        PolicyName.JITTER_REDUCTION: PolicyPreset(PolicyName.JITTER_REDUCTION, 0.45, 7),
+    }
+)
+
+
 @dataclass(frozen=True)
 class ResolvedStrategyConfig:
     """Concrete safety constraints after applying and validating overrides."""
@@ -43,14 +52,42 @@ class ResolvedStrategyConfig:
     minimum_retention_ratio: float
     maximum_consecutive_drops: int
 
+    def __post_init__(self) -> None:
+        request = StrategyRequest(
+            policy=self.policy,
+            minimum_retention_ratio=self.minimum_retention_ratio,
+            maximum_consecutive_drops=self.maximum_consecutive_drops,
+        )
+        if request.minimum_retention_ratio is None:
+            raise ConfigurationError(
+                RETENTION_RATIO_ERROR_MESSAGE,
+                code="invalid_value",
+                fields=("minimum_retention_ratio",),
+            )
+        if request.maximum_consecutive_drops is None:
+            raise ConfigurationError(
+                f"maximum_consecutive_drops must be an integer in [0, {MAXIMUM_CONSECUTIVE_DROPS}]",
+                code="invalid_value",
+                fields=("maximum_consecutive_drops",),
+            )
 
-_POLICY_PRESETS: Mapping[PolicyName, PolicyPreset] = MappingProxyType(
-    {
-        PolicyName.COVERAGE_FIRST: PolicyPreset(PolicyName.COVERAGE_FIRST, 0.85, 2),
-        PolicyName.BALANCED: PolicyPreset(PolicyName.BALANCED, 0.65, 4),
-        PolicyName.JITTER_REDUCTION: PolicyPreset(PolicyName.JITTER_REDUCTION, 0.45, 7),
-    }
-)
+        preset = _POLICY_PRESETS[request.policy]
+        if request.minimum_retention_ratio < preset.minimum_retention_ratio:
+            raise ConfigurationError(
+                f"minimum_retention_ratio is weaker than the policy safety limit {preset.minimum_retention_ratio}",
+                code="unsafe_override",
+                fields=("minimum_retention_ratio",),
+            )
+        if request.maximum_consecutive_drops > preset.maximum_consecutive_drops:
+            raise ConfigurationError(
+                f"maximum_consecutive_drops is weaker than the policy safety limit {preset.maximum_consecutive_drops}",
+                code="unsafe_override",
+                fields=("maximum_consecutive_drops",),
+            )
+
+        object.__setattr__(self, "policy", request.policy)
+        object.__setattr__(self, "minimum_retention_ratio", request.minimum_retention_ratio)
+        object.__setattr__(self, "maximum_consecutive_drops", request.maximum_consecutive_drops)
 
 
 def parse_strategy_request(data: object) -> StrategyRequest:
@@ -150,22 +187,10 @@ def resolve_strategy_request(request: StrategyRequest) -> ResolvedStrategyConfig
     minimum_retention_ratio = request.minimum_retention_ratio
     if minimum_retention_ratio is None:
         minimum_retention_ratio = preset.minimum_retention_ratio
-    elif minimum_retention_ratio < preset.minimum_retention_ratio:
-        raise ConfigurationError(
-            f"minimum_retention_ratio is weaker than the policy safety limit {preset.minimum_retention_ratio}",
-            code="unsafe_override",
-            fields=("minimum_retention_ratio",),
-        )
 
     maximum_consecutive_drops = request.maximum_consecutive_drops
     if maximum_consecutive_drops is None:
         maximum_consecutive_drops = preset.maximum_consecutive_drops
-    elif maximum_consecutive_drops > preset.maximum_consecutive_drops:
-        raise ConfigurationError(
-            f"maximum_consecutive_drops is weaker than the policy safety limit {preset.maximum_consecutive_drops}",
-            code="unsafe_override",
-            fields=("maximum_consecutive_drops",),
-        )
 
     return ResolvedStrategyConfig(
         policy=request.policy,

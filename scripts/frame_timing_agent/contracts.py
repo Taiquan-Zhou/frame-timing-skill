@@ -176,6 +176,46 @@ class StrategyCandidate:
     risk_level: RiskLevel
     reasons: tuple[str, ...]
 
+    def __post_init__(self) -> None:
+        integer_limits = {
+            "estimated_output_count": None,
+            "maximum_consecutive_drops": MAXIMUM_CONSECUTIVE_DROPS,
+            "maximum_source_index_gap": None,
+        }
+        for field_name, maximum_integer in integer_limits.items():
+            value = getattr(self, field_name)
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, int)
+                or value < 0
+                or (maximum_integer is not None and value > maximum_integer)
+            ):
+                upper_bound = "" if maximum_integer is None else f" and at most {maximum_integer}"
+                raise ConfigurationError(
+                    f"{field_name} must be a non-negative integer{upper_bound}",
+                    code="invalid_value",
+                    fields=(field_name,),
+                )
+
+        float_limits = {
+            "retention_ratio": (0.0, 1.0),
+            "maximum_time_gap_seconds": (0.0, None),
+            "estimated_jitter_reduction": (0.0, 1.0),
+            "estimated_quality_change": (None, None),
+            "confidence": (0.0, 1.0),
+        }
+        for field_name, (minimum_float, maximum_float) in float_limits.items():
+            normalized = _normalize_candidate_float(getattr(self, field_name), field_name)
+            if (minimum_float is not None and normalized < minimum_float) or (
+                maximum_float is not None and normalized > maximum_float
+            ):
+                raise ConfigurationError(
+                    f"{field_name} is outside its supported range",
+                    code="invalid_value",
+                    fields=(field_name,),
+                )
+            object.__setattr__(self, field_name, normalized)
+
 
 @dataclass(frozen=True)
 class ValidationIssue:
@@ -205,3 +245,27 @@ class ExecutionResult:
     selected_sources: tuple[int, ...]
     output_manifest: str
     output_digest: str
+
+
+def _normalize_candidate_float(value: object, field_name: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ConfigurationError(
+            f"{field_name} must be a finite number",
+            code="invalid_value",
+            fields=(field_name,),
+        )
+    try:
+        normalized = float(value)
+    except (OverflowError, ValueError) as exc:
+        raise ConfigurationError(
+            f"{field_name} must be a finite number",
+            code="invalid_value",
+            fields=(field_name,),
+        ) from exc
+    if not math.isfinite(normalized):
+        raise ConfigurationError(
+            f"{field_name} must be a finite number",
+            code="invalid_value",
+            fields=(field_name,),
+        )
+    return normalized

@@ -94,7 +94,7 @@ def plan_strategy(analysis: AnalysisResult, config: ResolvedStrategyConfig) -> S
         maximum_time_gap_seconds=_maximum_time_gap_seconds(selected_frames),
         estimated_jitter_reduction=_estimated_jitter_reduction(frames, selected_frames),
         estimated_quality_change=_estimated_quality_change(frames, selected_frames),
-        confidence=_candidate_confidence(frames),
+        confidence=analysis.motion_confidence,
         risk_level=risk_level,
         reasons=reasons,
     )
@@ -113,11 +113,17 @@ def _deletion_options(
         frame = frames[position]
         kind = kinds[position]
         range_confidence = _range_confidence(frame.source_index, ranges)
-        if kind in {"review_required", "active_motion"} or frame.motion_confidence < _MINIMUM_DECISION_CONFIDENCE:
+        low_confidence = (
+            frame.motion_confidence < _MINIMUM_DECISION_CONFIDENCE or range_confidence < _MINIMUM_DECISION_CONFIDENCE
+        )
+        if kind in {"review_required", "active_motion"}:
             if frame.low_quality_candidate:
                 low_quality_without_substitute = True
-            if frame.motion_confidence < _MINIMUM_DECISION_CONFIDENCE:
+            if low_confidence:
                 low_confidence_retained = True
+            continue
+        if low_confidence:
+            low_confidence_retained = True
             continue
 
         if frame.low_quality_candidate:
@@ -258,12 +264,15 @@ def _drop_respects_limit(position: int, frame_count: int, selected_positions: se
 
 
 def _maximum_source_index_gap(selected_sources: tuple[int, ...]) -> int:
-    return max((right - left for left, right in zip(selected_sources, selected_sources[1:])), default=0)
+    return max((right - left for left, right in zip(selected_sources, selected_sources[1:], strict=False)), default=0)
 
 
 def _maximum_time_gap_seconds(selected_frames: tuple[FrameAnalysis, ...]) -> float:
     return max(
-        (right.timestamp_sec - left.timestamp_sec for left, right in zip(selected_frames, selected_frames[1:])),
+        (
+            right.timestamp_sec - left.timestamp_sec
+            for left, right in zip(selected_frames, selected_frames[1:], strict=False)
+        ),
         default=0.0,
     )
 
@@ -282,10 +291,6 @@ def _estimated_quality_change(frames: tuple[FrameAnalysis, ...], selected_frames
     if original_mean == 0:
         return 0.0
     return (selected_mean - original_mean) / abs(original_mean)
-
-
-def _candidate_confidence(frames: tuple[FrameAnalysis, ...]) -> float:
-    return min(1.0, max(0.0, sum(frame.motion_confidence for frame in frames) / len(frames)))
 
 
 def _strategy_id(

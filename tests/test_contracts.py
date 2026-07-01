@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import FrozenInstanceError
+from dataclasses import FrozenInstanceError, replace
 
 import frame_timing_agent
 import pytest
@@ -15,6 +15,31 @@ from frame_timing_agent.contracts import (
     ValidationIssue,
     ValidationResult,
 )
+
+
+def _strategy_candidate() -> StrategyCandidate:
+    return StrategyCandidate(
+        schema_version=3,
+        strategy_id="strategy-id",
+        input_digest="sha256:input",
+        policy=PolicyName.BALANCED,
+        request=StrategyRequest(
+            policy=PolicyName.BALANCED,
+            minimum_retention_ratio=0.65,
+            maximum_consecutive_drops=4,
+        ),
+        selected_sources=(0, 2, 4),
+        estimated_output_count=3,
+        retention_ratio=0.6,
+        maximum_consecutive_drops=1,
+        maximum_source_index_gap=2,
+        maximum_time_gap_seconds=0.1,
+        estimated_jitter_reduction=0.5,
+        estimated_quality_change=0.1,
+        confidence=0.9,
+        risk_level=RiskLevel.MEDIUM,
+        reasons=("high_confidence_jitter_removed",),
+    )
 
 
 def test_public_enum_values_are_stable() -> None:
@@ -110,31 +135,33 @@ def test_analysis_summary_contracts_are_frozen() -> None:
 
 
 def test_strategy_candidate_contract_is_frozen() -> None:
-    candidate = StrategyCandidate(
-        schema_version=3,
-        strategy_id="strategy-id",
-        input_digest="sha256:input",
-        policy=PolicyName.BALANCED,
-        request=StrategyRequest(
-            policy=PolicyName.BALANCED,
-            minimum_retention_ratio=0.65,
-            maximum_consecutive_drops=4,
-        ),
-        selected_sources=(0, 2, 4),
-        estimated_output_count=3,
-        retention_ratio=0.6,
-        maximum_consecutive_drops=1,
-        maximum_source_index_gap=2,
-        maximum_time_gap_seconds=0.1,
-        estimated_jitter_reduction=0.5,
-        estimated_quality_change=0.1,
-        confidence=0.9,
-        risk_level=RiskLevel.MEDIUM,
-        reasons=("high_confidence_jitter_removed",),
-    )
+    candidate = _strategy_candidate()
 
     with pytest.raises(FrozenInstanceError):
         candidate.risk_level = RiskLevel.HIGH
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("retention_ratio", 10**1000),
+        ("maximum_time_gap_seconds", float("inf")),
+        ("estimated_jitter_reduction", float("nan")),
+        ("estimated_quality_change", "invalid"),
+        ("confidence", True),
+        ("estimated_output_count", True),
+        ("maximum_consecutive_drops", -1),
+        ("maximum_source_index_gap", -1),
+    ],
+)
+def test_strategy_candidate_rejects_invalid_numeric_fields(field: str, value: object) -> None:
+    from frame_timing_agent import ConfigurationError
+
+    with pytest.raises(ConfigurationError) as captured:
+        replace(_strategy_candidate(), **{field: value})
+
+    assert captured.value.code == "invalid_value"
+    assert captured.value.fields == (field,)
 
 
 def test_validation_contracts_are_frozen() -> None:

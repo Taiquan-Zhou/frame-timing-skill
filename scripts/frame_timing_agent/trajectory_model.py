@@ -10,6 +10,9 @@ import numpy.typing as npt
 
 from frame_timing_agent.motion_model import MotionConfig, MotionSample, has_spatial_uncertainty
 
+_ACTIVE_TRANSLATION_RATIO = 0.0005
+_ACTIVE_ROTATION_DEG = 0.03
+
 
 @dataclass(frozen=True)
 class MotionDecision:
@@ -46,6 +49,14 @@ def decompose_camera_trajectory(
     robust_x = _repair_low_confidence_trajectory(cumulative_x, samples, config.minimum_inlier_ratio)
     robust_y = _repair_low_confidence_trajectory(cumulative_y, samples, config.minimum_inlier_ratio)
     robust_rotation = _repair_low_confidence_trajectory(cumulative_rotation, samples, config.minimum_inlier_ratio)
+    coherent_motion = _coherent_motion_mask(
+        robust_x,
+        robust_y,
+        robust_rotation,
+        window_sizes[-1],
+        analysis_diagonal,
+        config.decision_deadband_ratio,
+    )
 
     votes: list[npt.NDArray[np.bool_]] = []
     ambiguities: list[npt.NDArray[np.bool_]] = []
@@ -79,6 +90,7 @@ def decompose_camera_trajectory(
                 sample,
                 int(vote_count[index]),
                 bool(ambiguous_any[index]),
+                bool(coherent_motion[index]),
                 float(jitter_scores[index]),
                 float(mean_translation_residual[index]),
                 float(mean_rotation_residual[index]),
@@ -93,6 +105,7 @@ def _decision_for_sample(
     sample: MotionSample,
     vote_count: int,
     ambiguous: bool,
+    coherent_motion: bool,
     jitter_score: float,
     translation_residual: float,
     rotation_residual: float,
@@ -114,7 +127,11 @@ def _decision_for_sample(
         )
     if vote_count == 2 or ambiguous:
         return _review_decision(sample, "multiscale_motion_disagreement", translation_residual, rotation_residual)
-    if sample.magnitude_px / analysis_diagonal > 0.0005 or abs(sample.rotation_deg) > 0.03:
+    if (
+        coherent_motion
+        or sample.magnitude_px / analysis_diagonal > _ACTIVE_TRANSLATION_RATIO
+        or abs(sample.rotation_deg) > _ACTIVE_ROTATION_DEG
+    ):
         return MotionDecision(
             sample.source_index,
             sample.output_index,
@@ -134,6 +151,30 @@ def _decision_for_sample(
         translation_residual,
         rotation_residual,
         "low_motion_high_confidence",
+    )
+
+
+def _coherent_motion_mask(
+    cumulative_x: npt.NDArray[np.float64],
+    cumulative_y: npt.NDArray[np.float64],
+    cumulative_rotation: npt.NDArray[np.float64],
+    window_size: int,
+    analysis_diagonal: float,
+    deadband_ratio: float,
+) -> npt.NDArray[np.bool_]:
+    trend_x = _weighted_moving_average(cumulative_x, window_size)
+    trend_y = _weighted_moving_average(cumulative_y, window_size)
+    trend_rotation = _weighted_moving_average(cumulative_rotation, window_size)
+    radius = window_size // 2
+    indices = np.arange(len(cumulative_x))
+    left = np.maximum(indices - radius, 0)
+    right = np.minimum(indices + radius, len(cumulative_x) - 1)
+    translation_span = np.hypot(trend_x[right] - trend_x[left], trend_y[right] - trend_y[left]) / analysis_diagonal
+    rotation_span = np.abs(trend_rotation[right] - trend_rotation[left])
+    high = 1.0 + deadband_ratio
+    return cast(
+        npt.NDArray[np.bool_],
+        (translation_span > _ACTIVE_TRANSLATION_RATIO * high) | (rotation_span > _ACTIVE_ROTATION_DEG * high),
     )
 
 
@@ -169,9 +210,7 @@ def _weighted_moving_average(values: npt.NDArray[np.float64], window_size: int) 
     if window_size < 3 or window_size % 2 == 0:
         raise ValueError("window_size must be an odd integer of at least 3")
     radius = window_size // 2
-    weights = np.concatenate(
-        (np.arange(1, radius + 2, dtype=np.float64), np.arange(radius, 0, -1, dtype=np.float64))
-    )
+    weights = np.concatenate((np.arange(1, radius + 2, dtype=np.float64), np.arange(radius, 0, -1, dtype=np.float64)))
     weights /= np.sum(weights)
     padded = np.pad(values, (radius, radius), mode="edge")
     return np.convolve(padded, weights, mode="valid")
@@ -196,9 +235,9 @@ def _scale_jitter_evidence(
     residual_rotation = cumulative_rotation - _weighted_moving_average(cumulative_rotation, window_size)
     normalized_residual = np.hypot(residual_x, residual_y) / analysis_diagonal
     normalized_velocity = np.hypot(np.gradient(residual_x), np.gradient(residual_y)) / analysis_diagonal
-    normalized_acceleration = np.hypot(
-        np.gradient(np.gradient(residual_x)), np.gradient(np.gradient(residual_y))
-    ) / analysis_diagonal
+    normalized_acceleration = (
+        np.hypot(np.gradient(np.gradient(residual_x)), np.gradient(np.gradient(residual_y))) / analysis_diagonal
+    )
     rotation_residual = np.abs(residual_rotation)
     evidence_window = min(9, window_size)
     if evidence_window % 2 == 0:

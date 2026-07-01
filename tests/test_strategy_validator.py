@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import FrozenInstanceError, replace
 
 import pytest
-
 from frame_timing_agent.configuration import ResolvedStrategyConfig, resolve_strategy_request
 from frame_timing_agent.contracts import (
     SCHEMA_VERSION,
@@ -12,6 +11,7 @@ from frame_timing_agent.contracts import (
     FrameAnalysis,
     PolicyName,
     QualitySummary,
+    RiskLevel,
     StrategyCandidate,
     StrategyRequest,
     TrajectorySummary,
@@ -103,6 +103,28 @@ def test_valid_candidate_has_stable_digest_and_no_issues() -> None:
     assert validation.issues == ()
 
 
+@pytest.mark.parametrize(
+    "strategy_request",
+    [
+        StrategyRequest(PolicyName.COVERAGE_FIRST),
+        StrategyRequest(PolicyName.BALANCED),
+        StrategyRequest(PolicyName.JITTER_REDUCTION),
+        StrategyRequest(PolicyName.COVERAGE_FIRST, 0.9, 1),
+    ],
+)
+def test_planner_output_validates_for_all_policies_and_conservative_override(
+    strategy_request: StrategyRequest,
+) -> None:
+    analysis = _analysis()
+    config = resolve_strategy_request(strategy_request)
+    candidate = plan_strategy(analysis, config)
+
+    validation = validate_strategy(analysis, candidate, config)
+
+    assert validation.valid
+    assert validation.issues == ()
+
+
 def test_input_digest_mismatch_is_an_error() -> None:
     analysis = _analysis()
     candidate = replace(_candidate(analysis), input_digest="sha256:other-input")
@@ -112,6 +134,40 @@ def test_input_digest_mismatch_is_an_error() -> None:
     assert not validation.valid
     assert "input_digest_mismatch" in {issue.code for issue in validation.issues}
     assert all(issue.severity is ValidationSeverity.ERROR for issue in validation.issues)
+
+
+def test_tampered_strategy_id_is_rejected_when_candidate_is_revalidated() -> None:
+    analysis = _analysis()
+    candidate = replace(_candidate(analysis), strategy_id=f"sha256:{'0' * 64}")
+
+    validation = validate_strategy(analysis, candidate, _config())
+
+    assert not validation.valid
+    assert "strategy_id_mismatch" in {issue.code for issue in validation.issues}
+
+
+@pytest.mark.parametrize(
+    ("changes", "expected_code"),
+    [
+        ({"risk_level": RiskLevel.LOW}, "risk_level_mismatch"),
+        ({"estimated_jitter_reduction": 1.0}, "candidate_diagnostic_mismatch"),
+        ({"estimated_quality_change": 0.75}, "candidate_diagnostic_mismatch"),
+        ({"confidence": 0.1}, "candidate_diagnostic_mismatch"),
+        ({"reasons": ("no_review_needed",)}, "candidate_diagnostic_mismatch"),
+    ],
+)
+def test_tampered_risk_or_diagnostics_are_rejected(
+    changes: dict[str, object],
+    expected_code: str,
+) -> None:
+    analysis = _analysis()
+    config = resolve_strategy_request(StrategyRequest(PolicyName.JITTER_REDUCTION))
+    candidate = replace(plan_strategy(analysis, config), **changes)
+
+    validation = validate_strategy(analysis, candidate, config)
+
+    assert not validation.valid
+    assert expected_code in {issue.code for issue in validation.issues}
 
 
 @pytest.mark.parametrize(
