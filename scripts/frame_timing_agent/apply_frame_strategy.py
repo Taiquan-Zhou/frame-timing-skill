@@ -69,7 +69,7 @@ def apply_strategy(records: list[FrameRecord], strategy: dict[str, Any], output_
     source_hashes: dict[Path, str] = {}
     output_index = 0
     output_dir.mkdir(parents=True, exist_ok=True)
-    _clear_previous_outputs(output_dir)
+    clear_generated_outputs(output_dir)
 
     for record in sorted_records:
         operation = operation_map.get(record.source_index, {"op": "keep", "reason": "unchanged"})
@@ -175,10 +175,10 @@ def apply_validated_strategy(
         applied = apply_strategy(normalized_records, strategy, output_dir)
     except Exception:
         if output_dir.is_dir():
-            _clear_previous_outputs(output_dir)
+            clear_generated_outputs(output_dir)
         raise
     if compute_input_digest(normalized_records) != analysis.input_digest:
-        _clear_previous_outputs(output_dir)
+        clear_generated_outputs(output_dir)
         raise ValueError("input frames changed during execution")
     return ExecutionResult(
         schema_version=SCHEMA_VERSION,
@@ -189,7 +189,7 @@ def apply_validated_strategy(
         output_frame_count=applied.output_count,
         selected_sources=candidate.selected_sources,
         output_manifest=applied.manifest_path.relative_to(output_dir).as_posix(),
-        output_digest=_output_digest(output_dir, applied),
+        output_digest=compute_output_digest(output_dir),
     )
 
 
@@ -272,8 +272,8 @@ def _validate_output_boundary(records: Sequence[FrameRecord], output_dir: Path) 
             raise ValueError("output directory must not overlap an input directory")
 
 
-def _output_digest(output_dir: Path, applied: ApplyResult) -> str:
-    generated_paths = [applied.selected_frames_path, applied.manifest_path]
+def compute_output_digest(output_dir: Path) -> str:
+    generated_paths = [output_dir / "selected_frames.txt", output_dir / "run_manifest.json"]
     generated_paths.extend(path for path in output_dir.iterdir() if path.is_file() and _is_generated_output_frame(path))
     digest = hashlib.sha256()
     for path in sorted(generated_paths, key=lambda item: item.name):
@@ -290,7 +290,7 @@ def _file_sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _clear_previous_outputs(output_dir: Path) -> None:
+def clear_generated_outputs(output_dir: Path) -> None:
     generated_names = {"selected_frames.txt", "run_manifest.json"}
     for path in output_dir.iterdir():
         if path.is_file() and (path.name in generated_names or _is_generated_output_frame(path)):

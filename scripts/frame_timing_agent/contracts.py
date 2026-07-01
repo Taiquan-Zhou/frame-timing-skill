@@ -247,6 +247,13 @@ class ExecutionResult:
     output_digest: str
 
 
+@dataclass(frozen=True)
+class OutputVerificationResult:
+    valid: bool
+    output_digest: str
+    issues: tuple[ValidationIssue, ...]
+
+
 def _normalize_candidate_float(value: object, field_name: str) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ConfigurationError(

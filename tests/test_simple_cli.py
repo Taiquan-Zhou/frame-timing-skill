@@ -1,4 +1,5 @@
 import json
+import inspect
 import subprocess
 import sys
 import tempfile
@@ -8,6 +9,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
+import frame_timing_agent.simple_cli as legacy_simple_cli
 
 TEST_TMP_ROOT = Path.cwd() / ".tmp_tests"
 
@@ -31,6 +33,11 @@ def _make_frames(frame_dir: Path, count: int) -> None:
 
 
 class SimpleCliTest(unittest.TestCase):
+    def test_legacy_cli_signature_and_module_do_not_expose_agent_contracts(self):
+        self.assertIn("argv", inspect.signature(legacy_simple_cli.main).parameters)
+        self.assertFalse(hasattr(legacy_simple_cli, "PolicyName"))
+        self.assertFalse(hasattr(legacy_simple_cli, "StrategyRequest"))
+
     def test_cli_processes_one_frame_directory_with_one_argument(self):
         with _tempdir() as tmp:
             root = Path(tmp)

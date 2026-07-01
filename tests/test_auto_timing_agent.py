@@ -1,5 +1,6 @@
 import tempfile
 import unittest
+import inspect
 from pathlib import Path
 import subprocess
 import sys
@@ -8,6 +9,7 @@ import json
 import cv2
 import numpy as np
 
+import frame_timing_agent.auto_timing_agent as legacy_auto_timing
 from frame_timing_agent.auto_timing_agent import run_timing_agent
 
 
@@ -19,6 +21,11 @@ def _write_image(path: Path, value: int) -> None:
 
 
 class AutoTimingAgentTest(unittest.TestCase):
+    def test_legacy_entry_keeps_override_signature_without_agent_contracts(self):
+        self.assertIn("override_config_path", inspect.signature(run_timing_agent).parameters)
+        self.assertFalse(hasattr(legacy_auto_timing, "PolicyName"))
+        self.assertFalse(hasattr(legacy_auto_timing, "StrategyRequest"))
+
     def test_preview_writes_analysis_but_not_output_frames(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

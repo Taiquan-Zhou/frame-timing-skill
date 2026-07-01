@@ -9,6 +9,7 @@ from frame_timing_agent import PolicyName, RiskLevel, StrategyRequest, Validatio
 from frame_timing_agent.contracts import (
     AnalysisRange,
     ExecutionResult,
+    OutputVerificationResult,
     QualitySummary,
     StrategyCandidate,
     TrajectorySummary,
@@ -179,3 +180,10 @@ def test_execution_result_contract_is_frozen() -> None:
 
     with pytest.raises(FrozenInstanceError):
         result.output_frame_count = 0
+
+
+def test_output_verification_result_is_frozen() -> None:
+    result = OutputVerificationResult(True, "sha256:output", ())
+
+    with pytest.raises(FrozenInstanceError):
+        result.valid = False

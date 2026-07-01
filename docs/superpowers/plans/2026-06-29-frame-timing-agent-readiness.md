@@ -725,34 +725,42 @@ git commit -m "feat: enforce strategy safety before execution"
 
 **Files:**
 - Create: `scripts/frame_timing_agent/service.py`
+- Create: `scripts/frame_timing_agent/output_verifier.py`
 - Create: `tests/test_service.py`
 - Modify: `scripts/frame_timing_agent/__init__.py`
+- Modify: `scripts/frame_timing_agent/apply_frame_strategy.py`
+- Modify: `scripts/frame_timing_agent/contracts.py`
 - Modify: `tests/test_auto_timing_agent.py`
 - Modify: `tests/test_batch_timing_agent.py`
+- Modify: `tests/test_contracts.py`
 - Modify: `tests/test_simple_cli.py`
 
-- [ ] **Step 1: 为 analyze/plan/validate/apply/verify 生命周期写失败测试**
+- [x] **Step 1: 为 analyze/plan/validate/apply/verify 生命周期写失败测试**
 
 测试新服务入口执行 `StrategyRequest → resolve_strategy_request → analyze → plan → validate → apply_validated_strategy → verify`；分析阶段不创建 `output_frames`，验证失败不能执行，输入变化后执行失败，成功执行后健康检查通过。重复执行同一已保存且已验证的候选必须得到相同 `selected_sources`、输出文件字节和 `output_digest`；重新运行分析只承诺离散判断和选帧结果稳定，不承诺 OpenCV 中间浮点逐位一致。Python service 只接收已经构造并自校验的 `StrategyRequest`，不得接受 `override_config_path` 或任意底层参数 dict；JSON 到 `StrategyRequest` 的严格解析属于 Task 7 CLI 适配层。
 
-- [ ] **Step 2: 实现无状态 service 函数**
+- [x] **Step 2: 实现无状态 service 函数**
 
 每个阶段只依赖显式输入和文件产物；不使用模块级可变状态。Agent-safe 服务通过 `resolve_strategy_request()` 将已校验的 `StrategyRequest` 解析为 `ResolvedStrategyConfig`，随后在规划器和验证器中传递该类型。分析、计划和验证 JSON 使用原子写入：先写同目录临时文件，再 `replace()`。`service.py` 不导入 `auto_timing_agent.py`、`batch_timing_agent.py` 或 `simple_cli.py`。
 
+公开签名固定为 `analyze_frames(frame_dir, artifact_root, *, fps=30.0)`、`plan_strategy(analysis, request, artifact_root)`、`validate_strategy(analysis, candidate, request, artifact_root)`、`apply_validated_strategy(frame_dir, analysis, candidate, validation, output_dir)` 和 `verify_output(analysis, candidate, execution, output_dir)`。输出健康检查独立位于 `output_verifier.py`，service 只负责阶段编排与原子产物写入。
+
 接入前记录长序列分析的图像读取次数和耗时；若重复解码成为主要瓶颈，只允许引入有明确内存上限的逐帧共享读取器，不得默认缓存整段原图，也不得为了性能把分析结果写回输入目录。
 
-- [ ] **Step 3: 锁定 v2/v3 隔离边界**
+当前 Windows 开发环境的 120 帧临时基准记录为 360 次 `cv2.imread`、4.280 秒（测试夹具 48x64，分析宽度 960）；回归锁定每帧最多解码三次（尺寸校验、质量指标和运动分析各一次）。该单机数据只用于识别重复解码热点，不作为跨设备性能承诺；当前未在没有真实长视频性能证据时引入整段图像缓存。
+
+- [x] **Step 3: 锁定 v2/v3 隔离边界**
 
 不修改 `auto_timing_agent.py`、`batch_timing_agent.py` 或 `simple_cli.py` 的生产代码。兼容测试锁定以下事实：旧函数签名继续接受 `override_config_path`；无 override 和有 override 的调用都生成 v2 strategy；现有一条命令入口继续生成 v2 产物；legacy 入口不暴露 `PolicyName` 或 `StrategyRequest`。新 service 的公开签名不接受 legacy `mode`、`override_config_path` 或 raw dict。
 
 不得根据 `override_config_path is None`、环境变量、产物目录是否存在或调用来源来选择引擎。未来迁移旧 facade 时必须新增显式版本计划、行为对比和弃用周期，不能在本任务内顺带完成。
 
-- [ ] **Step 4: 验证并提交**
+- [x] **Step 4: 验证并提交**
 
 ```powershell
 python -m pytest tests/test_service.py tests/test_auto_timing_agent.py tests/test_batch_timing_agent.py tests/test_simple_cli.py -v
 python -m mypy scripts/frame_timing_agent/service.py
-git add scripts/frame_timing_agent/service.py scripts/frame_timing_agent/__init__.py tests/test_service.py tests/test_auto_timing_agent.py tests/test_batch_timing_agent.py tests/test_simple_cli.py
+git add scripts/frame_timing_agent/service.py scripts/frame_timing_agent/output_verifier.py scripts/frame_timing_agent/__init__.py scripts/frame_timing_agent/apply_frame_strategy.py scripts/frame_timing_agent/contracts.py tests/test_service.py tests/test_auto_timing_agent.py tests/test_batch_timing_agent.py tests/test_contracts.py tests/test_simple_cli.py
 git commit -m "feat: expose staged frame timing service"
 ```
 
