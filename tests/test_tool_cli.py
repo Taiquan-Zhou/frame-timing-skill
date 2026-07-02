@@ -6,8 +6,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 import pytest
-
-import frame_timing_agent.tool_cli as tool_cli
+from frame_timing_agent import tool_cli
 from frame_timing_agent.tool_cli import main
 
 
@@ -207,6 +206,79 @@ def test_execution_failure_returns_exit_four(tmp_path: Path, capsys: pytest.Capt
     assert str(tmp_path) not in stdout
 
 
+def test_apply_rejects_strategy_derived_from_tampered_analysis(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    frame_dir = tmp_path / "frames"
+    artifact_root = tmp_path / "output" / "tampered_analysis"
+    output_dir = artifact_root / "output_frames"
+    _write_frames(frame_dir)
+
+    exit_code, _, _, _ = _invoke(
+        capsys,
+        ["analyze", "--frames", str(frame_dir), "--artifact-root", str(artifact_root)],
+    )
+    assert exit_code == 0
+
+    analysis_path = artifact_root / "analysis.json"
+    analysis = json.loads(analysis_path.read_text(encoding="utf-8"))
+    analysis["motion_confidence"] = 1.0
+    analysis["ranges"] = [
+        {
+            "start": 0,
+            "end": 7,
+            "kind": "jitter",
+            "confidence": 1.0,
+            "reason": "forged jitter range",
+        }
+    ]
+    analysis["warnings"] = []
+    for frame in analysis["frames"]:
+        frame["motion_confidence"] = 1.0
+        frame["jitter_score"] = 1.0
+        frame["jitter_confidence"] = 1.0
+        frame["low_quality_candidate"] = False
+    analysis_path.write_text(json.dumps(analysis), encoding="utf-8")
+
+    for argv in (
+        ["plan", "--analysis", str(analysis_path), "--policy", "jitter_reduction"],
+        [
+            "validate",
+            "--analysis",
+            str(analysis_path),
+            "--strategy",
+            str(artifact_root / "strategy.json"),
+        ],
+    ):
+        exit_code, payload, _, _ = _invoke(capsys, argv)
+        assert exit_code == 0, payload
+
+    strategy = json.loads((artifact_root / "strategy.json").read_text(encoding="utf-8"))
+    assert len(strategy["selected_sources"]) < 8
+
+    exit_code, payload, _, _ = _invoke(
+        capsys,
+        [
+            "apply",
+            "--frames",
+            str(frame_dir),
+            "--analysis",
+            str(analysis_path),
+            "--strategy",
+            str(artifact_root / "strategy.json"),
+            "--validation",
+            str(artifact_root / "validation.json"),
+            "--output-dir",
+            str(output_dir),
+        ],
+    )
+
+    assert exit_code == 4
+    assert payload["error"]["code"] == "execution_failed"
+    assert not output_dir.exists()
+
+
 def test_health_failure_returns_exit_five(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     frame_dir = tmp_path / "frames"
     artifact_root = tmp_path / "output" / "health_failure"
@@ -304,6 +376,145 @@ def test_cli_accepts_utf8_bom_artifacts(tmp_path: Path, capsys: pytest.CaptureFi
 
     assert exit_code == 0
     assert payload["status"] == "ok"
+
+
+def test_cli_errors_do_not_leak_absolute_input_paths(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    missing_frames = tmp_path / "private" / "missing_frames"
+    artifact_root = tmp_path / "output" / "missing_input"
+
+    exit_code, payload, stdout, stderr = _invoke(
+        capsys,
+        ["analyze", "--frames", str(missing_frames), "--artifact-root", str(artifact_root)],
+    )
+
+    assert exit_code == 2
+    assert payload["error"]["code"] == "input_error"
+    assert str(tmp_path) not in stdout
+    assert str(tmp_path) not in stderr
+
+
+def test_verify_issues_do_not_leak_absolute_paths(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    frame_dir = tmp_path / "private" / "frames"
+    artifact_root = tmp_path / "output" / "private_health"
+    output_dir = artifact_root / "output_frames"
+    _write_frames(frame_dir)
+    _prepare_validated(capsys, frame_dir, artifact_root)
+    exit_code, _, _, _ = _invoke(
+        capsys,
+        [
+            "apply",
+            "--frames",
+            str(frame_dir),
+            "--analysis",
+            str(artifact_root / "analysis.json"),
+            "--strategy",
+            str(artifact_root / "strategy.json"),
+            "--validation",
+            str(artifact_root / "validation.json"),
+            "--output-dir",
+            str(output_dir),
+        ],
+    )
+    assert exit_code == 0
+    selected_path = output_dir / "selected_frames.txt"
+    lines = selected_path.read_text(encoding="utf-8").splitlines()
+    header = lines[0].split("\t")
+    first_row = lines[1].split("\t")
+    first_row[header.index("source_index")] = str(tmp_path)
+    lines[1] = "\t".join(first_row)
+    selected_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    exit_code, payload, stdout, stderr = _invoke(
+        capsys,
+        ["verify", "--frames", str(frame_dir), "--artifact-root", str(artifact_root)],
+    )
+
+    assert exit_code == 5
+    issues = payload["result"]["issues"]
+    assert isinstance(issues, list)
+    assert any(issue["code"] == "selected_manifest_invalid" for issue in issues)
+    assert all(str(tmp_path) not in issue["message"] for issue in issues)
+    assert str(tmp_path) not in stdout
+    assert str(tmp_path) not in stderr
+
+
+def test_cli_rejects_excessively_nested_artifact_json(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    artifact_root = tmp_path / "output" / "deep_json"
+    artifact_root.mkdir(parents=True)
+    analysis_path = artifact_root / "analysis.json"
+    analysis_path.write_text("[" * 10_000 + "0" + "]" * 10_000, encoding="utf-8")
+
+    exit_code, payload, _, _ = _invoke(
+        capsys,
+        ["plan", "--analysis", str(analysis_path), "--policy", "coverage_first"],
+    )
+
+    assert exit_code == 2
+    assert payload["error"]["code"] == "invalid_artifact"
+
+
+def test_cli_rejects_noncanonical_artifact_filename(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    frame_dir = tmp_path / "frames"
+    artifact_root = tmp_path / "output" / "noncanonical"
+    _write_frames(frame_dir)
+    exit_code, _, _, _ = _invoke(
+        capsys,
+        ["analyze", "--frames", str(frame_dir), "--artifact-root", str(artifact_root)],
+    )
+    assert exit_code == 0
+    custom_analysis = artifact_root / "custom-analysis.json"
+    (artifact_root / "analysis.json").replace(custom_analysis)
+
+    exit_code, payload, _, _ = _invoke(
+        capsys,
+        ["plan", "--analysis", str(custom_analysis), "--policy", "coverage_first"],
+    )
+
+    assert exit_code == 2
+    assert payload["error"]["code"] == "input_error"
+    assert not (artifact_root / "strategy.json").exists()
+
+
+def test_cli_rejects_noncanonical_output_directory_as_input_error(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    frame_dir = tmp_path / "frames"
+    artifact_root = tmp_path / "output" / "noncanonical_output"
+    _write_frames(frame_dir)
+    _prepare_validated(capsys, frame_dir, artifact_root)
+
+    exit_code, payload, _, _ = _invoke(
+        capsys,
+        [
+            "apply",
+            "--frames",
+            str(frame_dir),
+            "--analysis",
+            str(artifact_root / "analysis.json"),
+            "--strategy",
+            str(artifact_root / "strategy.json"),
+            "--validation",
+            str(artifact_root / "validation.json"),
+            "--output-dir",
+            str(artifact_root / "frames_out"),
+        ],
+    )
+
+    assert exit_code == 2
+    assert payload["error"]["code"] == "input_error"
 
 
 def test_tool_cli_does_not_import_legacy_facades_and_is_registered() -> None:

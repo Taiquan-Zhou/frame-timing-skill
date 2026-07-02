@@ -62,7 +62,7 @@ def verify_output(
         output_digest = compute_output_digest(output_dir)
     except (FileNotFoundError, OSError, ValueError) as exc:
         output_digest = ""
-        issues.append(_error("output_digest_failed", f"cannot compute output digest: {exc}"))
+        issues.append(_error("output_digest_failed", f"cannot compute output digest: {type(exc).__name__}"))
     if output_digest != execution.output_digest:
         issues.append(_error("output_digest_mismatch", "output content digest does not match execution result"))
     return OutputVerificationResult(not issues, output_digest, tuple(issues))
@@ -132,7 +132,7 @@ def _load_selected_rows(output_dir: Path, issues: list[ValidationIssue]) -> list
         with selected_path.open("r", encoding="utf-8", newline="") as handle:
             return list(csv.DictReader(handle, delimiter="\t"))
     except (FileNotFoundError, OSError, UnicodeError) as exc:
-        issues.append(_error("selected_manifest_invalid", f"cannot read selected_frames.txt: {exc}"))
+        issues.append(_error("selected_manifest_invalid", f"cannot read selected_frames.txt: {type(exc).__name__}"))
         return []
 
 
@@ -142,7 +142,9 @@ def _selected_sources(rows: list[dict[str, str]], issues: list[ValidationIssue])
         for row in rows:
             sources.append(int(row["source_index"]))
     except (KeyError, TypeError, ValueError) as exc:
-        issues.append(_error("selected_manifest_invalid", f"invalid source index in selected_frames.txt: {exc}"))
+        issues.append(
+            _error("selected_manifest_invalid", f"invalid source index in selected_frames.txt: {type(exc).__name__}")
+        )
     return sources
 
 
@@ -196,7 +198,7 @@ def _check_manifest(output_dir: Path, execution: ExecutionResult, issues: list[V
     try:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     except (FileNotFoundError, OSError, UnicodeError, json.JSONDecodeError) as exc:
-        issues.append(_error("output_manifest_invalid", f"cannot read output manifest: {exc}"))
+        issues.append(_error("output_manifest_invalid", f"cannot read output manifest: {type(exc).__name__}"))
         return
     if manifest.get("output_count") != execution.output_frame_count:
         issues.append(_error("output_count_mismatch", "run_manifest output_count does not match execution result"))
@@ -289,7 +291,9 @@ def _check_output_record_identity(
     try:
         records = load_frame_records(output_dir, fps=fps)
     except (FileNotFoundError, OSError, UnicodeError, ValueError) as exc:
-        issues.append(_error("output_record_identity_mismatch", f"cannot load output frame identities: {exc}"))
+        issues.append(
+            _error("output_record_identity_mismatch", f"cannot load output frame identities: {type(exc).__name__}")
+        )
         return
     if tuple(record.source_index for record in records) != candidate.selected_sources:
         issues.append(_error("output_record_identity_mismatch", "output frame identities do not match candidate"))

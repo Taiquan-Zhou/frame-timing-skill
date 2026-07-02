@@ -342,12 +342,13 @@ def _load_analysis_gray(record: FrameRecord, analysis_width: int) -> npt.NDArray
     image = read_image(record.path, cv2.IMREAD_GRAYSCALE)
     if image is None:
         raise ValueError(f"cannot read frame image: {record.path}")
-    height, width = image.shape
+    gray_image = cast(npt.NDArray[np.uint8], image)
+    height, width = gray_image.shape
     if width == analysis_width:
-        return cast(npt.NDArray[np.uint8], image)
+        return gray_image
     analysis_height = max(1, round(height * analysis_width / width))
     interpolation = cv2.INTER_AREA if width > analysis_width else cv2.INTER_LINEAR
     return cast(
         npt.NDArray[np.uint8],
-        cv2.resize(image, (analysis_width, analysis_height), interpolation=interpolation),
+        cv2.resize(gray_image, (analysis_width, analysis_height), interpolation=interpolation),
     )

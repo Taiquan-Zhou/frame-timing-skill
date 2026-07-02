@@ -8,7 +8,7 @@ import numpy as np
 import numpy.typing as npt
 
 
-def read_image(path: Path | str, flags: int) -> npt.NDArray[np.uint8] | None:
+def read_image(path: Path | str, flags: int) -> npt.NDArray[np.generic] | None:
     """Read an image without relying on OpenCV's Windows path handling."""
 
     try:
@@ -17,4 +17,4 @@ def read_image(path: Path | str, flags: int) -> npt.NDArray[np.uint8] | None:
         return None
     if encoded.size == 0:
         return None
-    return cast(npt.NDArray[np.uint8] | None, cv2.imdecode(encoded, flags))
+    return cast(npt.NDArray[np.generic] | None, cv2.imdecode(encoded, flags))

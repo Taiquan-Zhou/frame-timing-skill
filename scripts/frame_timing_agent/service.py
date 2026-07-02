@@ -33,6 +33,7 @@ ANALYSIS_ARTIFACT = "analysis.json"
 STRATEGY_ARTIFACT = "strategy.json"
 VALIDATION_ARTIFACT = "validation.json"
 EXECUTION_ARTIFACT = "execution.json"
+OUTPUT_DIRECTORY = "output_frames"
 
 
 def capabilities() -> dict[str, object]:
@@ -107,11 +108,14 @@ def apply_validated_strategy(
 ) -> ExecutionResult:
     frame_dir = Path(frame_dir)
     output_dir = Path(output_dir)
-    if output_dir.name != "output_frames":
-        raise ValueError("validated execution output directory must be named output_frames")
+    if output_dir.name != OUTPUT_DIRECTORY:
+        raise ValueError(f"validated execution output directory must be named {OUTPUT_DIRECTORY}")
     _validate_artifact_root(output_dir.parent, frame_dir)
     records = load_frame_records(frame_dir, fps=analysis.fps)
-    core_result = _apply_validated_strategy(records, analysis, candidate, validation, output_dir)
+    execution_analysis = analyze_records(records, fps=analysis.fps, motion_config=MotionConfig())
+    if execution_analysis.input_digest != analysis.input_digest:
+        raise ValueError("input digest mismatch: source frames changed after analysis")
+    core_result = _apply_validated_strategy(records, execution_analysis, candidate, validation, output_dir)
     execution = replace(
         core_result,
         output_manifest=(Path(output_dir.name) / core_result.output_manifest).as_posix(),

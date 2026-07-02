@@ -182,7 +182,7 @@ def read_execution_result(path: Path | str) -> ExecutionResult:
 def _load_object(path: Path | str) -> dict[str, object]:
     try:
         payload = json.loads(Path(path).read_text(encoding="utf-8-sig"))
-    except (FileNotFoundError, OSError, UnicodeError, json.JSONDecodeError) as exc:
+    except (FileNotFoundError, OSError, UnicodeError, json.JSONDecodeError, RecursionError) as exc:
         raise ArtifactFormatError("artifact JSON cannot be read") from exc
     return _object(payload, "artifact")
 

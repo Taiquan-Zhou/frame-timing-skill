@@ -17,6 +17,11 @@ from frame_timing_agent.configuration import parse_strategy_request
 from frame_timing_agent.contracts import SCHEMA_VERSION, ConfigurationError, PolicyName
 from frame_timing_agent.serialization import canonical_json_bytes
 from frame_timing_agent.service import (
+    ANALYSIS_ARTIFACT,
+    EXECUTION_ARTIFACT,
+    OUTPUT_DIRECTORY,
+    STRATEGY_ARTIFACT,
+    VALIDATION_ARTIFACT,
     analyze_frames,
     apply_validated_strategy,
     capabilities,
@@ -102,11 +107,11 @@ def _dispatch(args: argparse.Namespace) -> tuple[int, dict[str, object]]:
         frame_dir = Path(args.frames)
         analysis = analyze_frames(frame_dir, Path(args.artifact_root), fps=float(args.fps))
         _log("analyze", f"analyzed {analysis.frame_count} frames")
-        payload = _response("ok", analysis.run_id, {"analysis": "analysis.json"}, analysis)
+        payload = _response("ok", analysis.run_id, {"analysis": ANALYSIS_ARTIFACT}, analysis)
         payload["input_name"] = frame_dir.name
         return EXIT_SUCCESS, payload
     if command == "plan":
-        analysis_path = Path(args.analysis)
+        analysis_path = _canonical_artifact_path(args.analysis, ANALYSIS_ARTIFACT)
         analysis = read_analysis_result(analysis_path)
         request = parse_strategy_request(
             {
@@ -121,12 +126,12 @@ def _dispatch(args: argparse.Namespace) -> tuple[int, dict[str, object]]:
         return EXIT_SUCCESS, _response(
             "ok",
             analysis.run_id,
-            {"analysis": "analysis.json", "strategy": "strategy.json"},
+            {"analysis": ANALYSIS_ARTIFACT, "strategy": STRATEGY_ARTIFACT},
             candidate,
         )
     if command == "validate":
-        analysis_path = Path(args.analysis)
-        strategy_path = Path(args.strategy)
+        analysis_path = _canonical_artifact_path(args.analysis, ANALYSIS_ARTIFACT)
+        strategy_path = _canonical_artifact_path(args.strategy, STRATEGY_ARTIFACT)
         artifact_root = _shared_artifact_root(analysis_path, strategy_path)
         analysis = read_analysis_result(analysis_path)
         candidate = read_strategy_candidate(strategy_path)
@@ -136,14 +141,18 @@ def _dispatch(args: argparse.Namespace) -> tuple[int, dict[str, object]]:
         return (EXIT_SUCCESS if validation.valid else EXIT_UNSAFE_STRATEGY), _response(
             status,
             analysis.run_id,
-            {"analysis": "analysis.json", "strategy": "strategy.json", "validation": "validation.json"},
+            {
+                "analysis": ANALYSIS_ARTIFACT,
+                "strategy": STRATEGY_ARTIFACT,
+                "validation": VALIDATION_ARTIFACT,
+            },
             validation,
         )
     if command == "apply":
-        analysis_path = Path(args.analysis)
-        strategy_path = Path(args.strategy)
-        validation_path = Path(args.validation)
-        output_dir = Path(args.output_dir)
+        analysis_path = _canonical_artifact_path(args.analysis, ANALYSIS_ARTIFACT)
+        strategy_path = _canonical_artifact_path(args.strategy, STRATEGY_ARTIFACT)
+        validation_path = _canonical_artifact_path(args.validation, VALIDATION_ARTIFACT)
+        output_dir = _canonical_artifact_path(args.output_dir, OUTPUT_DIRECTORY)
         artifact_root = _shared_artifact_root(analysis_path, strategy_path, validation_path, output_dir)
         analysis = read_analysis_result(analysis_path)
         candidate = read_strategy_candidate(strategy_path)
@@ -154,30 +163,30 @@ def _dispatch(args: argparse.Namespace) -> tuple[int, dict[str, object]]:
             "ok",
             analysis.run_id,
             {
-                "analysis": "analysis.json",
-                "strategy": "strategy.json",
-                "validation": "validation.json",
-                "execution": "execution.json",
+                "analysis": ANALYSIS_ARTIFACT,
+                "strategy": STRATEGY_ARTIFACT,
+                "validation": VALIDATION_ARTIFACT,
+                "execution": EXECUTION_ARTIFACT,
                 "output_frames": output_dir.relative_to(artifact_root).as_posix(),
             },
             execution,
         )
     if command == "verify":
         artifact_root = Path(args.artifact_root)
-        analysis = read_analysis_result(artifact_root / "analysis.json")
-        candidate = read_strategy_candidate(artifact_root / "strategy.json")
-        execution = read_execution_result(artifact_root / "execution.json")
-        health = verify_output(Path(args.frames), analysis, candidate, execution, artifact_root / "output_frames")
+        analysis = read_analysis_result(artifact_root / ANALYSIS_ARTIFACT)
+        candidate = read_strategy_candidate(artifact_root / STRATEGY_ARTIFACT)
+        execution = read_execution_result(artifact_root / EXECUTION_ARTIFACT)
+        health = verify_output(Path(args.frames), analysis, candidate, execution, artifact_root / OUTPUT_DIRECTORY)
         status = "ok" if health.valid else "failed"
         _log("verify", status)
         return (EXIT_SUCCESS if health.valid else EXIT_HEALTH_FAILED), _response(
             status,
             analysis.run_id,
             {
-                "analysis": "analysis.json",
-                "strategy": "strategy.json",
-                "execution": "execution.json",
-                "output_frames": "output_frames",
+                "analysis": ANALYSIS_ARTIFACT,
+                "strategy": STRATEGY_ARTIFACT,
+                "execution": EXECUTION_ARTIFACT,
+                "output_frames": OUTPUT_DIRECTORY,
             },
             health,
         )
@@ -189,6 +198,13 @@ def _shared_artifact_root(*paths: Path) -> Path:
     if len(parents) != 1:
         raise ArtifactFormatError("artifact paths must share one artifact root")
     return parents.pop()
+
+
+def _canonical_artifact_path(raw_path: str, expected_name: str) -> Path:
+    path = Path(raw_path)
+    if path.name != expected_name:
+        raise CliInputError(f"artifact path must end with {expected_name}")
+    return path
 
 
 def _response(
@@ -207,7 +223,7 @@ def _response(
 
 
 def _emit_error(exit_code: int, code: str, safe_message: str, exc: Exception) -> int:
-    _log("error", str(exc))
+    _log("error", f"{code}: {type(exc).__name__}")
     _emit(
         {
             "schema_version": SCHEMA_VERSION,

@@ -777,6 +777,8 @@ git commit -m "feat: expose staged frame timing service"
 - Create: `scripts/frame_timing_agent/image_io.py`
 - Create: `scripts/frame_timing_agent/tool_cli.py`
 - Create: `tests/test_tool_cli.py`
+- Modify: `scripts/frame_timing_agent/service.py`
+- Modify: `scripts/frame_timing_agent/output_verifier.py`
 - Modify: `scripts/frame_timing_agent/analysis.py`
 - Modify: `scripts/frame_timing_agent/motion_model.py`
 - Modify: `scripts/frame_timing_agent/timing_metrics.py`
@@ -789,7 +791,9 @@ git commit -m "feat: expose staged frame timing service"
 
 - [x] **Step 2: 实现薄 CLI 适配层**
 
-CLI 只解析参数和 JSON（使用 `parse_strategy_request()`）、调用 service、序列化结果和映射退出码。阶段产物由 `artifact_io.py` 按精确字段和类型恢复为冻结契约对象；不得复制配置约束、分析、规划或验证逻辑。`apply` 和 `verify` 都必须显式接收原始 `--frames`，因为执行和健康检查必须重新读取源帧并验证输入摘要，不能从不含私有绝对路径的 JSON 产物反推源目录。
+CLI 只解析参数和 JSON（使用 `parse_strategy_request()`）、调用 service、序列化结果和映射退出码。阶段产物由 `artifact_io.py` 按精确字段和类型恢复为冻结契约对象；不得复制配置约束、分析、规划或验证逻辑。`plan`、`validate` 和 `apply` 只接受同一 artifact root 下的规范文件名 `analysis.json`、`strategy.json`、`validation.json`，执行输出目录固定为 `output_frames`，保证响应中的相对路径与真实产物一致。畸形或递归过深的 JSON 必须稳定映射为输入错误；stdout、stderr 和健康检查问题不得包含用户绝对路径。
+
+`apply` 和 `verify` 都必须显式接收原始 `--frames`，不能从不含私有绝对路径的 JSON 产物反推源目录。`apply` 在写入任何输出前必须从源帧重新执行分析，用新分析重新验证候选与验证结果，并核对输入摘要；可编辑的 `analysis.json`、`strategy.json` 和 `validation.json` 都只是待核对的审计声明，不是执行授权。`verify` 必须重新读取源帧并验证输入与输出内容摘要。
 
 - [x] **Step 3: 注册命令**
 
