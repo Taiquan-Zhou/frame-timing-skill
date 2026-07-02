@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import re
+
+from frame_timing_agent.configuration import resolve_strategy_request
 from frame_timing_agent.contracts import (
     SCHEMA_VERSION,
     AgentHealthResult,
+    AnalysisRange,
     AnalysisResult,
     ExecutionResult,
     OutputVerificationResult,
@@ -12,6 +16,10 @@ from frame_timing_agent.contracts import (
     ValidationSeverity,
 )
 from frame_timing_agent.serialization import sha256_digest
+from frame_timing_agent.strategy_validator import validate_strategy
+
+_AUDIT_CODE_PATTERN = re.compile(r"[a-z0-9][a-z0-9_.:-]{0,127}")
+_REDACTED_AUDIT_CODE = "untrusted_text_redacted"
 
 
 def audit_agent_strategy_lifecycle(
@@ -21,7 +29,12 @@ def audit_agent_strategy_lifecycle(
     execution: ExecutionResult,
     output_verification: OutputVerificationResult,
 ) -> AgentHealthResult:
-    issues = list(validation.issues)
+    fresh_validation = validate_strategy(
+        analysis,
+        candidate,
+        resolve_strategy_request(candidate.request),
+    )
+    issues = list(fresh_validation.issues)
     expected_candidate_digest = sha256_digest(candidate)
     validation_identity_valid = True
     identity_checks = (
@@ -45,18 +58,45 @@ def audit_agent_strategy_lifecycle(
         if not matches:
             validation_identity_valid = False
             issues.append(ValidationIssue(code, ValidationSeverity.ERROR, message))
-    if not validation.valid:
+    saved_validation_matches = validation == fresh_validation
+    if not saved_validation_matches:
         issues.append(
             ValidationIssue(
-                "saved_validation_failed",
+                "saved_validation_mismatch",
                 ValidationSeverity.ERROR,
-                "saved validation did not approve the candidate",
+                "saved validation does not match fresh strategy validation",
             )
         )
-    saved_validation_has_errors = any(issue.severity is ValidationSeverity.ERROR for issue in validation.issues)
+    audit_text_safe = _audit_text_is_safe(analysis, candidate)
+    if not audit_text_safe:
+        issues.append(
+            ValidationIssue(
+                "unsafe_audit_text",
+                ValidationSeverity.ERROR,
+                "saved analysis or candidate contains unsafe audit text",
+            )
+        )
     issues.extend(output_verification.issues)
-    validation_valid = validation.valid and validation_identity_valid and not saved_validation_has_errors
+    validation_valid = (
+        fresh_validation.valid and saved_validation_matches and validation_identity_valid and audit_text_safe
+    )
     valid = validation_valid and output_verification.valid
+    review_ranges = tuple(
+        AnalysisRange(
+            start=item.start,
+            end=item.end,
+            kind="review_required",
+            confidence=item.confidence,
+            reason=_safe_audit_code(item.reason),
+        )
+        for item in analysis.ranges
+        if item.kind == "review_required"
+    )
+    selected_sources = set(candidate.selected_sources)
+    selected_jitter_scores = [frame.jitter_score for frame in analysis.frames if frame.source_index in selected_sources]
+    estimated_residual_jitter = (
+        sum(selected_jitter_scores) / len(selected_jitter_scores) if selected_jitter_scores else 0.0
+    )
     return AgentHealthResult(
         schema_version=SCHEMA_VERSION,
         run_id=analysis.run_id,
@@ -76,10 +116,22 @@ def audit_agent_strategy_lifecycle(
         maximum_source_index_gap=candidate.maximum_source_index_gap,
         maximum_time_gap_seconds=candidate.maximum_time_gap_seconds,
         estimated_jitter_reduction=candidate.estimated_jitter_reduction,
+        estimated_residual_jitter=estimated_residual_jitter,
         estimated_quality_change=candidate.estimated_quality_change,
         confidence=candidate.confidence,
         risk_level=candidate.risk_level,
-        reasons=candidate.reasons,
-        review_ranges=analysis.ranges,
+        reasons=tuple(_safe_audit_code(reason) for reason in candidate.reasons),
+        review_ranges=review_ranges,
         issues=tuple(issues),
     )
+
+
+def _audit_text_is_safe(analysis: AnalysisResult, candidate: StrategyCandidate) -> bool:
+    values = [*analysis.warnings, *candidate.reasons]
+    values.extend(item.kind for item in analysis.ranges)
+    values.extend(item.reason for item in analysis.ranges)
+    return all(_AUDIT_CODE_PATTERN.fullmatch(value) is not None for value in values)
+
+
+def _safe_audit_code(value: str) -> str:
+    return value if _AUDIT_CODE_PATTERN.fullmatch(value) is not None else _REDACTED_AUDIT_CODE

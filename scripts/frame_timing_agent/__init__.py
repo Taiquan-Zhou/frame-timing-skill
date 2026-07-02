@@ -1,5 +1,6 @@
 """Public contracts for the frame timing optimization package."""
 
+from frame_timing_agent.agent_artifact_health import run_agent_artifact_health_check
 from frame_timing_agent.contracts import (
     AgentHealthResult,
     AnalysisResult,
@@ -13,7 +14,6 @@ from frame_timing_agent.contracts import (
     ValidationResult,
     ValidationSeverity,
 )
-from frame_timing_agent.agent_artifact_health import run_agent_artifact_health_check
 from frame_timing_agent.service import (
     analyze_frames,
     apply_validated_strategy,

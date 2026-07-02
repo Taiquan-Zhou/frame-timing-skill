@@ -6,13 +6,13 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Never
 
+from frame_timing_agent.agent_artifact_health import HealthPublicationError, run_agent_artifact_health_check
 from frame_timing_agent.artifact_io import (
     ArtifactFormatError,
     read_analysis_result,
     read_strategy_candidate,
     read_validation_result,
 )
-from frame_timing_agent.agent_artifact_health import run_agent_artifact_health_check
 from frame_timing_agent.artifact_layout import (
     ANALYSIS_ARTIFACT,
     EXECUTION_ARTIFACT,
@@ -62,6 +62,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _emit_error(EXIT_INPUT_ERROR, "invalid_artifact", "artifact JSON is invalid", exc)
     except (ConfigurationError, FileNotFoundError) as exc:
         return _emit_error(EXIT_INPUT_ERROR, "input_error", "command input is invalid", exc)
+    except HealthPublicationError as exc:
+        return _emit_error(EXIT_HEALTH_FAILED, "health_failed", "health artifact publication failed", exc)
     except (OSError, ValueError) as exc:
         if command == "apply":
             return _emit_error(EXIT_EXECUTION_FAILED, "execution_failed", "validated execution failed", exc)

@@ -19,7 +19,6 @@ def write_agent_report(
     health: AgentHealthResult,
 ) -> Path:
     path = Path(path)
-    reasons = list(candidate.reasons) + list(analysis.warnings)
     lines = [
         "# Frame Timing Agent Report",
         "",
@@ -32,18 +31,19 @@ def write_agent_report(
         f"Maximum source index gap: {candidate.maximum_source_index_gap}",
         f"Maximum time gap: {candidate.maximum_time_gap_seconds:.6f} seconds",
         f"Estimated jitter reduction: {candidate.estimated_jitter_reduction:.6f}",
+        f"Estimated residual jitter: {health.estimated_residual_jitter:.6f}",
         f"Estimated quality change: {candidate.estimated_quality_change:.6f}",
         f"Confidence: {candidate.confidence:.6f}",
         f"Risk level: {candidate.risk_level.value}",
         "",
-        "## Fallback reasons:",
+        "## Decision reasons:",
     ]
-    lines.extend([f"- {reason}" for reason in reasons] if reasons else ["- none"])
+    lines.extend([f"- {reason}" for reason in health.reasons] if health.reasons else ["- none"])
     lines.extend(["", "## Review ranges:"])
-    if analysis.ranges:
+    if health.review_ranges:
         lines.extend(
             f"- {item.kind}: source {item.start}-{item.end}, confidence={item.confidence:.6f}, reason={item.reason}"
-            for item in analysis.ranges
+            for item in health.review_ranges
         )
     else:
         lines.append("- none")

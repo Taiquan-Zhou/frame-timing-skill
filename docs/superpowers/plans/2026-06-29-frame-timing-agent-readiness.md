@@ -439,21 +439,27 @@ v0.3.0 的内部默认窗口固定为 `(0.15, 0.35, 0.75)` 秒，`decision_deadb
 
 ```python
 from frame_timing_agent import (
+    AgentHealthResult,
     AnalysisResult,
+    ExecutionResult,
+    OutputVerificationResult,
     PolicyName,
+    RiskLevel,
     StrategyCandidate,
     StrategyRequest,
     ValidationResult,
+    ValidationSeverity,
     analyze_frames,
     apply_validated_strategy,
     capabilities,
     plan_strategy,
+    run_agent_artifact_health_check,
     validate_strategy,
     verify_output,
 )
 ```
 
-`__init__.py` 只导出以上契约，不导出 OpenCV 或内部算法函数。
+`__init__.py` 只导出以上契约，不导出 OpenCV 或内部算法函数。健康检查入口签名为 `run_agent_artifact_health_check(frame_dir: Path | str, artifact_root: Path | str) -> AgentHealthResult`。
 
 这些名称只代表 v3 Agent-safe API。legacy `run_timing_agent()`、`run_batch_timing_agent()` 和 v2 `apply_strategy()` 继续从原模块导入，不提升为新的包根稳定接口，也不与 v3 函数共用名称。
 
@@ -847,9 +853,11 @@ git commit -m "feat: add agent-safe json tool interface"
 
 健康检查不得另写一套保留率和间隔逻辑。它必须读取执行时保存的 `ValidationResult`、核验其身份链，并调用 `output_verifier.verify_output()` 重新检查候选约束和实际输出。v2 `batch_artifact_health.py` 与 v3 单次生命周期的布局不同，保持 legacy 隔离，不在同一模块混合两套模型。
 
+保存的 `ValidationResult` 必须与统一验证器重算结果完整一致，health 只采用重算得到的可信 issues。每次 verify 在读取必需产物前先使旧的 `health.json`、`report.md` 和 `human_review.md` 失效；三份派生产物全部生成成功后再发布，并最后提交 `health.json`。发布失败返回健康失败退出码 5，不得留下旧的或部分成功 health。
+
 - [x] **Step 3: 报告候选对比和风险**
 
-人类报告明确显示输入数、输出数、保留率、最大连续丢帧数、最大源编号间隔、最大时间间隔、残余抖动估计、置信度、风险等级、回退原因和待人工审查区间。
+人类报告明确显示输入数、输出数、保留率、最大连续丢帧数、最大源编号间隔、最大时间间隔、残余抖动估计、置信度、风险等级、决策原因和待人工审查区间。残余抖动定义为候选所选来源帧 `jitter_score` 的算术平均值；待人工审查区间只包含 `kind == "review_required"` 的范围。报告和 health 不得复制未重新验证的自由文本，也不得包含私有绝对路径。
 
 - [x] **Step 4: 验证并提交**
 

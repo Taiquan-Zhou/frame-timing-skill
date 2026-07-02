@@ -274,6 +274,7 @@ class AgentHealthResult:
     maximum_source_index_gap: int
     maximum_time_gap_seconds: float
     estimated_jitter_reduction: float
+    estimated_residual_jitter: float
     estimated_quality_change: float
     confidence: float
     risk_level: RiskLevel

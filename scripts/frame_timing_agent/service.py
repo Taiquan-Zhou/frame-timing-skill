@@ -4,6 +4,12 @@ from dataclasses import replace
 from pathlib import Path
 
 from frame_timing_agent.analysis import analyze_records
+from frame_timing_agent.apply_frame_strategy import (
+    apply_validated_strategy as _apply_validated_strategy,
+)
+from frame_timing_agent.apply_frame_strategy import (
+    clear_generated_outputs,
+)
 from frame_timing_agent.artifact_layout import (
     ANALYSIS_ARTIFACT,
     EXECUTION_ARTIFACT,
@@ -11,12 +17,6 @@ from frame_timing_agent.artifact_layout import (
     STRATEGY_ARTIFACT,
     VALIDATION_ARTIFACT,
     validate_artifact_root,
-)
-from frame_timing_agent.apply_frame_strategy import (
-    apply_validated_strategy as _apply_validated_strategy,
-)
-from frame_timing_agent.apply_frame_strategy import (
-    clear_generated_outputs,
 )
 from frame_timing_agent.configuration import resolve_strategy_request
 from frame_timing_agent.contracts import (
@@ -34,6 +34,7 @@ from frame_timing_agent.output_verifier import verify_output as verify_output
 from frame_timing_agent.serialization import write_canonical_json_atomic
 from frame_timing_agent.strategy_planner import plan_strategy as _plan_strategy
 from frame_timing_agent.strategy_validator import validate_strategy as _validate_strategy
+
 
 def capabilities() -> dict[str, object]:
     policies = list(PolicyName)
