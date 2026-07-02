@@ -875,38 +875,36 @@ git commit -m "feat: audit agent strategy lifecycle"
 - Create: `scripts/frame_timing_agent/benchmark_cli.py`
 - Create: `tests/test_benchmark_cli.py`
 - Modify: `.gitignore`
+- Modify: `pyproject.toml`
 
-- [ ] **Step 1: 定义不包含私有路径的 benchmark 结果格式**
+- [x] **Step 1: 定义不包含私有路径的 benchmark 结果格式**
 
 记录案例 ID、输入摘要、帧数、分辨率、fps、设备类别、运动类型、前后景深度结构、光照、策略、输出数、保留率、最大连续丢帧数、最大时间间隔、抖动估计、复核请求率、人工结论和版本；不提交原始图片或绝对路径。结果只表示当前验收集中的观察，不计算或宣称总体准确率。
 
-- [ ] **Step 2: 对已知 580/570 帧案例运行三种策略**
+- [x] **Step 2: 对已知 580/570 帧案例运行三种策略**
 
-使用本地外部数据运行，不覆盖旧目录：
-
-```powershell
-if (-not $env:FRAME_TIMING_BENCHMARK_FRAMES) { throw "FRAME_TIMING_BENCHMARK_FRAMES is required" }
-frame-timing-tool analyze --frames $env:FRAME_TIMING_BENCHMARK_FRAMES --artifact-root "output/benchmark/test3_cut2"
-frame-timing-tool plan --analysis "output/benchmark/test3_cut2/analysis.json" --policy coverage_first
-frame-timing-tool validate --analysis "output/benchmark/test3_cut2/analysis.json" --strategy "output/benchmark/test3_cut2/strategy.json"
-```
+使用 `frame-timing-benchmark` 分析一次，并把三种策略写入独立子目录，避免相互覆盖。结果写入被忽略的 `output/benchmark/`，不提交原始帧、绝对路径或本地结果。
 
 验收：0-136 和 424-579 不得判为静止；任何删帧都必须来自高置信度抖动/质量替代判断，并满足覆盖约束。报告措辞必须写“当前验收集中观察到 0 个慢速运动静止误判”，不得写成对未知视频的零误判保证。
+
+2026-07-02 本地外部样本观察：输入 570 帧，当前验收集中观察到 0 个慢速运动静止误判；三策略均通过验证，分别保留 564、563、563 帧，删除原因均为 `high_confidence_jitter_removed`。该结果未提交，且人工结论仍为 pending。
 
 - [ ] **Step 3: 人工复核至少七类真实片段**
 
 案例必须覆盖慢速平移、明显手持抖动、快速主动转向、低纹理场景、模糊突发、前后景明显视差和独立运动前景；视差类至少包含横向移动或前向移动之一。每类记录“正确检测、误检、漏检、复核请求和建模覆盖风险”。该集合是发布验收与冒烟回归集，不是统计验证集；新增设备、分辨率、fps、光照或深度结构后持续追加案例，不回写算法期望迎合现有结果。
 
-- [ ] **Step 4: 设置发布门槛**
+- [ ] **Step 4: 设置发布门槛（当前 pending）**
 
 当前验收集内已确认的慢速运动误判静止数、视差/动态前景不确定区间自动删除数和验证器违规漏过数必须均为 0；所有高风险策略必须要求人工确认。算法效果不满足门槛时不发布 v0.3.0，也不得修改期望结果来迁就实现。
 
 通过这些门槛只允许发布独立的 v3 Agent-safe API/CLI，不自动授权迁移 legacy facade 或 `frame-timing` 默认入口。旧入口迁移需基于本次 benchmark 结果另立计划和版本。
 
-- [ ] **Step 5: 提交 benchmark 工具和格式，不提交私有数据**
+当前仅有一个 570 帧外部案例，尚缺其余真实片段类别和完整人工结论，因此不得把 Task 9 或 v0.3.0 发布门标记为通过。
+
+- [x] **Step 5: 提交 benchmark 工具和格式，不提交私有数据**
 
 ```powershell
-git add benchmarks scripts/frame_timing_agent/benchmark_cli.py tests/test_benchmark_cli.py .gitignore
+git add benchmarks scripts/frame_timing_agent/benchmark_cli.py tests/test_benchmark_cli.py .gitignore pyproject.toml docs/superpowers/plans/2026-06-29-frame-timing-agent-readiness.md
 git commit -m "test: add external frame timing benchmark protocol"
 ```
 

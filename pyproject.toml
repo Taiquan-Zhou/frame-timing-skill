@@ -56,6 +56,7 @@ frame-timing-batch = "frame_timing_agent.batch_timing_agent:main"
 frame-timing-health = "frame_timing_agent.batch_artifact_health:main"
 frame-timing-demo = "frame_timing_agent.demo_frames:main"
 frame-timing-tool = "frame_timing_agent.tool_cli:main"
+frame-timing-benchmark = "frame_timing_agent.benchmark_cli:main"
 
 [tool.setuptools]
 package-dir = {"" = "scripts"}

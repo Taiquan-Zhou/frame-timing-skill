@@ -1,0 +1,191 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Frame Timing External Benchmark Result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "case_id",
+    "input_digest",
+    "input_frame_count",
+    "resolution",
+    "fps",
+    "device_category",
+    "motion_type",
+    "depth_structure",
+    "lighting",
+    "software_version",
+    "acceptance_scope",
+    "expected_active_ranges",
+    "review_request_rate",
+    "policies",
+    "automated_checks",
+    "human_review",
+    "release_gate"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "case_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$"},
+    "input_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "input_frame_count": {"type": "integer", "minimum": 1},
+    "resolution": {"$ref": "#/$defs/resolution"},
+    "fps": {"type": "number", "exclusiveMinimum": 0},
+    "device_category": {"$ref": "#/$defs/code"},
+    "motion_type": {"$ref": "#/$defs/code"},
+    "depth_structure": {"$ref": "#/$defs/code"},
+    "lighting": {"$ref": "#/$defs/code"},
+    "software_version": {"type": "string", "minLength": 1},
+    "acceptance_scope": {"const": "current_external_smoke_set_only"},
+    "expected_active_ranges": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/sourceRange"}
+    },
+    "review_request_rate": {"type": "number", "minimum": 0, "maximum": 1},
+    "policies": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "items": {"$ref": "#/$defs/policyResult"},
+      "allOf": [
+        {
+          "contains": {"type": "object", "properties": {"policy": {"const": "coverage_first"}}},
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {"type": "object", "properties": {"policy": {"const": "balanced"}}},
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {"type": "object", "properties": {"policy": {"const": "jitter_reduction"}}},
+          "minContains": 1,
+          "maxContains": 1
+        }
+      ]
+    },
+    "automated_checks": {"$ref": "#/$defs/automatedChecks"},
+    "human_review": {"$ref": "#/$defs/humanReview"},
+    "release_gate": {"$ref": "#/$defs/releaseGate"}
+  },
+  "$defs": {
+    "code": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9_.:-]{0,127}$"
+    },
+    "resolution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["width", "height"],
+      "properties": {
+        "width": {"type": "integer", "minimum": 1},
+        "height": {"type": "integer", "minimum": 1}
+      }
+    },
+    "sourceRange": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["start", "end"],
+      "properties": {
+        "start": {"type": "integer", "minimum": 0},
+        "end": {"type": "integer", "minimum": 0}
+      }
+    },
+    "policyResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "policy",
+        "output_frame_count",
+        "removed_frame_count",
+        "retention_ratio",
+        "maximum_consecutive_drops",
+        "maximum_source_index_gap",
+        "maximum_time_gap_seconds",
+        "estimated_jitter_reduction",
+        "confidence",
+        "risk_level",
+        "validation_valid",
+        "human_confirmation_required",
+        "deletion_reason_codes",
+        "reasons"
+      ],
+      "properties": {
+        "policy": {"enum": ["coverage_first", "balanced", "jitter_reduction"]},
+        "output_frame_count": {"type": "integer", "minimum": 1},
+        "removed_frame_count": {"type": "integer", "minimum": 0},
+        "retention_ratio": {"type": "number", "minimum": 0, "maximum": 1},
+        "maximum_consecutive_drops": {"type": "integer", "minimum": 0},
+        "maximum_source_index_gap": {"type": "integer", "minimum": 0},
+        "maximum_time_gap_seconds": {"type": "number", "minimum": 0},
+        "estimated_jitter_reduction": {"type": "number", "minimum": 0, "maximum": 1},
+        "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+        "risk_level": {"enum": ["low", "medium", "high"]},
+        "validation_valid": {"type": "boolean"},
+        "human_confirmation_required": {"type": "boolean"},
+        "deletion_reason_codes": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "high_confidence_jitter_removed",
+              "low_quality_with_substitute_removed",
+              "redundant_static_removed"
+            ]
+          },
+          "uniqueItems": true
+        },
+        "reasons": {"type": "array", "items": {"$ref": "#/$defs/code"}}
+      }
+    },
+    "automatedChecks": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "active_range_static_misclassified_sources",
+        "all_policy_validations_passed",
+        "all_high_risk_policies_require_confirmation",
+        "all_removals_use_jitter_or_quality_reason"
+      ],
+      "properties": {
+        "active_range_static_misclassified_sources": {
+          "type": "array",
+          "items": {"type": "integer", "minimum": 0},
+          "uniqueItems": true
+        },
+        "all_policy_validations_passed": {"type": "boolean"},
+        "all_high_risk_policies_require_confirmation": {"type": "boolean"},
+        "all_removals_use_jitter_or_quality_reason": {"type": "boolean"}
+      }
+    },
+    "humanReview": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "conclusion",
+        "correct_detections",
+        "false_positives",
+        "false_negatives",
+        "review_requests",
+        "reconstruction_coverage_risk"
+      ],
+      "properties": {
+        "conclusion": {"enum": ["pending", "pass", "fail"]},
+        "correct_detections": {"type": ["integer", "null"], "minimum": 0},
+        "false_positives": {"type": ["integer", "null"], "minimum": 0},
+        "false_negatives": {"type": ["integer", "null"], "minimum": 0},
+        "review_requests": {"type": ["integer", "null"], "minimum": 0},
+        "reconstruction_coverage_risk": {"enum": ["pending", "low", "medium", "high"]}
+      }
+    },
+    "releaseGate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "reasons"],
+      "properties": {
+        "status": {"enum": ["pending", "passed", "failed"]},
+        "reasons": {"type": "array", "items": {"$ref": "#/$defs/code"}}
+      }
+    }
+  }
+}
