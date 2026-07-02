@@ -254,6 +254,34 @@ class OutputVerificationResult:
     issues: tuple[ValidationIssue, ...]
 
 
+@dataclass(frozen=True)
+class AgentHealthResult:
+    schema_version: int
+    run_id: str
+    strategy_id: str
+    input_digest: str
+    candidate_digest: str
+    output_digest: str
+    status: str
+    valid: bool
+    validation_valid: bool
+    output_valid: bool
+    input_frame_count: int
+    output_frame_count: int
+    policy: PolicyName
+    retention_ratio: float
+    maximum_consecutive_drops: int
+    maximum_source_index_gap: int
+    maximum_time_gap_seconds: float
+    estimated_jitter_reduction: float
+    estimated_quality_change: float
+    confidence: float
+    risk_level: RiskLevel
+    reasons: tuple[str, ...]
+    review_ranges: tuple[AnalysisRange, ...]
+    issues: tuple[ValidationIssue, ...]
+
+
 def _normalize_candidate_float(value: object, field_name: str) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ConfigurationError(

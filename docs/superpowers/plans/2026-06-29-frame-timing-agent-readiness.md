@@ -123,6 +123,10 @@ LLM 负责解释用户目标、选择预设、比较候选方案和处理人工�
 | `scripts/frame_timing_agent/artifact_io.py` | 严格反序列化 v3 阶段产物，拒绝未知字段和非规范值 |
 | `scripts/frame_timing_agent/image_io.py` | 通过 Python 文件接口读取 Unicode 路径，再交给 OpenCV 解码 |
 | `scripts/frame_timing_agent/tool_cli.py` | 面向 Agent 的稳定 JSON CLI，不包含业务算法 |
+| `scripts/frame_timing_agent/agent_lifecycle_audit.py` | 核验保存的验证身份链，并合并统一输出验证结果 |
+| `scripts/frame_timing_agent/agent_artifact_health.py` | 读取 v3 生命周期产物并生成 health、技术报告和人工审查报告 |
+| `scripts/frame_timing_agent/agent_report.py` | 生成不包含私有绝对路径的 v3 技术与人工报告 |
+| `scripts/frame_timing_agent/artifact_layout.py` | 集中定义 v3 产物名称和 output 根目录安全边界 |
 
 ### 4.2 保留并收敛的模块
 
@@ -824,29 +828,34 @@ git commit -m "feat: add agent-safe json tool interface"
 ### Task 8: 统一审计、健康检查和报告
 
 **Files:**
-- Modify: `scripts/frame_timing_agent/strategy_execution_audit.py`
-- Modify: `scripts/frame_timing_agent/batch_artifact_health.py`
-- Modify: `scripts/frame_timing_agent/timing_report.py`
-- Modify: `scripts/frame_timing_agent/human_review.py`
+- Create: `scripts/frame_timing_agent/artifact_layout.py`
+- Create: `scripts/frame_timing_agent/agent_lifecycle_audit.py`
+- Create: `scripts/frame_timing_agent/agent_artifact_health.py`
+- Create: `scripts/frame_timing_agent/agent_report.py`
+- Modify: `scripts/frame_timing_agent/contracts.py`
+- Modify: `scripts/frame_timing_agent/serialization.py`
+- Modify: `scripts/frame_timing_agent/service.py`
+- Modify: `scripts/frame_timing_agent/tool_cli.py`
+- Modify: `scripts/frame_timing_agent/__init__.py`
 - Create: `tests/test_agent_artifact_contract.py`
 
-- [ ] **Step 1: 写失败测试覆盖 v3 产物契约**
+- [x] **Step 1: 写失败测试覆盖 v3 产物契约**
 
 要求 analysis、candidate、validation、execution 和 health 五类 JSON 均存在；报告不得包含绝对输入路径；输出文件哈希必须与来源摘要一致。
 
-- [ ] **Step 2: 调用统一验证规则**
+- [x] **Step 2: 调用统一验证规则**
 
-健康检查不得另写一套保留率和间隔逻辑。它必须读取执行时保存的 `ValidationResult` 并重新检查实际输出。
+健康检查不得另写一套保留率和间隔逻辑。它必须读取执行时保存的 `ValidationResult`、核验其身份链，并调用 `output_verifier.verify_output()` 重新检查候选约束和实际输出。v2 `batch_artifact_health.py` 与 v3 单次生命周期的布局不同，保持 legacy 隔离，不在同一模块混合两套模型。
 
-- [ ] **Step 3: 报告候选对比和风险**
+- [x] **Step 3: 报告候选对比和风险**
 
 人类报告明确显示输入数、输出数、保留率、最大连续丢帧数、最大源编号间隔、最大时间间隔、残余抖动估计、置信度、风险等级、回退原因和待人工审查区间。
 
-- [ ] **Step 4: 验证并提交**
+- [x] **Step 4: 验证并提交**
 
 ```powershell
-python -m pytest tests/test_agent_artifact_contract.py tests/test_strategy_execution_audit.py tests/test_batch_artifact_health.py tests/test_timing_report.py tests/test_human_review.py -v
-git add scripts/frame_timing_agent/strategy_execution_audit.py scripts/frame_timing_agent/batch_artifact_health.py scripts/frame_timing_agent/timing_report.py scripts/frame_timing_agent/human_review.py tests/test_agent_artifact_contract.py
+python -m pytest tests/test_agent_artifact_contract.py tests/test_tool_cli.py tests/test_service.py tests/test_serialization.py tests/test_strategy_execution_audit.py tests/test_batch_artifact_health.py tests/test_timing_report.py tests/test_human_review.py -v
+git add scripts/frame_timing_agent/artifact_layout.py scripts/frame_timing_agent/agent_lifecycle_audit.py scripts/frame_timing_agent/agent_artifact_health.py scripts/frame_timing_agent/agent_report.py scripts/frame_timing_agent/contracts.py scripts/frame_timing_agent/serialization.py scripts/frame_timing_agent/service.py scripts/frame_timing_agent/tool_cli.py scripts/frame_timing_agent/__init__.py tests/test_agent_artifact_contract.py docs/superpowers/plans/2026-06-29-frame-timing-agent-readiness.md
 git commit -m "feat: audit agent strategy lifecycle"
 ```
 

@@ -9,25 +9,29 @@ from typing import Never
 from frame_timing_agent.artifact_io import (
     ArtifactFormatError,
     read_analysis_result,
-    read_execution_result,
     read_strategy_candidate,
     read_validation_result,
+)
+from frame_timing_agent.agent_artifact_health import run_agent_artifact_health_check
+from frame_timing_agent.artifact_layout import (
+    ANALYSIS_ARTIFACT,
+    EXECUTION_ARTIFACT,
+    HEALTH_ARTIFACT,
+    HUMAN_REVIEW_ARTIFACT,
+    OUTPUT_DIRECTORY,
+    REPORT_ARTIFACT,
+    STRATEGY_ARTIFACT,
+    VALIDATION_ARTIFACT,
 )
 from frame_timing_agent.configuration import parse_strategy_request
 from frame_timing_agent.contracts import SCHEMA_VERSION, ConfigurationError, PolicyName
 from frame_timing_agent.serialization import canonical_json_bytes
 from frame_timing_agent.service import (
-    ANALYSIS_ARTIFACT,
-    EXECUTION_ARTIFACT,
-    OUTPUT_DIRECTORY,
-    STRATEGY_ARTIFACT,
-    VALIDATION_ARTIFACT,
     analyze_frames,
     apply_validated_strategy,
     capabilities,
     plan_strategy,
     validate_strategy,
-    verify_output,
 )
 
 EXIT_SUCCESS = 0
@@ -173,19 +177,20 @@ def _dispatch(args: argparse.Namespace) -> tuple[int, dict[str, object]]:
         )
     if command == "verify":
         artifact_root = Path(args.artifact_root)
-        analysis = read_analysis_result(artifact_root / ANALYSIS_ARTIFACT)
-        candidate = read_strategy_candidate(artifact_root / STRATEGY_ARTIFACT)
-        execution = read_execution_result(artifact_root / EXECUTION_ARTIFACT)
-        health = verify_output(Path(args.frames), analysis, candidate, execution, artifact_root / OUTPUT_DIRECTORY)
+        health = run_agent_artifact_health_check(Path(args.frames), artifact_root)
         status = "ok" if health.valid else "failed"
         _log("verify", status)
         return (EXIT_SUCCESS if health.valid else EXIT_HEALTH_FAILED), _response(
             status,
-            analysis.run_id,
+            health.run_id,
             {
                 "analysis": ANALYSIS_ARTIFACT,
                 "strategy": STRATEGY_ARTIFACT,
+                "validation": VALIDATION_ARTIFACT,
                 "execution": EXECUTION_ARTIFACT,
+                "health": HEALTH_ARTIFACT,
+                "report": REPORT_ARTIFACT,
+                "human_review": HUMAN_REVIEW_ARTIFACT,
                 "output_frames": OUTPUT_DIRECTORY,
             },
             health,

@@ -3,6 +3,8 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import os
+import tempfile
 from collections.abc import Mapping
 from dataclasses import fields, is_dataclass
 from enum import Enum
@@ -23,6 +25,29 @@ def canonical_json_bytes(payload: object) -> bytes:
 def sha256_digest(payload: object) -> str:
     digest = hashlib.sha256(canonical_json_bytes(payload)).hexdigest()
     return f"sha256:{digest}"
+
+
+def write_canonical_json_atomic(path: Path | str, payload: object) -> None:
+    destination = Path(path)
+    encoded = canonical_json_bytes(payload)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    temporary_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="wb",
+            dir=destination.parent,
+            prefix=f".{destination.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as handle:
+            temporary_path = Path(handle.name)
+            handle.write(encoded)
+            handle.flush()
+            os.fsync(handle.fileno())
+        temporary_path.replace(destination)
+    finally:
+        if temporary_path is not None and temporary_path.exists():
+            temporary_path.unlink()
 
 
 def _normalize(value: object) -> object:
