@@ -120,6 +120,8 @@ LLM 负责解释用户目标、选择预设、比较候选方案和处理人工�
 | `scripts/frame_timing_agent/strategy_validator.py` | 保留率、连续丢帧、端点、范围、重复和摘要校验 |
 | `scripts/frame_timing_agent/serialization.py` | 规范化 JSON 字节序列化和摘要计算，不包含业务判断 |
 | `scripts/frame_timing_agent/service.py` | analyze/plan/validate/apply/verify 五阶段编排 |
+| `scripts/frame_timing_agent/artifact_io.py` | 严格反序列化 v3 阶段产物，拒绝未知字段和非规范值 |
+| `scripts/frame_timing_agent/image_io.py` | 通过 Python 文件接口读取 Unicode 路径，再交给 OpenCV 解码 |
 | `scripts/frame_timing_agent/tool_cli.py` | 面向 Agent 的稳定 JSON CLI，不包含业务算法 |
 
 ### 4.2 保留并收敛的模块
@@ -460,8 +462,8 @@ frame-timing-tool capabilities
 frame-timing-tool analyze --frames path/to/clean_frames --artifact-root output/frame_timing_run
 frame-timing-tool plan --analysis output/frame_timing_run/analysis.json --policy coverage_first
 frame-timing-tool validate --analysis output/frame_timing_run/analysis.json --strategy output/frame_timing_run/strategy.json
-frame-timing-tool apply --analysis output/frame_timing_run/analysis.json --strategy output/frame_timing_run/strategy.json --validation output/frame_timing_run/validation.json --output-dir output/frame_timing_run/output_frames
-frame-timing-tool verify --artifact-root output/frame_timing_run
+frame-timing-tool apply --frames path/to/clean_frames --analysis output/frame_timing_run/analysis.json --strategy output/frame_timing_run/strategy.json --validation output/frame_timing_run/validation.json --output-dir output/frame_timing_run/output_frames
+frame-timing-tool verify --frames path/to/clean_frames --artifact-root output/frame_timing_run
 ```
 
 规则：
@@ -771,26 +773,32 @@ git commit -m "feat: expose staged frame timing service"
 ### Task 7: 增加 Agent JSON CLI
 
 **Files:**
+- Create: `scripts/frame_timing_agent/artifact_io.py`
+- Create: `scripts/frame_timing_agent/image_io.py`
 - Create: `scripts/frame_timing_agent/tool_cli.py`
 - Create: `tests/test_tool_cli.py`
+- Modify: `scripts/frame_timing_agent/analysis.py`
+- Modify: `scripts/frame_timing_agent/motion_model.py`
+- Modify: `scripts/frame_timing_agent/timing_metrics.py`
+- Modify: `tests/test_service.py`
 - Modify: `pyproject.toml`
 
-- [ ] **Step 1: 为六个子命令和退出码写失败测试**
+- [x] **Step 1: 为六个子命令和退出码写失败测试**
 
 通过 `main(argv)` 测试 JSON Schema、UTF-8、标准输出单对象、日志进入标准错误以及退出码 0/2/3/4/5。
 
-- [ ] **Step 2: 实现薄 CLI 适配层**
+- [x] **Step 2: 实现薄 CLI 适配层**
 
-CLI 只解析参数和 JSON（使用 `parse_strategy_request()`）、调用 service、序列化结果和映射退出码。不得复制配置约束、分析、规划或验证逻辑。
+CLI 只解析参数和 JSON（使用 `parse_strategy_request()`）、调用 service、序列化结果和映射退出码。阶段产物由 `artifact_io.py` 按精确字段和类型恢复为冻结契约对象；不得复制配置约束、分析、规划或验证逻辑。`apply` 和 `verify` 都必须显式接收原始 `--frames`，因为执行和健康检查必须重新读取源帧并验证输入摘要，不能从不含私有绝对路径的 JSON 产物反推源目录。
 
-- [ ] **Step 3: 注册命令**
+- [x] **Step 3: 注册命令**
 
 ```toml
 [project.scripts]
 frame-timing-tool = "frame_timing_agent.tool_cli:main"
 ```
 
-- [ ] **Step 4: 安装到隔离目录进行黑盒测试**
+- [x] **Step 4: 安装到隔离目录进行黑盒测试**
 
 ```powershell
 python -m build
@@ -801,11 +809,11 @@ frame-timing-tool capabilities
 
 预期：输出合法 JSON，包含三个策略和安全边界。
 
-- [ ] **Step 5: 验证并提交**
+- [x] **Step 5: 验证并提交**
 
 ```powershell
 python -m pytest tests/test_tool_cli.py tests/test_simple_cli.py -v
-git add scripts/frame_timing_agent/tool_cli.py tests/test_tool_cli.py pyproject.toml
+git add scripts/frame_timing_agent/artifact_io.py scripts/frame_timing_agent/image_io.py scripts/frame_timing_agent/tool_cli.py scripts/frame_timing_agent/analysis.py scripts/frame_timing_agent/motion_model.py scripts/frame_timing_agent/timing_metrics.py tests/test_tool_cli.py tests/test_service.py pyproject.toml docs/superpowers/plans/2026-06-29-frame-timing-agent-readiness.md
 git commit -m "feat: add agent-safe json tool interface"
 ```
 

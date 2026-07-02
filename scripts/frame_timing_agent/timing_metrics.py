@@ -9,6 +9,7 @@ import numpy as np
 import numpy.typing as npt
 
 from frame_timing_agent.frame_source import FrameRecord
+from frame_timing_agent.image_io import read_image
 
 
 @dataclass(frozen=True)
@@ -25,7 +26,7 @@ class FrameMetric:
 
 
 def _load_gray_image(path: Path) -> npt.NDArray[np.uint8]:
-    image = cv2.imread(str(path), cv2.IMREAD_GRAYSCALE)
+    image = read_image(path, cv2.IMREAD_GRAYSCALE)
     if image is None:
         raise ValueError(f"Cannot read frame image: {path}")
     return cast(npt.NDArray[np.uint8], image)

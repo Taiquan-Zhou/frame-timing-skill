@@ -14,6 +14,7 @@ import numpy as np
 import pytest
 from frame_timing_agent.apply_frame_strategy import compute_output_digest
 from frame_timing_agent.contracts import AnalysisError, PolicyName, StrategyRequest
+from frame_timing_agent.image_io import read_image
 from frame_timing_agent.service import (
     analyze_frames,
     apply_validated_strategy,
@@ -245,12 +246,15 @@ def test_analysis_image_decoding_is_bounded_to_three_reads_per_frame(tmp_path: P
     frame_dir = tmp_path / "frames"
     artifact_root = tmp_path / "output" / "read_count"
     _write_frames(frame_dir)
-    original_imread = cv2.imread
-
-    with patch("cv2.imread", wraps=original_imread) as imread:
+    with (
+        patch("frame_timing_agent.analysis.read_image", wraps=read_image) as dimension_reads,
+        patch("frame_timing_agent.timing_metrics.read_image", wraps=read_image) as quality_reads,
+        patch("frame_timing_agent.motion_model.read_image", wraps=read_image) as motion_reads,
+    ):
         analyze_frames(frame_dir, artifact_root)
 
-    assert 8 <= imread.call_count <= 24
+    total_reads = dimension_reads.call_count + quality_reads.call_count + motion_reads.call_count
+    assert 8 <= total_reads <= 24
 
 
 def test_apply_requires_dedicated_output_frames_directory(tmp_path: Path) -> None:

@@ -10,6 +10,7 @@ import numpy as np
 import numpy.typing as npt
 
 from frame_timing_agent.frame_source import FrameRecord
+from frame_timing_agent.image_io import read_image
 
 _FALLBACK_NORMALIZED_RESIDUAL = 1.0
 
@@ -338,7 +339,7 @@ def _phase_fallback(
 
 
 def _load_analysis_gray(record: FrameRecord, analysis_width: int) -> npt.NDArray[np.uint8]:
-    image = cv2.imread(str(record.path), cv2.IMREAD_GRAYSCALE)
+    image = read_image(record.path, cv2.IMREAD_GRAYSCALE)
     if image is None:
         raise ValueError(f"cannot read frame image: {record.path}")
     height, width = image.shape

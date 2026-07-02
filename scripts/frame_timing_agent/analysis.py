@@ -18,6 +18,7 @@ from frame_timing_agent.contracts import (
     TrajectorySummary,
 )
 from frame_timing_agent.frame_source import FrameRecord, normalize_fps
+from frame_timing_agent.image_io import read_image
 from frame_timing_agent.motion_model import (
     MotionConfig,
     MotionSample,
@@ -95,7 +96,7 @@ def _validate_and_sort_records(records: Sequence[FrameRecord]) -> list[FrameReco
 def _validate_dimensions(records: Sequence[FrameRecord]) -> tuple[int, int]:
     expected: tuple[int, int] | None = None
     for record in records:
-        image = cv2.imread(str(record.path), cv2.IMREAD_UNCHANGED)
+        image = read_image(record.path, cv2.IMREAD_UNCHANGED)
         if image is None:
             raise AnalysisError(
                 f"cannot read frame image: {record.path}",
