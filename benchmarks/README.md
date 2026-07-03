@@ -41,4 +41,6 @@ The command analyzes the source once, then writes independent `strategy.json` an
 
 A case fails automatically when an expected active range overlaps a `static` analysis range, any policy validation
 fails, a deletion reason is not high-confidence jitter or quality-with-substitute, or a high-risk policy does not require human confirmation. It remains pending until human review is complete.
+All machine-readable `*_removed` reasons are retained in the result; unknown deletion reasons fail closed instead of
+being filtered from the audit record. Human-confirmation decisions use the same policy as the generated human review.
 Passing individual cases does not authorize release until all seven required categories are represented and reviewed.

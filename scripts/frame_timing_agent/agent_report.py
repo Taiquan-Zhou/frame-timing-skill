@@ -6,9 +6,9 @@ from frame_timing_agent.contracts import (
     AgentHealthResult,
     AnalysisResult,
     ExecutionResult,
-    RiskLevel,
     StrategyCandidate,
 )
+from frame_timing_agent.review_policy import requires_human_confirmation
 
 
 def write_agent_report(
@@ -64,8 +64,10 @@ def write_agent_human_review(
     health: AgentHealthResult,
 ) -> Path:
     path = Path(path)
-    requires_confirmation = (
-        not health.valid or candidate.risk_level in {RiskLevel.MEDIUM, RiskLevel.HIGH} or bool(health.review_ranges)
+    requires_confirmation = requires_human_confirmation(
+        valid=health.valid,
+        risk_level=candidate.risk_level,
+        has_review_ranges=bool(health.review_ranges),
     )
     lines = [
         "# Frame Timing Human Review",

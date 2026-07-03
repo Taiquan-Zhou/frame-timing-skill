@@ -11,6 +11,7 @@ from typing import Never
 
 from frame_timing_agent.artifact_layout import validate_artifact_root
 from frame_timing_agent.contracts import AnalysisRange, PolicyName, RiskLevel, StrategyRequest
+from frame_timing_agent.review_policy import requires_human_confirmation
 from frame_timing_agent.serialization import canonical_json_bytes, write_canonical_json_atomic
 from frame_timing_agent.service import analyze_frames, plan_strategy, validate_strategy
 
@@ -18,11 +19,6 @@ BENCHMARK_SCHEMA_VERSION = 1
 RESULT_ARTIFACT = "benchmark_result.json"
 _SAFE_CODE = re.compile(r"[a-z0-9][a-z0-9_.:-]{0,127}")
 _CASE_ID = re.compile(r"[a-z0-9][a-z0-9_-]{0,63}")
-_DELETION_REASON_CODES = (
-    "high_confidence_jitter_removed",
-    "low_quality_with_substitute_removed",
-    "redundant_static_removed",
-)
 _ALLOWED_BENCHMARK_DELETION_REASONS = {
     "high_confidence_jitter_removed",
     "low_quality_with_substitute_removed",
@@ -189,10 +185,12 @@ def run_benchmark(
                 confidence=candidate.confidence,
                 risk_level=candidate.risk_level.value,
                 validation_valid=validation.valid,
-                human_confirmation_required=(
-                    candidate.risk_level in {RiskLevel.MEDIUM, RiskLevel.HIGH} or bool(review_sources)
+                human_confirmation_required=requires_human_confirmation(
+                    valid=validation.valid,
+                    risk_level=candidate.risk_level,
+                    has_review_ranges=bool(review_sources),
                 ),
-                deletion_reason_codes=tuple(code for code in _DELETION_REASON_CODES if code in candidate.reasons),
+                deletion_reason_codes=_deletion_reason_codes(candidate.reasons),
                 reasons=candidate.reasons,
             )
         )
@@ -201,20 +199,9 @@ def run_benchmark(
     expected_active_sources = {
         source for item in expected_active_ranges for source in available_sources if item.start <= source <= item.end
     }
-    checks = AutomatedChecks(
+    checks = build_automated_checks(
         active_range_static_misclassified_sources=tuple(sorted(static_sources & expected_active_sources)),
-        all_policy_validations_passed=all(item.validation_valid for item in policies),
-        all_high_risk_policies_require_confirmation=all(
-            item.risk_level != RiskLevel.HIGH.value or item.human_confirmation_required for item in policies
-        ),
-        all_removals_use_jitter_or_quality_reason=all(
-            item.removed_frame_count == 0
-            or (
-                bool(item.deletion_reason_codes)
-                and set(item.deletion_reason_codes) <= _ALLOWED_BENCHMARK_DELETION_REASONS
-            )
-            for item in policies
-        ),
+        policies=policies,
     )
     release_gate = evaluate_case_gate(checks, human_review)
     result = BenchmarkResult(
@@ -312,6 +299,32 @@ def _sources_for_kind(
         for source in available_sources
         if item.start <= source <= item.end
     }
+
+
+def _deletion_reason_codes(reasons: tuple[str, ...]) -> tuple[str, ...]:
+    return tuple(reason for reason in reasons if reason.endswith("_removed"))
+
+
+def build_automated_checks(
+    *,
+    active_range_static_misclassified_sources: tuple[int, ...],
+    policies: Sequence[PolicyBenchmarkResult],
+) -> AutomatedChecks:
+    return AutomatedChecks(
+        active_range_static_misclassified_sources=active_range_static_misclassified_sources,
+        all_policy_validations_passed=all(item.validation_valid for item in policies),
+        all_high_risk_policies_require_confirmation=all(
+            item.risk_level != RiskLevel.HIGH.value or item.human_confirmation_required for item in policies
+        ),
+        all_removals_use_jitter_or_quality_reason=all(
+            item.removed_frame_count == 0
+            or (
+                bool(item.deletion_reason_codes)
+                and set(item.deletion_reason_codes) <= _ALLOWED_BENCHMARK_DELETION_REASONS
+            )
+            for item in policies
+        ),
+    )
 
 
 def evaluate_case_gate(checks: AutomatedChecks, human_review: HumanReview) -> ReleaseGate:

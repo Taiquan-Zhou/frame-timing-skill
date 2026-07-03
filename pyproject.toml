@@ -37,6 +37,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
   "build>=1.2,<2",
+  "jsonschema>=4.23,<5",
   "mypy>=1.10,<2",
   "pip-audit>=2.7,<3",
   "pytest>=8,<10",

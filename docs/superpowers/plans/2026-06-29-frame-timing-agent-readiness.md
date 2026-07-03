@@ -872,14 +872,18 @@ git commit -m "feat: audit agent strategy lifecycle"
 **Files:**
 - Create: `benchmarks/case_schema.json`
 - Create: `benchmarks/README.md`
+- Create: `scripts/frame_timing_agent/review_policy.py`
 - Create: `scripts/frame_timing_agent/benchmark_cli.py`
 - Create: `tests/test_benchmark_cli.py`
+- Modify: `scripts/frame_timing_agent/agent_report.py`
 - Modify: `.gitignore`
 - Modify: `pyproject.toml`
 
 - [x] **Step 1: 定义不包含私有路径的 benchmark 结果格式**
 
 记录案例 ID、输入摘要、帧数、分辨率、fps、设备类别、运动类型、前后景深度结构、光照、策略、输出数、保留率、最大连续丢帧数、最大时间间隔、抖动估计、复核请求率、人工结论和版本；不提交原始图片或绝对路径。结果只表示当前验收集中的观察，不计算或宣称总体准确率。
+
+所有以 `_removed` 结尾的机器原因都原样写入结果，再与允许集合比较；未知删除原因必须使发布门失败，不能在检查前被过滤。高风险和不确定结果的人工确认要求由 `review_policy.py` 单一规则同时提供给人类报告和 benchmark，benchmark 再独立检查高风险不变量。
 
 - [x] **Step 2: 对已知 580/570 帧案例运行三种策略**
 

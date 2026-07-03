@@ -126,13 +126,7 @@
         "human_confirmation_required": {"type": "boolean"},
         "deletion_reason_codes": {
           "type": "array",
-          "items": {
-            "enum": [
-              "high_confidence_jitter_removed",
-              "low_quality_with_substitute_removed",
-              "redundant_static_removed"
-            ]
-          },
+          "items": {"$ref": "#/$defs/code"},
           "uniqueItems": true
         },
         "reasons": {"type": "array", "items": {"$ref": "#/$defs/code"}}
