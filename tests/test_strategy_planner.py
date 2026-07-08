@@ -6,6 +6,7 @@ from dataclasses import replace
 import pytest
 from frame_timing_agent.configuration import ResolvedStrategyConfig, resolve_strategy_request
 from frame_timing_agent.contracts import (
+    POLICY_REVISION,
     SCHEMA_VERSION,
     AnalysisRange,
     AnalysisResult,
@@ -93,6 +94,10 @@ def _maximum_consecutive_drops(all_sources: tuple[int, ...], selected_sources: t
     return maximum
 
 
+def _selected_in_range(candidate: StrategyCandidate, start: int, end: int) -> tuple[int, ...]:
+    return tuple(source for source in candidate.selected_sources if start <= source <= end)
+
+
 def test_policy_presets_produce_ordered_candidates_with_explainable_metrics() -> None:
     analysis = _analysis(
         120,
@@ -111,9 +116,69 @@ def test_policy_presets_produce_ordered_candidates_with_explainable_metrics() ->
     assert all(math.isfinite(candidate.estimated_quality_change) for candidate in candidates)
     assert all(0.0 <= candidate.confidence <= 1.0 for candidate in candidates)
     assert [candidate.risk_level for candidate in candidates] == [RiskLevel.LOW, RiskLevel.MEDIUM, RiskLevel.HIGH]
-    assert "high_confidence_jitter_removed" in candidates[0].reasons
-    assert "redundant_static_removed" not in candidates[0].reasons
+    assert all(candidate.policy_revision == POLICY_REVISION for candidate in candidates)
+    assert "redundant_static_removed" in candidates[0].reasons
     assert "redundant_static_removed" in candidates[1].reasons
+
+
+def test_strategy_id_records_current_policy_revision() -> None:
+    analysis = _analysis(
+        40,
+        ranges=(AnalysisRange(0, 39, "jitter", 0.95, "multiscale_jitter_consensus"),),
+    )
+
+    candidate = plan_strategy(analysis, _config(PolicyName.COVERAGE_FIRST))
+
+    assert candidate.policy_revision == POLICY_REVISION
+    assert POLICY_REVISION in candidate.strategy_id
+
+
+def test_coverage_first_thins_confirmed_static_before_touching_motion() -> None:
+    analysis = _analysis(
+        120,
+        ranges=(
+            AnalysisRange(0, 39, "static", 0.90, "low_motion_high_confidence"),
+            AnalysisRange(40, 79, "jitter", 0.95, "multiscale_jitter_consensus"),
+            AnalysisRange(80, 119, "active_motion", 0.95, "coherent_active_motion"),
+        ),
+    )
+
+    candidate = plan_strategy(analysis, _config(PolicyName.COVERAGE_FIRST))
+    selected_static = _selected_in_range(candidate, 0, 39)
+    selected_non_static = _selected_in_range(candidate, 40, 119)
+
+    assert len(selected_static) <= 10
+    assert selected_static[0] == 0
+    assert selected_static[-1] == 39
+    assert selected_non_static == tuple(range(40, 120))
+    assert candidate.retention_ratio >= 0.75
+    assert candidate.maximum_consecutive_drops <= 4
+    assert "redundant_static_removed" in candidate.reasons
+
+
+def test_coverage_first_does_not_thin_static_below_very_high_confidence() -> None:
+    analysis = _analysis(
+        40,
+        ranges=(AnalysisRange(0, 39, "static", 0.899999, "low_motion_high_confidence"),),
+    )
+
+    candidate = plan_strategy(analysis, _config(PolicyName.COVERAGE_FIRST))
+
+    assert candidate.selected_sources == tuple(range(40))
+    assert "static_confidence_guard_applied" in candidate.reasons
+
+
+def test_coverage_first_keeps_original_non_static_safety_density() -> None:
+    analysis = _analysis(
+        120,
+        ranges=(AnalysisRange(0, 119, "jitter", 0.95, "multiscale_jitter_consensus"),),
+    )
+
+    candidate = plan_strategy(analysis, _config(PolicyName.COVERAGE_FIRST))
+
+    assert candidate.retention_ratio >= 0.85
+    assert candidate.maximum_consecutive_drops <= 2
+    assert "non_static_coverage_floor_applied" in candidate.reasons
 
 
 def test_continuous_slow_translation_is_not_treated_as_static_or_compressed() -> None:
@@ -205,7 +270,7 @@ def test_low_quality_frame_with_local_safe_substitute_can_be_removed() -> None:
     assert 10 not in candidate.selected_sources
     assert {9, 11} & set(candidate.selected_sources)
     assert "low_quality_with_substitute_removed" in candidate.reasons
-    assert "redundant_static_removed" not in candidate.reasons
+    assert "redundant_static_removed" in candidate.reasons
 
 
 @pytest.mark.parametrize("kind", ["static", "jitter"])

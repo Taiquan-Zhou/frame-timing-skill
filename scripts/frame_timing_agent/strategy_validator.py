@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import math
 
-from frame_timing_agent.configuration import ResolvedStrategyConfig
+from frame_timing_agent.configuration import ResolvedStrategyConfig, StrategySafetyLimits, strategy_safety_limits
 from frame_timing_agent.contracts import (
+    POLICY_REVISION,
     SCHEMA_VERSION,
     AnalysisRange,
     AnalysisResult,
@@ -12,6 +13,14 @@ from frame_timing_agent.contracts import (
     ValidationIssue,
     ValidationResult,
     ValidationSeverity,
+)
+from frame_timing_agent.selection_constraints import (
+    frame_kinds,
+    maximum_consecutive_drops,
+    maximum_non_static_consecutive_drops,
+    non_static_retention_ratio,
+    range_confidence,
+    static_range_endpoint_positions,
 )
 from frame_timing_agent.serialization import sha256_digest
 from frame_timing_agent.strategy_planner import plan_strategy
@@ -29,6 +38,8 @@ def validate_strategy(
     expected_candidate = plan_strategy(analysis, config)
     frames = analysis.frames
     available_sources = tuple(frame.source_index for frame in frames)
+    kinds = frame_kinds(available_sources, analysis.ranges)
+    safety_limits = strategy_safety_limits(config)
     available_set = set(available_sources)
     raw_selected_sources: tuple[object, ...] = candidate.selected_sources
     invalid_source_type = any(
@@ -45,6 +56,8 @@ def validate_strategy(
         issues.append(_error("unsupported_candidate_schema", f"candidate schema_version must be {SCHEMA_VERSION}"))
     if candidate.input_digest != analysis.input_digest:
         issues.append(_error("input_digest_mismatch", "candidate input digest does not match analysis"))
+    if candidate.policy_revision != POLICY_REVISION:
+        issues.append(_error("policy_revision_mismatch", "candidate policy revision is not current"))
     if candidate.policy != config.policy or candidate.request.policy != config.policy:
         issues.append(_error("policy_mismatch", "candidate policy does not match resolved strategy config"))
     if (
@@ -62,6 +75,8 @@ def validate_strategy(
         issues.append(
             _error("candidate_diagnostic_mismatch", "candidate diagnostics do not match the planned strategy")
         )
+    if selected_sources != expected_candidate.selected_sources:
+        issues.append(_error("selected_sources_mismatch", "candidate sources do not match the planned strategy"))
 
     if invalid_source_type:
         issues.append(_error("invalid_source_type", "selected_sources must contain only integers"))
@@ -98,8 +113,9 @@ def validate_strategy(
             )
 
     retained_known = selected_set & available_set
+    retained_positions = {position for position, frame in enumerate(frames) if frame.source_index in retained_known}
     actual_retention = len(retained_known) / len(frames) if frames else 0.0
-    actual_maximum_drops = _maximum_consecutive_drops(available_sources, retained_known)
+    actual_maximum_drops = maximum_consecutive_drops(len(frames), retained_positions)
     if actual_retention < config.minimum_retention_ratio:
         issues.append(
             _error(
@@ -115,7 +131,26 @@ def validate_strategy(
             )
         )
 
-    _append_protected_source_issues(analysis, retained_known, issues)
+    if safety_limits.minimum_non_static_retention_ratio is not None:
+        actual_non_static_retention = non_static_retention_ratio(kinds, retained_positions)
+        if actual_non_static_retention < safety_limits.minimum_non_static_retention_ratio:
+            issues.append(
+                _error(
+                    "non_static_retention_below_minimum",
+                    "non-static retention is below the coverage-first safety limit",
+                )
+            )
+    if safety_limits.maximum_non_static_consecutive_drops is not None:
+        actual_non_static_maximum_drops = maximum_non_static_consecutive_drops(kinds, retained_positions)
+        if actual_non_static_maximum_drops > safety_limits.maximum_non_static_consecutive_drops:
+            issues.append(
+                _error(
+                    "non_static_consecutive_drop_limit_exceeded",
+                    "non-static consecutive drops exceed the coverage-first safety limit",
+                )
+            )
+
+    _append_protected_source_issues(analysis, retained_known, kinds, safety_limits, issues)
     if _candidate_metrics_do_not_match(
         analysis,
         candidate,
@@ -146,6 +181,8 @@ def _candidate_digest(candidate: StrategyCandidate, issues: list[ValidationIssue
 def _append_protected_source_issues(
     analysis: AnalysisResult,
     retained_sources: set[int],
+    kinds: tuple[str, ...],
+    safety_limits: StrategySafetyLimits,
     issues: list[ValidationIssue],
 ) -> None:
     removed = {frame.source_index for frame in analysis.frames} - retained_sources
@@ -160,6 +197,47 @@ def _append_protected_source_issues(
                 "low_confidence_source_removed",
                 "low-confidence analyzed sources must be retained",
                 (min(low_confidence_removed), max(low_confidence_removed)),
+            )
+        )
+
+    guarded_static_removed = [
+        frame.source_index
+        for frame, kind in zip(analysis.frames, kinds, strict=True)
+        if (
+            frame.source_index in removed
+            and kind == "static"
+            and range_confidence(frame.source_index, analysis.ranges) < safety_limits.minimum_static_range_confidence
+        )
+    ]
+    if guarded_static_removed:
+        issues.append(
+            _error(
+                "insufficient_static_confidence_source_removed",
+                "static sources below the policy confidence threshold must be retained",
+                (min(guarded_static_removed), max(guarded_static_removed)),
+            )
+        )
+
+    source_indices = tuple(frame.source_index for frame in analysis.frames)
+    endpoint_positions = (
+        static_range_endpoint_positions(
+            source_indices,
+            kinds,
+            analysis.ranges,
+            safety_limits.minimum_static_range_confidence,
+        )
+        if safety_limits.protect_static_range_endpoints
+        else set()
+    )
+    removed_endpoints = [
+        source_indices[position] for position in endpoint_positions if source_indices[position] in removed
+    ]
+    if removed_endpoints:
+        issues.append(
+            _error(
+                "static_range_endpoint_removed",
+                "confirmed static range endpoints must be retained",
+                (min(removed_endpoints), max(removed_endpoints)),
             )
         )
 
@@ -182,20 +260,10 @@ def _append_protected_source_issues(
 
 
 def _is_low_confidence(frame: FrameAnalysis, ranges: tuple[AnalysisRange, ...]) -> bool:
-    range_confidences = [item.confidence for item in ranges if item.start <= frame.source_index <= item.end]
-    range_confidence = min(range_confidences, default=0.0)
-    return frame.motion_confidence < _MINIMUM_DECISION_CONFIDENCE or range_confidence < _MINIMUM_DECISION_CONFIDENCE
-
-
-def _maximum_consecutive_drops(available_sources: tuple[int, ...], retained_sources: set[int]) -> int:
-    maximum = current = 0
-    for source in available_sources:
-        if source in retained_sources:
-            current = 0
-        else:
-            current += 1
-            maximum = max(maximum, current)
-    return maximum
+    frame_range_confidence = range_confidence(frame.source_index, ranges)
+    return (
+        frame.motion_confidence < _MINIMUM_DECISION_CONFIDENCE or frame_range_confidence < _MINIMUM_DECISION_CONFIDENCE
+    )
 
 
 def _candidate_metrics_do_not_match(

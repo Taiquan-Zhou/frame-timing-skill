@@ -7,6 +7,7 @@ import frame_timing_agent
 import pytest
 from frame_timing_agent import PolicyName, RiskLevel, StrategyRequest, ValidationSeverity
 from frame_timing_agent.contracts import (
+    POLICY_REVISION,
     AnalysisRange,
     ExecutionResult,
     OutputVerificationResult,
@@ -22,6 +23,7 @@ def _strategy_candidate() -> StrategyCandidate:
     return StrategyCandidate(
         schema_version=3,
         strategy_id="strategy-id",
+        policy_revision=POLICY_REVISION,
         input_digest="sha256:input",
         policy=PolicyName.BALANCED,
         request=StrategyRequest(
@@ -140,6 +142,16 @@ def test_strategy_candidate_contract_is_frozen() -> None:
 
     with pytest.raises(FrozenInstanceError):
         candidate.risk_level = RiskLevel.HIGH
+
+
+def test_strategy_candidate_rejects_invalid_policy_revision() -> None:
+    from frame_timing_agent import ConfigurationError
+
+    with pytest.raises(ConfigurationError) as captured:
+        replace(_strategy_candidate(), policy_revision="")
+
+    assert captured.value.code == "invalid_value"
+    assert captured.value.fields == ("policy_revision",)
 
 
 @pytest.mark.parametrize(

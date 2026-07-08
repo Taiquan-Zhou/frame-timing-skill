@@ -13,7 +13,7 @@ import frame_timing_agent
 import numpy as np
 import pytest
 from frame_timing_agent.apply_frame_strategy import compute_output_digest
-from frame_timing_agent.contracts import AnalysisError, PolicyName, StrategyRequest
+from frame_timing_agent.contracts import POLICY_REVISION, AnalysisError, PolicyName, StrategyRequest
 from frame_timing_agent.image_io import read_image
 from frame_timing_agent.service import (
     analyze_frames,
@@ -172,7 +172,17 @@ def test_capabilities_and_public_signatures_exclude_legacy_overrides() -> None:
 
     assert payload["schema_version"] == 3
     assert payload["api_version"] == 3
+    assert payload["policy_revision"] == POLICY_REVISION
     assert payload["policies"] == ["coverage_first", "balanced", "jitter_reduction"]
+    coverage_limits = payload["safety_limits"]["coverage_first"]
+    assert coverage_limits == {
+        "minimum_retention_ratio": 0.75,
+        "maximum_consecutive_drops": 4,
+        "minimum_non_static_retention_ratio": 0.85,
+        "maximum_non_static_consecutive_drops": 2,
+        "minimum_static_range_confidence": 0.90,
+        "protect_static_range_endpoints": True,
+    }
     assert "coverage_protection_not_viewpoint_optimization" in payload["limitations"]
     assert tuple(inspect.signature(verify_output).parameters) == (
         "frame_dir",

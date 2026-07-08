@@ -84,6 +84,7 @@ def read_strategy_candidate(path: Path | str) -> StrategyCandidate:
         {
             "schema_version",
             "strategy_id",
+            "policy_revision",
             "input_digest",
             "policy",
             "request",
@@ -105,6 +106,7 @@ def read_strategy_candidate(path: Path | str) -> StrategyCandidate:
     return StrategyCandidate(
         schema_version=SCHEMA_VERSION,
         strategy_id=_string(data["strategy_id"], "strategy.strategy_id"),
+        policy_revision=_string(data["policy_revision"], "strategy.policy_revision"),
         input_digest=_string(data["input_digest"], "strategy.input_digest"),
         policy=_enum(PolicyName, data["policy"], "strategy.policy"),
         request=_strategy_request(data["request"]),

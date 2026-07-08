@@ -14,6 +14,7 @@ from frame_timing_agent.agent_report import write_agent_human_review
 from frame_timing_agent.artifact_io import read_analysis_result, read_execution_result
 from frame_timing_agent.configuration import resolve_strategy_request
 from frame_timing_agent.contracts import (
+    POLICY_REVISION,
     AnalysisRange,
     OutputVerificationResult,
     PolicyName,
@@ -155,6 +156,7 @@ def test_v3_lifecycle_writes_five_json_artifacts_and_complete_private_report(
     assert health["output_frame_count"] > 0
     analysis = json.loads((artifact_root / "analysis.json").read_text(encoding="utf-8"))
     strategy = json.loads((artifact_root / "strategy.json").read_text(encoding="utf-8"))
+    assert strategy["policy_revision"] == POLICY_REVISION
     selected_sources = set(strategy["selected_sources"])
     expected_residual_jitter = sum(
         frame["jitter_score"] for frame in analysis["frames"] if frame["source_index"] in selected_sources

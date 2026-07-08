@@ -18,8 +18,9 @@ from frame_timing_agent.artifact_layout import (
     VALIDATION_ARTIFACT,
     validate_artifact_root,
 )
-from frame_timing_agent.configuration import resolve_strategy_request
+from frame_timing_agent.configuration import resolve_strategy_request, strategy_safety_limits
 from frame_timing_agent.contracts import (
+    POLICY_REVISION,
     SCHEMA_VERSION,
     AnalysisResult,
     ExecutionResult,
@@ -41,13 +42,19 @@ def capabilities() -> dict[str, object]:
     safety_limits: dict[str, object] = {}
     for policy in policies:
         config = resolve_strategy_request(StrategyRequest(policy))
+        policy_limits = strategy_safety_limits(config)
         safety_limits[policy.value] = {
             "minimum_retention_ratio": config.minimum_retention_ratio,
             "maximum_consecutive_drops": config.maximum_consecutive_drops,
+            "minimum_non_static_retention_ratio": policy_limits.minimum_non_static_retention_ratio,
+            "maximum_non_static_consecutive_drops": policy_limits.maximum_non_static_consecutive_drops,
+            "minimum_static_range_confidence": policy_limits.minimum_static_range_confidence,
+            "protect_static_range_endpoints": policy_limits.protect_static_range_endpoints,
         }
     return {
         "api_version": SCHEMA_VERSION,
         "schema_version": SCHEMA_VERSION,
+        "policy_revision": POLICY_REVISION,
         "policies": [policy.value for policy in policies],
         "safety_limits": safety_limits,
         "stages": ["analyze", "plan", "validate", "apply", "verify"],

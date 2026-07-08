@@ -6,6 +6,7 @@ from enum import Enum
 
 # Schema versions are enforced at JSON boundaries, not stored on in-memory requests.
 SCHEMA_VERSION = 3
+POLICY_REVISION = "coverage-static-thinning-v1"
 MAXIMUM_CONSECUTIVE_DROPS = 7
 RETENTION_RATIO_ERROR_MESSAGE = "minimum_retention_ratio must be a finite number in (0, 1]"
 
@@ -161,6 +162,7 @@ class AnalysisResult:
 class StrategyCandidate:
     schema_version: int
     strategy_id: str
+    policy_revision: str
     input_digest: str
     policy: PolicyName
     request: StrategyRequest
@@ -177,6 +179,13 @@ class StrategyCandidate:
     reasons: tuple[str, ...]
 
     def __post_init__(self) -> None:
+        if not isinstance(self.policy_revision, str) or not self.policy_revision:
+            raise ConfigurationError(
+                "policy_revision must be a non-empty string",
+                code="invalid_value",
+                fields=("policy_revision",),
+            )
+
         integer_limits = {
             "estimated_output_count": None,
             "maximum_consecutive_drops": MAXIMUM_CONSECUTIVE_DROPS,

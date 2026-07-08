@@ -5,8 +5,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
-
 from frame_timing_agent.contracts import (
+    POLICY_REVISION,
     SCHEMA_VERSION,
     PolicyName,
     RiskLevel,
@@ -27,6 +27,7 @@ def _candidate(*, confidence: float = 0.9) -> StrategyCandidate:
     return StrategyCandidate(
         schema_version=SCHEMA_VERSION,
         strategy_id="sha256:strategy",
+        policy_revision=POLICY_REVISION,
         input_digest="sha256:input",
         policy=PolicyName.BALANCED,
         request=StrategyRequest(PolicyName.BALANCED, 0.65, 4),
@@ -97,5 +98,6 @@ def test_candidate_digest_survives_canonical_json_round_trip() -> None:
     candidate = _candidate()
     payload = json.loads(canonical_json_bytes(candidate))
 
+    assert payload["policy_revision"] == POLICY_REVISION
     assert sha256_digest(candidate) == sha256_digest(payload)
     assert sha256_digest(candidate).startswith("sha256:")

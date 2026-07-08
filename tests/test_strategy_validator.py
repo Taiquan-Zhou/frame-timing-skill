@@ -5,6 +5,7 @@ from dataclasses import FrozenInstanceError, replace
 import pytest
 from frame_timing_agent.configuration import ResolvedStrategyConfig, resolve_strategy_request
 from frame_timing_agent.contracts import (
+    POLICY_REVISION,
     SCHEMA_VERSION,
     AnalysisRange,
     AnalysisResult,
@@ -22,8 +23,8 @@ from frame_timing_agent.strategy_planner import plan_strategy
 from frame_timing_agent.strategy_validator import validate_strategy
 
 
-def _config() -> ResolvedStrategyConfig:
-    return resolve_strategy_request(StrategyRequest(PolicyName.BALANCED))
+def _config(policy: PolicyName = PolicyName.BALANCED) -> ResolvedStrategyConfig:
+    return resolve_strategy_request(StrategyRequest(policy))
 
 
 def _analysis(
@@ -146,6 +147,38 @@ def test_tampered_strategy_id_is_rejected_when_candidate_is_revalidated() -> Non
     assert "strategy_id_mismatch" in {issue.code for issue in validation.issues}
 
 
+def test_tampered_policy_revision_is_rejected_explicitly() -> None:
+    analysis = _analysis()
+    candidate = replace(_candidate(analysis), policy_revision=f"{POLICY_REVISION}-old")
+
+    validation = validate_strategy(analysis, candidate, _config())
+
+    assert not validation.valid
+    assert "policy_revision_mismatch" in {issue.code for issue in validation.issues}
+
+
+def test_constraint_compliant_alternate_selection_is_rejected() -> None:
+    analysis = _analysis(default_kind="jitter")
+    config = _config(PolicyName.COVERAGE_FIRST)
+    candidate = plan_strategy(analysis, config)
+    alternate_sources = tuple(source for source in range(20) if source not in {5, 10, 15})
+    tampered = replace(
+        candidate,
+        selected_sources=alternate_sources,
+        estimated_output_count=len(alternate_sources),
+        retention_ratio=len(alternate_sources) / 20,
+        maximum_consecutive_drops=1,
+        maximum_source_index_gap=2,
+        maximum_time_gap_seconds=2 / 30.0,
+    )
+
+    validation = validate_strategy(analysis, tampered, config)
+
+    assert alternate_sources != candidate.selected_sources
+    assert not validation.valid
+    assert "selected_sources_mismatch" in {issue.code for issue in validation.issues}
+
+
 @pytest.mark.parametrize(
     ("changes", "expected_code"),
     [
@@ -219,6 +252,85 @@ def test_consecutive_drops_are_recomputed_from_input_positions() -> None:
 
     assert "consecutive_drop_limit_exceeded" in codes
     assert "candidate_metric_mismatch" in codes
+
+
+def test_coverage_first_rejects_non_static_retention_below_its_stricter_floor() -> None:
+    analysis = _analysis(default_kind="jitter")
+    config = _config(PolicyName.COVERAGE_FIRST)
+    candidate = plan_strategy(analysis, config)
+    selected = tuple(source for source in range(20) if source not in {1, 3, 5, 7})
+    tampered = replace(
+        candidate,
+        selected_sources=selected,
+        estimated_output_count=len(selected),
+        retention_ratio=len(selected) / 20,
+        maximum_consecutive_drops=1,
+        maximum_source_index_gap=2,
+        maximum_time_gap_seconds=2 / 30.0,
+    )
+
+    codes = {issue.code for issue in validate_strategy(analysis, tampered, config).issues}
+
+    assert len(selected) / 20 >= config.minimum_retention_ratio
+    assert "non_static_retention_below_minimum" in codes
+
+
+def test_coverage_first_rejects_three_consecutive_non_static_drops() -> None:
+    analysis = _analysis(default_kind="jitter")
+    config = _config(PolicyName.COVERAGE_FIRST)
+    candidate = plan_strategy(analysis, config)
+    selected = (0, *range(4, 20))
+    tampered = replace(
+        candidate,
+        selected_sources=selected,
+        estimated_output_count=len(selected),
+        retention_ratio=len(selected) / 20,
+        maximum_consecutive_drops=3,
+        maximum_source_index_gap=4,
+        maximum_time_gap_seconds=4 / 30.0,
+    )
+
+    codes = {issue.code for issue in validate_strategy(analysis, tampered, config).issues}
+
+    assert len(selected) / 20 >= config.minimum_retention_ratio
+    assert tampered.maximum_consecutive_drops <= config.maximum_consecutive_drops
+    assert "non_static_consecutive_drop_limit_exceeded" in codes
+
+
+def test_coverage_first_rejects_removal_of_confirmed_static_range_endpoint() -> None:
+    analysis = replace(
+        _analysis(default_kind="active_motion"),
+        ranges=(
+            AnalysisRange(0, 4, "active_motion", 0.95, "coherent_active_motion"),
+            AnalysisRange(5, 14, "static", 0.95, "low_motion_high_confidence"),
+            AnalysisRange(15, 19, "active_motion", 0.95, "coherent_active_motion"),
+        ),
+    )
+    config = _config(PolicyName.COVERAGE_FIRST)
+    candidate = plan_strategy(analysis, config)
+    selected = tuple(source for source in candidate.selected_sources if source != 5)
+    tampered = replace(candidate, selected_sources=selected)
+
+    codes = {issue.code for issue in validate_strategy(analysis, tampered, config).issues}
+
+    assert "static_range_endpoint_removed" in codes
+
+
+def test_balanced_internal_static_endpoint_removal_remains_valid() -> None:
+    analysis = replace(
+        _analysis(default_kind="active_motion"),
+        ranges=(
+            AnalysisRange(0, 4, "active_motion", 0.95, "coherent_active_motion"),
+            AnalysisRange(5, 14, "static", 0.95, "low_motion_high_confidence"),
+            AnalysisRange(15, 19, "active_motion", 0.95, "coherent_active_motion"),
+        ),
+    )
+    config = _config(PolicyName.BALANCED)
+
+    validation = validate_strategy(analysis, plan_strategy(analysis, config), config)
+
+    assert validation.valid
+    assert "static_range_endpoint_removed" not in {issue.code for issue in validation.issues}
 
 
 def test_deleted_low_confidence_source_is_rejected() -> None:

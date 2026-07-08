@@ -5,13 +5,18 @@ import math
 
 import pytest
 from frame_timing_agent import PolicyName, StrategyRequest
-from frame_timing_agent.configuration import ResolvedStrategyConfig, parse_strategy_request, resolve_strategy_request
+from frame_timing_agent.configuration import (
+    ResolvedStrategyConfig,
+    parse_strategy_request,
+    resolve_strategy_request,
+    strategy_safety_limits,
+)
 
 
 @pytest.mark.parametrize(
     ("policy", "minimum_retention_ratio", "maximum_consecutive_drops"),
     [
-        ("coverage_first", 0.85, 2),
+        ("coverage_first", 0.75, 4),
         ("balanced", 0.65, 4),
         ("jitter_reduction", 0.45, 7),
     ],
@@ -28,6 +33,32 @@ def test_policy_presets_resolve_to_documented_safety_limits(
     assert resolved.policy is PolicyName(policy)
     assert resolved.minimum_retention_ratio == minimum_retention_ratio
     assert resolved.maximum_consecutive_drops == maximum_consecutive_drops
+
+
+def test_coverage_first_keeps_stricter_non_static_safety_limits() -> None:
+    resolved = resolve_strategy_request(StrategyRequest(policy=PolicyName.COVERAGE_FIRST))
+
+    limits = strategy_safety_limits(resolved)
+
+    assert limits.minimum_non_static_retention_ratio == 0.85
+    assert limits.maximum_non_static_consecutive_drops == 2
+    assert limits.minimum_static_range_confidence == 0.90
+    assert limits.protect_static_range_endpoints
+
+
+def test_conservative_override_tightens_both_global_and_non_static_limits() -> None:
+    resolved = resolve_strategy_request(
+        StrategyRequest(
+            policy=PolicyName.COVERAGE_FIRST,
+            minimum_retention_ratio=0.90,
+            maximum_consecutive_drops=1,
+        )
+    )
+
+    limits = strategy_safety_limits(resolved)
+
+    assert limits.minimum_non_static_retention_ratio == 0.90
+    assert limits.maximum_non_static_consecutive_drops == 1
 
 
 def test_parse_strategy_request_round_trips_serialized_contract() -> None:
@@ -178,7 +209,7 @@ def test_consecutive_drop_type_error_describes_global_range() -> None:
 @pytest.mark.parametrize(
     "payload",
     [
-        {"schema_version": 3, "policy": "coverage_first", "minimum_retention_ratio": 0.84},
+        {"schema_version": 3, "policy": "coverage_first", "minimum_retention_ratio": 0.74},
         {"schema_version": 3, "policy": "balanced", "maximum_consecutive_drops": 5},
     ],
 )

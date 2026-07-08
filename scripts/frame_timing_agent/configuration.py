@@ -33,13 +33,41 @@ class PolicyPreset:
     policy: PolicyName
     minimum_retention_ratio: float
     maximum_consecutive_drops: int
+    minimum_non_static_retention_ratio: float | None
+    maximum_non_static_consecutive_drops: int | None
+    minimum_static_range_confidence: float
+    protect_static_range_endpoints: bool
 
 
 _POLICY_PRESETS: Mapping[PolicyName, PolicyPreset] = MappingProxyType(
     {
-        PolicyName.COVERAGE_FIRST: PolicyPreset(PolicyName.COVERAGE_FIRST, 0.85, 2),
-        PolicyName.BALANCED: PolicyPreset(PolicyName.BALANCED, 0.65, 4),
-        PolicyName.JITTER_REDUCTION: PolicyPreset(PolicyName.JITTER_REDUCTION, 0.45, 7),
+        PolicyName.COVERAGE_FIRST: PolicyPreset(
+            policy=PolicyName.COVERAGE_FIRST,
+            minimum_retention_ratio=0.75,
+            maximum_consecutive_drops=4,
+            minimum_non_static_retention_ratio=0.85,
+            maximum_non_static_consecutive_drops=2,
+            minimum_static_range_confidence=0.90,
+            protect_static_range_endpoints=True,
+        ),
+        PolicyName.BALANCED: PolicyPreset(
+            policy=PolicyName.BALANCED,
+            minimum_retention_ratio=0.65,
+            maximum_consecutive_drops=4,
+            minimum_non_static_retention_ratio=None,
+            maximum_non_static_consecutive_drops=None,
+            minimum_static_range_confidence=0.50,
+            protect_static_range_endpoints=False,
+        ),
+        PolicyName.JITTER_REDUCTION: PolicyPreset(
+            policy=PolicyName.JITTER_REDUCTION,
+            minimum_retention_ratio=0.45,
+            maximum_consecutive_drops=7,
+            minimum_non_static_retention_ratio=None,
+            maximum_non_static_consecutive_drops=None,
+            minimum_static_range_confidence=0.50,
+            protect_static_range_endpoints=False,
+        ),
     }
 )
 
@@ -88,6 +116,39 @@ class ResolvedStrategyConfig:
         object.__setattr__(self, "policy", request.policy)
         object.__setattr__(self, "minimum_retention_ratio", request.minimum_retention_ratio)
         object.__setattr__(self, "maximum_consecutive_drops", request.maximum_consecutive_drops)
+
+
+@dataclass(frozen=True)
+class StrategySafetyLimits:
+    """Policy-owned limits that are not exposed as Agent-controlled knobs."""
+
+    minimum_non_static_retention_ratio: float | None
+    maximum_non_static_consecutive_drops: int | None
+    minimum_static_range_confidence: float
+    protect_static_range_endpoints: bool
+
+
+def strategy_safety_limits(config: ResolvedStrategyConfig) -> StrategySafetyLimits:
+    """Resolve fixed policy guards together with any stricter public override."""
+    preset = _POLICY_PRESETS[config.policy]
+    minimum_non_static_retention_ratio = preset.minimum_non_static_retention_ratio
+    if minimum_non_static_retention_ratio is not None:
+        minimum_non_static_retention_ratio = max(
+            minimum_non_static_retention_ratio,
+            config.minimum_retention_ratio,
+        )
+    maximum_non_static_consecutive_drops = preset.maximum_non_static_consecutive_drops
+    if maximum_non_static_consecutive_drops is not None:
+        maximum_non_static_consecutive_drops = min(
+            maximum_non_static_consecutive_drops,
+            config.maximum_consecutive_drops,
+        )
+    return StrategySafetyLimits(
+        minimum_non_static_retention_ratio=minimum_non_static_retention_ratio,
+        maximum_non_static_consecutive_drops=maximum_non_static_consecutive_drops,
+        minimum_static_range_confidence=preset.minimum_static_range_confidence,
+        protect_static_range_endpoints=preset.protect_static_range_endpoints,
+    )
 
 
 def parse_strategy_request(data: object) -> StrategyRequest:
