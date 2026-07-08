@@ -2,129 +2,121 @@
 
 [English](README.md) | [中文](README.zh-CN.md)
 
-Frame Timing Skill 是一个本地 Python package 和通用 Agent Skill，用于在重建、NeRF、Gaussian Splatting、摄影测量或人工审查前，处理已经清理并抽取好的视频帧。
+Frame Timing Skill 用于在三维重建、NeRF、Gaussian Splatting、摄影测量或人工审查之前，处理已经抽取并清理好的图片帧目录。它会分析帧运动和画质，规划安全的选帧策略，以字节级一致的方式复制选中的帧，并写出本地审计产物。
 
-它可以检测静止区间、快速运动区间，以及高频相机抖动区间。它会把输出帧以字节级一致的方式复制到 `output/` 下，并生成本地审查产物。它不负责视频抽帧、去水印、OCR、修改像素、上传数据或执行重建。
+它不负责视频抽帧、修改像素、画面稳定、去模糊、上传数据或执行重建。v0.3.0 提供的是帧选择层面的覆盖保护，不是基于三维几何、视差或相机基线的覆盖优化器。
 
-## 功能
+## 普通用户
 
-- 检测静止帧区间和快速运动帧区间。
-- 使用稳定关键帧选择来减少严重相机抖动。
-- 为下游重建流程生成 timing strategy。
-- 使用源帧的字节级一致副本写出模型安全的 `output_frames/`。
-- 记录复制帧的 `source_sha256` 来源校验。
-- 生成人工审查、可视化审查、执行审计和健康检查报告。
-- 同时提供 CLI 入口和 Python API。
-
-## 版本对比
-
-| 版本 | 策略 | 主要行为 | 对重建的影响 | 状态 |
-| --- | --- | --- | --- | --- |
-| v1 / 0.1.0 | `aggressive_motion` | 检测静止区间和快速运动区间，用 `keep_uniform` 压缩长静止段，用 `duplicate_range` 复制快速运动段。 | 可以做基础帧节奏处理，但剧烈相机抖动仍可能被复制，或被混入类似静止段的处理逻辑。 | 已被 v2 替代。 |
-| v2 / 0.2.0 | `reconstruction_balanced` | 增加高频抖动检测、稳定关键帧选择、`select_sources`、执行审计、可配置抖动阈值，以及人工 override 保护。 | 更适合重建、NeRF、Gaussian Splatting 和摄影测量，因为它可以减少抖动区间的不稳定帧，同时不修改像素。 | 当前默认策略。 |
-
-v2 是一次策略升级。输出帧数量和 `strategy.json` 操作可能与 v1 不同。本 package 仍然只写出源帧的字节级一致副本；不会 warp、裁剪、插值或视觉稳定化图片。
-
-## For Users
-
-### 作为 Agent Skill 使用
-
-普通使用者只需要让你的 AI agent 或 AI 编程工具安装这个 skill：
+让你的 AI agent 或 AI 编程工具安装这个仓库作为 skill：
 
 ```text
 Install this skill: https://github.com/Taiquan-Zhou/frame-timing-skill
 ```
 
-然后让它处理你的帧目录：
+然后让它处理已经清理好的帧目录。推荐 Agent 使用 `frame-timing-tool`：
 
 ```text
-/skill frame-timing-skill
-Use frame-timing-skill on path/to/clean_frames
+Use frame-timing-skill on path/to/clean_frames.
+Analyze first, compare candidates if needed, validate before apply, and verify before using output_frames downstream.
 ```
 
-agent 应优先运行默认的 `reconstruction_balanced` 模式：`frame-timing path/to/clean_frames`，并用 `frame-timing-health` 验证结果。
-
-## For Developers
-
-### 安装 Python Package
-
-如果要直接使用 CLI 或 Python API：
-
-```bash
-python -m pip install git+https://github.com/Taiquan-Zhou/frame-timing-skill.git
-```
-
-### CLI 使用方法
-
-对已经清理并抽取好的帧目录运行 frame timing：
+如果只需要兼容的一条命令入口，可以使用：
 
 ```bash
 frame-timing path/to/clean_frames
 ```
 
-默认产物会写入 `output/frame_timing_run`。
-默认策略是 `reconstruction_balanced`。
+`frame-timing` 是 legacy v2 兼容入口，保留旧的 `reconstruction_balanced` 行为和产物结构，适合简单本地使用。
+legacy v2 的策略文件可能包含 `select_sources` 等操作。
 
-如果要处理多个帧目录，或需要自定义批处理参数，再使用高级 batch 命令：
+## Agent 和开发者
 
-```bash
-frame-timing-batch \
-  --frames "sample=path/to/clean_frames" \
-  --artifact_root output/frame_timing_run \
-  --write
-```
-
-检查生成的产物：
+从仓库安装：
 
 ```bash
-frame-timing-health --artifact_root output/frame_timing_run
+python -m pip install git+https://github.com/Taiquan-Zhou/frame-timing-skill.git
 ```
 
-### CLI Reference
+### Agent-safe v3 JSON CLI
 
-- `frame-timing`：用默认本地产物结构处理一个 clean frame 目录。
-- `frame-timing-demo`：生成用于本地检查的确定性 demo frames。
-- `frame-timing-batch`：分析 clean frame 目录，并写出 `output_frames/` 和审查产物。
-- `frame-timing-health`：验证产物结构和复制帧来源。
+当 Agent 需要明确、可审计的阶段时，使用 `frame-timing-tool`。该生命周期使用 `schema_version 3` 和策略版本 `coverage-static-thinning-v1`。
 
-默认模式：
+```bash
+frame-timing-tool capabilities
+frame-timing-tool analyze --frames path/to/clean_frames --artifact-root output/frame_timing_run
+frame-timing-tool plan --analysis output/frame_timing_run/analysis.json --policy coverage_first
+frame-timing-tool validate --analysis output/frame_timing_run/analysis.json --strategy output/frame_timing_run/strategy.json
+frame-timing-tool apply --frames path/to/clean_frames --analysis output/frame_timing_run/analysis.json --strategy output/frame_timing_run/strategy.json --validation output/frame_timing_run/validation.json --output-dir output/frame_timing_run/output_frames
+frame-timing-tool verify --frames path/to/clean_frames --artifact-root output/frame_timing_run
+```
 
-- `reconstruction_balanced`：适度压缩长静止区间，重复快速运动区间给建模降速，并在抖动区间选择稳定关键帧。
+v3 策略：
 
-可以重复传入 `--frames "<item_name>=<clean_frame_dir>"` 来处理多个帧目录。
+- `coverage_first`：推荐默认策略，用于重建场景；保护非静止段覆盖率，只对高置信静止段做保守稀疏。
+- `balanced`：中等风险对比候选。
+- `jitter_reduction`：更激进的对比候选；适合视觉审查，但对重建覆盖风险更高。
+
+中风险和高风险候选应先展示给用户确认。验证失败时禁止通过手工编辑 JSON 绕过；apply 阶段会重新验证候选摘要和策略身份。
 
 ### Python API
 
 ```python
 from pathlib import Path
-from frame_timing_agent.batch_timing_agent import BatchTimingItem, run_batch_timing_agent
-
-result = run_batch_timing_agent(
-    [BatchTimingItem(name="sample", frames=Path("path/to/clean_frames"))],
-    artifact_root=Path("output/frame_timing_run"),
-    limit_first_n=300,
-    write=True,
+from frame_timing_agent import (
+    PolicyName,
+    StrategyRequest,
+    analyze_frames,
+    apply_validated_strategy,
+    plan_strategy,
+    validate_strategy,
+    verify_output,
 )
+
+frame_dir = Path("path/to/clean_frames")
+artifact_root = Path("output/frame_timing_run")
+analysis = analyze_frames(frame_dir, artifact_root)
+candidate = plan_strategy(analysis, StrategyRequest(PolicyName.COVERAGE_FIRST), artifact_root)
+validation = validate_strategy(analysis, candidate, candidate.request, artifact_root)
+execution = apply_validated_strategy(frame_dir, analysis, candidate, validation, artifact_root / "output_frames")
+health = verify_output(frame_dir, analysis, candidate, execution, artifact_root / "output_frames")
 ```
 
-## 输出
+### Benchmark 协议
 
-模型安全输出写入：
+`frame-timing-benchmark` 用于记录外部冒烟验收结果，不复制私有帧：
+
+```bash
+frame-timing-benchmark --case-id sample --frames path/to/clean_frames --artifact-root output/benchmark_sample
+```
+
+Benchmark 结果是发布验收证据，不是统计准确率声明。
+
+## 产物
+
+Agent-safe v3 会写出：
 
 ```text
-output/<run_name>/<item_name>/output_frames/
+output/frame_timing_run/
+  analysis.json
+  strategy.json
+  validation.json
+  execution.json
+  health.json
+  report.md
+  human_review.md
+  output_frames/
 ```
 
-审查、审计和健康检查产物写入：
+只有 `output_frames/` 应传给下游重建工具。输出图片是源帧的字节级一致副本。
 
-```text
-output/<run_name>/analysis/
-output/<run_name>/<item_name>/analysis/
-```
+## 更多文档
 
-只有 `output_frames/` 应传给下游重建工具。
-
-在 `reconstruction_balanced` 模式下，`strategy.json` 使用 strategy version `2`。它可能包含 `keep_uniform`、`duplicate_range` 和 `select_sources` 操作。输出图片仍然是源帧的字节级一致副本；本 package 不会 warp、裁剪、插值或稳定化像素。
+- [使用说明](references/usage.md)
+- [产物契约](references/artifact_contract.md)
+- [Agent 集成](references/agent-integration.md)
+- [从 v2 迁移到 v3](references/migration-v2-to-v3.md)
+- [Benchmark 协议](benchmarks/README.md)
 
 ## License
 

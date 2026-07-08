@@ -47,8 +47,12 @@ class PackageMetadataTest(unittest.TestCase):
 
         self.assertEqual(data["project"]["scripts"]["frame-timing"], "frame_timing_agent.simple_cli:main")
         self.assertEqual(data["project"]["scripts"]["frame-timing-batch"], "frame_timing_agent.batch_timing_agent:main")
-        self.assertEqual(data["project"]["scripts"]["frame-timing-health"], "frame_timing_agent.batch_artifact_health:main")
+        self.assertEqual(
+            data["project"]["scripts"]["frame-timing-health"], "frame_timing_agent.batch_artifact_health:main"
+        )
         self.assertEqual(data["project"]["scripts"]["frame-timing-demo"], "frame_timing_agent.demo_frames:main")
+        self.assertEqual(data["project"]["scripts"]["frame-timing-tool"], "frame_timing_agent.tool_cli:main")
+        self.assertEqual(data["project"]["scripts"]["frame-timing-benchmark"], "frame_timing_agent.benchmark_cli:main")
 
     def test_user_facing_docs_do_not_reference_private_project_paths(self):
         doc_paths = [
@@ -57,6 +61,8 @@ class PackageMetadataTest(unittest.TestCase):
             Path("SKILL.md"),
             Path("references") / "usage.md",
             Path("references") / "artifact_contract.md",
+            Path("references") / "agent-integration.md",
+            Path("references") / "migration-v2-to-v3.md",
             Path("agents") / "openai.yaml",
         ]
 
@@ -78,29 +84,30 @@ class PackageMetadataTest(unittest.TestCase):
         self.assertIn("[中文](README.zh-CN.md)", readme)
         self.assertIn("[English](README.md)", readme_zh)
         self.assertIn("## For Users", readme)
-        self.assertIn("### Use as an Agent Skill", readme)
-        self.assertIn("## For Developers", readme)
-        self.assertIn("### Install Python Package", readme)
-        self.assertIn("### CLI Usage", readme)
+        self.assertIn("## For Agents And Developers", readme)
+        self.assertIn("### Agent-safe v3 JSON CLI", readme)
         self.assertIn("### Python API", readme)
         self.assertIn("Install this skill: https://github.com/Taiquan-Zhou/frame-timing-skill", readme)
-        self.assertIn("### 作为 Agent Skill 使用", readme_zh)
-        self.assertIn("### 安装 Python Package", readme_zh)
-        self.assertIn("### CLI 使用方法", readme_zh)
+        self.assertIn("## 普通用户", readme_zh)
+        self.assertIn("## Agent 和开发者", readme_zh)
+        self.assertIn("### Agent-safe v3 JSON CLI", readme_zh)
         for content in [readme, readme_zh, skill, usage, artifact_contract]:
+            self.assertIn("coverage_first", content)
+            self.assertIn("balanced", content)
+            self.assertIn("jitter_reduction", content)
+            self.assertIn("frame-timing-tool", content)
+            self.assertIn("coverage-static-thinning-v1", content)
             self.assertIn("reconstruction_balanced", content)
             self.assertIn("select_sources", content)
         self.assertIn("frame-timing path/to/clean_frames", readme)
         self.assertIn("frame-timing path/to/clean_frames", readme_zh)
-        self.assertIn("/skill frame-timing-skill", readme)
-        self.assertIn("/skill frame-timing-skill", readme_zh)
         self.assertIn("output/frame_timing_run", readme)
         self.assertIn("output/frame_timing_run", readme_zh)
         self.assertIn("git+https://github.com/Taiquan-Zhou/frame-timing-skill.git", readme)
         self.assertIn("https://github.com/Taiquan-Zhou/frame-timing-skill", readme)
-        self.assertIn("frame-timing \"<clean_frame_dir>\"", skill)
-        self.assertIn("prefer the installed `frame-timing` CLI", skill)
-        self.assertIn("Host Project Smoke", usage)
+        self.assertIn("frame-timing-tool analyze", skill)
+        self.assertIn("Agent-safe v3 Workflow", skill)
+        self.assertIn("legacy v2", usage)
 
         self.assertNotIn("<your-agent-skills-dir>/frame-timing-skill", readme)
         self.assertNotIn("repo: Taiquan-Zhou/frame-timing-skill", readme)

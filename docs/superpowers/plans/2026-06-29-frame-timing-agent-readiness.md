@@ -926,23 +926,23 @@ git commit -m "test: add external frame timing benchmark protocol"
 - Create: `references/migration-v2-to-v3.md`
 - Modify: `CHANGELOG.md`
 
-- [ ] **Step 1: 写文档一致性测试**
+- [x] **Step 1: 写文档一致性测试**
 
 命令、策略名、版本号、公开导入和产物文件名必须来自真实代码；测试 CLI `--help` 中出现文档主命令。
 
-- [ ] **Step 2: 更新用户文档**
+- [x] **Step 2: 更新用户文档**
 
 README 保持两类用户：普通用户的一条默认命令明确标记为 legacy v2 兼容入口；Agent 和开发者使用独立的 v3 Python API 与 JSON CLI。明确本工具做帧选择而非像素修复，也不得把 v2 一条命令描述成 Agent-safe v3。明确 v0.3.0 只提供覆盖保护，不执行基于三维几何、视差或相机基线的覆盖优化。
 
-- [ ] **Step 3: 更新 Skill 工作流**
+- [x] **Step 3: 更新 Skill 工作流**
 
 写明 analyze-first、候选比较、风险确认、validate-before-apply 和 verify-before-downstream，不限制特定 Agent 产品。
 
-- [ ] **Step 4: 编写迁移文档**
+- [x] **Step 4: 编写迁移文档**
 
 说明 v2 兼容范围、v3 不再生成重复帧、旧 override 不映射到 v3 且只能由 legacy 入口读取、Agent 应如何固定包版本和如何回滚。文档必须明确：v0.3.0 不迁移旧 facade；未来迁移需要显式选择新入口、弃用周期和真实样本对比，不允许按 override 是否存在隐式路由。
 
-- [ ] **Step 5: 验证并提交**
+- [x] **Step 5: 验证并提交**
 
 ```powershell
 python -m pytest tests/test_text_quality.py tests/test_package_metadata.py tests/test_tool_cli.py -v

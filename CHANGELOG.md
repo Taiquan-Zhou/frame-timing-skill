@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.0 - Unreleased
+
+Agent-safe v3 readiness release.
+
+- Document `frame-timing-tool` as the staged Agent-safe v3 JSON CLI.
+- Document `coverage_first`, `balanced`, and `jitter_reduction` policy selection.
+- Document `schema_version 3` and policy revision `coverage-static-thinning-v1`.
+- Clarify that `frame-timing` remains the legacy v2 compatibility entrypoint.
+- Add Agent integration and v2-to-v3 migration references.
+- Clarify that the package performs frame selection and byte-identical copying, not pixel stabilization, deblurring, 3D coverage optimization, or reconstruction-quality guarantees.
+
 ## 0.2.0rc1
 
 Strategy upgrade from v1 `aggressive_motion` to v2 `reconstruction_balanced`.

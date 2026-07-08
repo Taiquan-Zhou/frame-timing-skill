@@ -2,128 +2,121 @@
 
 [English](README.md) | [中文](README.zh-CN.md)
 
-Frame Timing Skill is a local Python package and portable Agent Skill for preparing already-clean extracted video frames before reconstruction, NeRF, Gaussian Splatting, photogrammetry, or visual review.
+Frame Timing Skill prepares already-clean extracted image frames before reconstruction, NeRF, Gaussian Splatting, photogrammetry, or visual review. It analyzes frame motion and quality, plans a safe frame selection strategy, copies selected frames byte-for-byte, and writes local audit artifacts.
 
-It detects static ranges, fast-motion ranges, and high-frequency camera jitter. It writes byte-identical copied output frames and local review artifacts under `output/`. It does not extract video, remove watermarks, run OCR, edit pixels, upload data, or run reconstruction.
-
-## Features
-
-- Detect static and fast-motion frame ranges.
-- Reduce severe camera jitter with stable keyframe selection.
-- Generate timing strategies for downstream reconstruction workflows.
-- Write model-safe `output_frames/` using byte-identical source-frame copies.
-- Record `source_sha256` provenance for copied frames.
-- Generate human review, visual review, execution audit, and health reports.
-- Provide both CLI entrypoints and a Python API.
-
-## Version Overview
-
-| Version | Strategy | Main behavior | Reconstruction impact | Status |
-| --- | --- | --- | --- | --- |
-| v1 / 0.1.0 | `aggressive_motion` | Detected static and fast-motion ranges, compressed long static sections with `keep_uniform`, and duplicated fast-motion ranges with `duplicate_range`. | Useful for basic frame timing, but severe camera jitter could still be duplicated or mixed into static-like handling. | Replaced by v2. |
-| v2 / 0.2.0 | `reconstruction_balanced` | Adds high-frequency jitter detection, stable keyframe selection, `select_sources`, execution audit, configurable jitter thresholds, and manual-override protection. | Better suited for reconstruction, NeRF, Gaussian Splatting, and photogrammetry because unstable jitter ranges can be reduced without modifying pixels. | Current default. |
-
-v2 is a strategy upgrade. Output frame counts and `strategy.json` operations can differ from v1. The package still writes byte-identical source-frame copies only; it does not warp, crop, interpolate, or visually stabilize images.
+It does not extract video, edit pixels, stabilize images, deblur frames, upload data, or run reconstruction. v0.3.0 provides coverage protection for frame selection; it is not a 3D geometry, parallax, or camera-baseline coverage optimizer.
 
 ## For Users
 
-### Use as an Agent Skill
-
-For regular users, ask your AI agent or AI coding tool to install this repository as a skill:
+Ask your AI agent or AI coding tool to install this repository as a skill:
 
 ```text
 Install this skill: https://github.com/Taiquan-Zhou/frame-timing-skill
 ```
 
-Then ask it to process your frame directory:
+Then ask it to process an already-clean frame directory. The recommended Agent workflow uses `frame-timing-tool`:
 
 ```text
-/skill frame-timing-skill
-Use frame-timing-skill on path/to/clean_frames
+Use frame-timing-skill on path/to/clean_frames.
+Analyze first, compare candidates if needed, validate before apply, and verify before using output_frames downstream.
 ```
 
-The agent should run `frame-timing path/to/clean_frames` with the default `reconstruction_balanced` mode and verify the result with `frame-timing-health`.
-
-## For Developers
-
-### Install Python Package
-
-For direct CLI or Python API use:
-
-```bash
-python -m pip install git+https://github.com/Taiquan-Zhou/frame-timing-skill.git
-```
-
-### CLI Usage
-
-Run frame timing on a directory of already-clean extracted frames:
+If you only need the compatibility one-command flow, use:
 
 ```bash
 frame-timing path/to/clean_frames
 ```
 
-By default, artifacts are written to `output/frame_timing_run` using the `reconstruction_balanced` strategy.
+`frame-timing` is the legacy v2 compatibility entrypoint. It keeps the older `reconstruction_balanced` behavior and artifact layout for simple local use.
+Legacy v2 strategy files may contain operations such as `select_sources`.
 
-For multiple frame directories or custom batch settings, use the advanced batch command:
+## For Agents And Developers
 
-```bash
-frame-timing-batch \
-  --frames "sample=path/to/clean_frames" \
-  --artifact_root output/frame_timing_run \
-  --write
-```
-
-Check the generated artifacts:
+Install from the repository:
 
 ```bash
-frame-timing-health --artifact_root output/frame_timing_run
+python -m pip install git+https://github.com/Taiquan-Zhou/frame-timing-skill.git
 ```
 
-### CLI Reference
+### Agent-safe v3 JSON CLI
 
-- `frame-timing`: process one clean frame directory with the default local artifact layout.
-- `frame-timing-demo`: generate deterministic demo frames for local checks.
-- `frame-timing-batch`: analyze clean frame directories and write `output_frames/` plus review artifacts.
-- `frame-timing-health`: verify artifact structure and copied-frame provenance.
+Use `frame-timing-tool` when an Agent needs explicit, auditable stages. The lifecycle uses `schema_version 3` and policy revision `coverage-static-thinning-v1`.
 
-Default mode:
+```bash
+frame-timing-tool capabilities
+frame-timing-tool analyze --frames path/to/clean_frames --artifact-root output/frame_timing_run
+frame-timing-tool plan --analysis output/frame_timing_run/analysis.json --policy coverage_first
+frame-timing-tool validate --analysis output/frame_timing_run/analysis.json --strategy output/frame_timing_run/strategy.json
+frame-timing-tool apply --frames path/to/clean_frames --analysis output/frame_timing_run/analysis.json --strategy output/frame_timing_run/strategy.json --validation output/frame_timing_run/validation.json --output-dir output/frame_timing_run/output_frames
+frame-timing-tool verify --frames path/to/clean_frames --artifact-root output/frame_timing_run
+```
 
-- `reconstruction_balanced`: compresses long static ranges moderately, duplicates fast-motion ranges to slow them down for reconstruction, and selects stable keyframes in jitter ranges.
+Available v3 policies:
 
-Pass multiple frame sets by repeating `--frames "<item_name>=<clean_frame_dir>"`.
+- `coverage_first`: default for reconstruction-oriented Agent use; protects non-static coverage and thins only confirmed static ranges conservatively.
+- `balanced`: middle-risk comparison candidate.
+- `jitter_reduction`: aggressive comparison candidate; useful for visual review, but high-risk for reconstruction coverage.
+
+Medium-risk and high-risk candidates should be shown to the user before applying. Failed validation must not be bypassed by editing JSON; apply revalidates the candidate digest and strategy identity.
 
 ### Python API
 
 ```python
 from pathlib import Path
-from frame_timing_agent.batch_timing_agent import BatchTimingItem, run_batch_timing_agent
-
-result = run_batch_timing_agent(
-    [BatchTimingItem(name="sample", frames=Path("path/to/clean_frames"))],
-    artifact_root=Path("output/frame_timing_run"),
-    limit_first_n=300,
-    write=True,
+from frame_timing_agent import (
+    PolicyName,
+    StrategyRequest,
+    analyze_frames,
+    apply_validated_strategy,
+    plan_strategy,
+    validate_strategy,
+    verify_output,
 )
+
+frame_dir = Path("path/to/clean_frames")
+artifact_root = Path("output/frame_timing_run")
+analysis = analyze_frames(frame_dir, artifact_root)
+candidate = plan_strategy(analysis, StrategyRequest(PolicyName.COVERAGE_FIRST), artifact_root)
+validation = validate_strategy(analysis, candidate, candidate.request, artifact_root)
+execution = apply_validated_strategy(frame_dir, analysis, candidate, validation, artifact_root / "output_frames")
+health = verify_output(frame_dir, analysis, candidate, execution, artifact_root / "output_frames")
 ```
 
-## Output
+### Benchmark protocol
 
-Model-safe output is written to:
+`frame-timing-benchmark` records external smoke-test results without copying private frames:
+
+```bash
+frame-timing-benchmark --case-id sample --frames path/to/clean_frames --artifact-root output/benchmark_sample
+```
+
+Benchmark results are release evidence, not a statistical accuracy claim.
+
+## Artifacts
+
+Agent-safe v3 writes:
 
 ```text
-output/<run_name>/<item_name>/output_frames/
+output/frame_timing_run/
+  analysis.json
+  strategy.json
+  validation.json
+  execution.json
+  health.json
+  report.md
+  human_review.md
+  output_frames/
 ```
 
-Review, audit, and health artifacts are written under:
+Only `output_frames/` should be passed to downstream reconstruction. The copied images are byte-identical source-frame copies.
 
-```text
-output/<run_name>/analysis/
-output/<run_name>/<item_name>/analysis/
-```
+## More Documentation
 
-Only `output_frames/` should be passed to downstream reconstruction tools.
-
-In `reconstruction_balanced` mode, `strategy.json` uses strategy version `2`. It may contain `keep_uniform`, `duplicate_range`, and `select_sources` operations. Output images are still byte-identical source-frame copies; the package does not warp, crop, interpolate, or stabilize pixels.
+- [Usage reference](references/usage.md)
+- [Artifact contract](references/artifact_contract.md)
+- [Agent integration](references/agent-integration.md)
+- [Migration from v2 to v3](references/migration-v2-to-v3.md)
+- [Benchmark protocol](benchmarks/README.md)
 
 ## License
 
