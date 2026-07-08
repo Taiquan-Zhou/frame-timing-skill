@@ -100,7 +100,7 @@ def test_benchmark_runs_three_policies_without_private_paths_or_raw_frames(
     result_path = output_root / "synthetic-motion" / "benchmark_result.json"
     result = json.loads(result_path.read_text(encoding="utf-8"))
     _benchmark_schema_validator().validate(result)
-    assert result["schema_version"] == 1
+    assert result["schema_version"] == 2
     assert result["case_id"] == "synthetic-motion"
     assert result["input_frame_count"] == 8
     assert result["resolution"] == {"height": 48, "width": 64}
@@ -116,11 +116,12 @@ def test_benchmark_runs_three_policies_without_private_paths_or_raw_frames(
     assert all(item["validation_valid"] for item in result["policies"])
     assert all(item["removed_frame_count"] >= 0 for item in result["policies"])
     assert all(
-        set(item["deletion_reason_codes"]) <= {"high_confidence_jitter_removed", "low_quality_with_substitute_removed"}
+        set(item["deletion_reason_codes"])
+        <= {"high_confidence_jitter_removed", "low_quality_with_substitute_removed", "redundant_static_removed"}
         for item in result["policies"]
     )
     assert result["automated_checks"]["active_range_static_misclassified_sources"] == []
-    assert result["automated_checks"]["all_removals_use_jitter_or_quality_reason"] is True
+    assert result["automated_checks"]["all_removals_use_allowed_reason"] is True
     assert str(tmp_path) not in _nested_strings(result)
     assert str(tmp_path) not in captured.out
     assert not list((output_root / "synthetic-motion").rglob("*.png"))
@@ -241,7 +242,7 @@ def test_benchmark_records_and_rejects_unknown_deletion_reason(
         "high_confidence_jitter_removed",
         "future_unsafe_removed",
     ]
-    assert result["automated_checks"]["all_removals_use_jitter_or_quality_reason"] is False
+    assert result["automated_checks"]["all_removals_use_allowed_reason"] is False
     assert "unsupported_deletion_reason" in result["release_gate"]["reasons"]
 
 
@@ -278,6 +279,7 @@ def test_benchmark_schema_and_readme_define_honest_external_protocol() -> None:
     ):
         assert category in readme
     assert "not a statistical accuracy claim" in readme
+    assert "redundant_static_removed" in readme
     gitignore = (root / ".gitignore").read_text(encoding="utf-8")
     assert "benchmarks/private/" in gitignore
     assert "benchmarks/results/" in gitignore
@@ -320,7 +322,7 @@ def test_case_gate_rejects_each_automated_failure(
     assert gate.reasons == (expected_reason,)
 
 
-def test_static_thinning_is_not_an_allowed_benchmark_deletion_reason() -> None:
+def test_static_thinning_is_an_allowed_benchmark_deletion_reason() -> None:
     policy = PolicyBenchmarkResult(
         policy="balanced",
         output_frame_count=7,
@@ -340,7 +342,7 @@ def test_static_thinning_is_not_an_allowed_benchmark_deletion_reason() -> None:
 
     checks = build_automated_checks(active_range_static_misclassified_sources=(), policies=(policy,))
 
-    assert checks.all_removals_use_jitter_or_quality_reason is False
+    assert checks.all_removals_use_allowed_reason is True
 
 
 @pytest.mark.parametrize(

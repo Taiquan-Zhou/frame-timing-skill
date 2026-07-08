@@ -36,6 +36,7 @@ frame-timing-tool verify --frames path/to/clean_frames --artifact-root output/fr
 ```
 
 It writes `analysis.json`, `strategy.json`, `validation.json`, `execution.json`, `health.json`, `report.md`, `human_review.md`, and `output_frames`.
+It does not generate duplicate frames. Static ranges may be thinned only when the analysis marks them as confirmed static and validation preserves the configured retention, non-static coverage, consecutive-drop limits, and static-range endpoints.
 
 The current v3 strategy identity uses `schema_version 3` and policy revision `coverage-static-thinning-v1`.
 

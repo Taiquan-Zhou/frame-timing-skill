@@ -4,7 +4,7 @@
 
 Frame Timing Skill prepares already-clean extracted image frames before reconstruction, NeRF, Gaussian Splatting, photogrammetry, or visual review. It analyzes frame motion and quality, plans a safe frame selection strategy, copies selected frames byte-for-byte, and writes local audit artifacts.
 
-It does not extract video, edit pixels, stabilize images, deblur frames, upload data, or run reconstruction. v0.3.0 provides coverage protection for frame selection; it is not a 3D geometry, parallax, or camera-baseline coverage optimizer.
+It does not extract video, edit pixels, stabilize images, deblur frames, upload data, or run reconstruction. Agent-safe v3 provides coverage protection for frame selection; it is not a 3D geometry, parallax, or camera-baseline coverage optimizer.
 
 ## For Users
 

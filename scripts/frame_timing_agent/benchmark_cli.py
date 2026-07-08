@@ -15,13 +15,14 @@ from frame_timing_agent.review_policy import requires_human_confirmation
 from frame_timing_agent.serialization import canonical_json_bytes, write_canonical_json_atomic
 from frame_timing_agent.service import analyze_frames, plan_strategy, validate_strategy
 
-BENCHMARK_SCHEMA_VERSION = 1
+BENCHMARK_SCHEMA_VERSION = 2
 RESULT_ARTIFACT = "benchmark_result.json"
 _SAFE_CODE = re.compile(r"[a-z0-9][a-z0-9_.:-]{0,127}")
 _CASE_ID = re.compile(r"[a-z0-9][a-z0-9_-]{0,63}")
 _ALLOWED_BENCHMARK_DELETION_REASONS = {
     "high_confidence_jitter_removed",
     "low_quality_with_substitute_removed",
+    "redundant_static_removed",
 }
 
 
@@ -69,7 +70,7 @@ class AutomatedChecks:
     active_range_static_misclassified_sources: tuple[int, ...]
     all_policy_validations_passed: bool
     all_high_risk_policies_require_confirmation: bool
-    all_removals_use_jitter_or_quality_reason: bool
+    all_removals_use_allowed_reason: bool
 
 
 @dataclass(frozen=True)
@@ -316,7 +317,7 @@ def build_automated_checks(
         all_high_risk_policies_require_confirmation=all(
             item.risk_level != RiskLevel.HIGH.value or item.human_confirmation_required for item in policies
         ),
-        all_removals_use_jitter_or_quality_reason=all(
+        all_removals_use_allowed_reason=all(
             item.removed_frame_count == 0
             or (
                 bool(item.deletion_reason_codes)
@@ -335,7 +336,7 @@ def evaluate_case_gate(checks: AutomatedChecks, human_review: HumanReview) -> Re
         reasons.append("policy_validation_failed")
     if not checks.all_high_risk_policies_require_confirmation:
         reasons.append("high_risk_confirmation_missing")
-    if not checks.all_removals_use_jitter_or_quality_reason:
+    if not checks.all_removals_use_allowed_reason:
         reasons.append("unsupported_deletion_reason")
     if human_review.conclusion == "fail":
         reasons.append("human_review_failed")

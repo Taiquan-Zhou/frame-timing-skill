@@ -24,7 +24,7 @@
     "release_gate"
   ],
   "properties": {
-    "schema_version": {"const": 1},
+    "schema_version": {"const": 2},
     "case_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$"},
     "input_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
     "input_frame_count": {"type": "integer", "minimum": 1},
@@ -139,7 +139,7 @@
         "active_range_static_misclassified_sources",
         "all_policy_validations_passed",
         "all_high_risk_policies_require_confirmation",
-        "all_removals_use_jitter_or_quality_reason"
+        "all_removals_use_allowed_reason"
       ],
       "properties": {
         "active_range_static_misclassified_sources": {
@@ -149,7 +149,7 @@
         },
         "all_policy_validations_passed": {"type": "boolean"},
         "all_high_risk_policies_require_confirmation": {"type": "boolean"},
-        "all_removals_use_jitter_or_quality_reason": {"type": "boolean"}
+        "all_removals_use_allowed_reason": {"type": "boolean"}
       }
     },
     "humanReview": {

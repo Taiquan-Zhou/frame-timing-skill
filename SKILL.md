@@ -14,7 +14,7 @@ Use this skill only after the user already has an extracted, cleaned image-frame
 - Do not hand-edit JSON to bypass validation.
 - Keep generated artifacts under an `output/` directory.
 - Only `output_frames/` may be passed to downstream reconstruction.
-- v0.3.0 provides coverage protection for frame selection, not 3D coverage optimization.
+- Agent-safe v3 provides coverage protection for frame selection, not 3D coverage optimization.
 
 ## Install Fallback
 

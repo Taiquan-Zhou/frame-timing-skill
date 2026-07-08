@@ -100,3 +100,4 @@ def test_migration_docs_keep_v2_and_v3_boundaries_explicit() -> None:
     assert "Agent-safe v3" in migration
     assert "override" in migration
     assert "does not automatically route" in migration
+    assert "does not generate duplicate frames" in migration
