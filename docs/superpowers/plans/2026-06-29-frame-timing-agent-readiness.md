@@ -958,11 +958,11 @@ git commit -m "docs: document agent-safe frame timing workflow"
 - Create: `.github/dependabot.yml`
 - Modify: `pyproject.toml`
 
-- [ ] **Step 1: 扩展 CI 矩阵**
+- [x] **Step 1: 扩展 CI 矩阵**
 
 Windows 和 Ubuntu 分别运行 Python 3.10、3.12；lint/type/test 只运行一次完整矩阵中的指定组合，包安装和 CLI smoke 两个平台都运行。
 
-- [ ] **Step 2: 增加发布质量命令**
+- [x] **Step 2: 增加发布质量命令**
 
 ```powershell
 python -m ruff check scripts tests
@@ -974,11 +974,11 @@ python -m twine check dist\*
 python -m pip_audit
 ```
 
-- [ ] **Step 3: 独立代码审查**
+- [x] **Step 3: 独立代码审查**
 
 每完成 Tasks 3、5、7、9 后进行一次独立审查，审查输入包含基线 SHA、当前 SHA、本计划对应任务和测试输出。Critical 和 Important 问题必须修复后再进入下一阶段。
 
-- [ ] **Step 4: 最终 diff 审查**
+- [x] **Step 4: 最终 diff 审查**
 
 ```powershell
 git diff --check main...HEAD
@@ -988,7 +988,7 @@ git log --oneline main..HEAD
 
 逐文件确认没有私有路径、运行产物、缓存、大图、无关重构、被弱化的断言或未解释依赖。
 
-- [ ] **Step 5: 最终验证并提交**
+- [x] **Step 5: 最终验证并提交**
 
 ```powershell
 python -m ruff check scripts tests

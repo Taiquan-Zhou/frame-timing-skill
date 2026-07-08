@@ -38,8 +38,7 @@ def _compute_motion_score(
 ) -> float:
     if current_gray_normalized.shape != previous_gray_normalized.shape:
         raise ValueError(
-            "frame size mismatch: "
-            f"previous={previous_gray_normalized.shape}, current={current_gray_normalized.shape}"
+            f"frame size mismatch: previous={previous_gray_normalized.shape}, current={current_gray_normalized.shape}"
         )
     return float(np.mean(np.abs(current_gray_normalized - previous_gray_normalized)))
 

@@ -196,7 +196,9 @@ def _normalize_items(
             BatchTimingItem(
                 name=safe_name,
                 frames=Path(item.frames),
-                override_config_path=Path(item.override_config_path) if item.override_config_path is not None else default_override,
+                override_config_path=Path(item.override_config_path)
+                if item.override_config_path is not None
+                else default_override,
             )
         )
     return normalized
@@ -459,7 +461,9 @@ def _relative_markdown_path(current_file: Path, target: Path) -> str:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Batch run the local extracted-frame timing agent.")
     parser.add_argument("--manifest", type=Path, default=None, help="JSON batch manifest.")
-    parser.add_argument("--frames", action="append", default=None, help="Frame directory, optionally named as name=path.")
+    parser.add_argument(
+        "--frames", action="append", default=None, help="Frame directory, optionally named as name=path."
+    )
     parser.add_argument("--artifact_root", type=Path)
     parser.add_argument("--limit_first_n", type=int, default=300)
     parser.add_argument("--mode", default="reconstruction_balanced", choices=["reconstruction_balanced"])

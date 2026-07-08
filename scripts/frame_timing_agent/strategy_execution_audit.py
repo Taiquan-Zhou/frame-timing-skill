@@ -23,15 +23,16 @@ def audit_strategy_execution(
     output_count = len(output_records)
 
     if manifest_output_count is not None and manifest_output_count != output_count:
-        errors.append(f"manifest output_count mismatch: manifest={manifest_output_count}, selected_frames={output_count}")
+        errors.append(
+            f"manifest output_count mismatch: manifest={manifest_output_count}, selected_frames={output_count}"
+        )
     if image_count != output_count:
         errors.append(f"image_count mismatch: images={image_count}, selected_frames={output_count}")
     if output_records and [record.output_index for record in output_records] != list(range(output_count)):
         errors.append("output_index is not contiguous from 0")
 
     operation_results = [
-        _audit_operation(operation, input_records, output_records)
-        for operation in strategy.get("operations", [])
+        _audit_operation(operation, input_records, output_records) for operation in strategy.get("operations", [])
     ]
     for result in operation_results:
         errors.extend(result.pop("errors", []))
@@ -164,9 +165,7 @@ def _audit_operation(
         for source in kept_sources:
             instances = [record.instance_id for record in output_in_range if record.source_index == source]
             if instances != [0]:
-                result["errors"].append(
-                    f"source {source} expected one non-duplicate instance [0], got {instances}"
-                )
+                result["errors"].append(f"source {source} expected one non-duplicate instance [0], got {instances}")
         return result
 
     result["warnings"].append(f"unsupported audit details for operation: {op}")

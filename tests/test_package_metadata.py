@@ -128,17 +128,41 @@ class PackageMetadataTest(unittest.TestCase):
         workflow = Path(".github") / "workflows" / "ci.yml"
         content = workflow.read_text(encoding="utf-8")
 
-        self.assertIn("python -m pytest", content)
+        self.assertIn("ubuntu-latest", content)
+        self.assertIn("windows-latest", content)
+        self.assertIn('"3.10"', content)
+        self.assertIn('"3.12"', content)
+        self.assertIn('python -m pip install ".[dev]"', content)
+        self.assertIn("python -m ruff check scripts tests", content)
+        self.assertIn("python -m ruff format --check scripts tests", content)
+        self.assertIn("python -m mypy scripts/frame_timing_agent", content)
+        self.assertIn(
+            "python -m pytest --cov=frame_timing_agent --cov-report=term-missing --cov-fail-under=90",
+            content,
+        )
         self.assertIn("python -m compileall -q scripts examples tests", content)
-        self.assertIn("python -m build --outdir $dist", content)
+        self.assertIn("python -m build", content)
+        self.assertIn("python -m twine check dist/*", content)
         self.assertIn("non-release files", content)
         self.assertIn('"/output/"', content)
         self.assertNotIn(".codex", content)
-        self.assertIn("Set-Location $hostDir", content)
-        self.assertIn("python -m pip install $source", content)
-        self.assertIn("frame-timing output\\demo_frames\\sample", content)
+        self.assertIn("shell: bash", content)
+        self.assertIn('python -m pip install "$source"', content)
+        self.assertIn("frame-timing output/demo_frames/sample", content)
         self.assertIn("frame-timing-demo", content)
         self.assertIn("frame-timing-health", content)
+        self.assertIn("frame-timing-tool capabilities", content)
+        self.assertIn("frame-timing-benchmark --help", content)
+
+    def test_security_workflow_and_dependabot_cover_release_dependencies(self):
+        security = (Path(".github") / "workflows" / "security.yml").read_text(encoding="utf-8")
+        dependabot = (Path(".github") / "dependabot.yml").read_text(encoding="utf-8")
+
+        self.assertIn('python -m pip install ".[dev]"', security)
+        self.assertIn("python -m pip_audit", security)
+        self.assertIn("schedule:", security)
+        self.assertIn('package-ecosystem: "pip"', dependabot)
+        self.assertIn('package-ecosystem: "github-actions"', dependabot)
 
     def test_source_distribution_manifest_excludes_development_artifacts(self):
         content = Path("MANIFEST.in").read_text(encoding="utf-8")

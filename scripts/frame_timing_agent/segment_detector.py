@@ -124,10 +124,7 @@ def _thresholds_are_degenerate(
     fast_threshold: float,
     very_fast_threshold: float,
 ) -> bool:
-    return bool(
-        np.isclose(static_threshold, fast_threshold)
-        and np.isclose(fast_threshold, very_fast_threshold)
-    )
+    return bool(np.isclose(static_threshold, fast_threshold) and np.isclose(fast_threshold, very_fast_threshold))
 
 
 def _append_segment_if_needed(
@@ -184,9 +181,7 @@ def _detect_jittered_static_windows(
     calm_runs: list[list[FrameMetric]] = []
     current: list[FrameMetric] = []
     hard_break_segments = [
-        segment
-        for segment in existing_segments
-        if segment.segment_type in {"fast_motion", "very_fast_motion"}
+        segment for segment in existing_segments if segment.segment_type in {"fast_motion", "very_fast_motion"}
     ]
     for metric, frame_type in classified_metrics:
         if _source_in_any_segment(metric.source_index, hard_break_segments) or frame_type == "very_fast_motion":
