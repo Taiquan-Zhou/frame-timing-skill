@@ -47,6 +47,13 @@ def _run_until_validation(frame_dir: Path, artifact_root: Path):
     return analysis, candidate, validation
 
 
+def _run_until_execution(frame_dir: Path, artifact_root: Path):
+    output_dir = artifact_root / "output_frames"
+    analysis, candidate, validation = _run_until_validation(frame_dir, artifact_root)
+    execution = apply_validated_strategy(frame_dir, analysis, candidate, validation, output_dir)
+    return analysis, candidate, execution, output_dir
+
+
 def _output_bytes(output_dir: Path) -> dict[str, bytes]:
     return {path.name: path.read_bytes() for path in sorted(output_dir.iterdir()) if path.is_file()}
 
@@ -165,6 +172,129 @@ def test_verify_output_reports_content_tampering(tmp_path: Path) -> None:
 
     assert not health.valid
     assert {issue.code for issue in health.issues} >= {"output_digest_mismatch", "source_hash_mismatch"}
+
+
+def test_verify_output_reports_missing_output_directory(tmp_path: Path) -> None:
+    frame_dir = tmp_path / "frames"
+    artifact_root = tmp_path / "output" / "missing_output"
+    _write_frames(frame_dir)
+    analysis, candidate, execution, output_dir = _run_until_execution(frame_dir, artifact_root)
+    for child in output_dir.iterdir():
+        child.unlink()
+    output_dir.rmdir()
+
+    health = verify_output(frame_dir, analysis, candidate, execution, output_dir)
+
+    assert not health.valid
+    assert {issue.code for issue in health.issues} == {"missing_output_directory"}
+
+
+def test_verify_output_rejects_output_directory_overlapping_input_frames(tmp_path: Path) -> None:
+    frame_dir = tmp_path / "frames"
+    artifact_root = tmp_path / "output" / "overlap"
+    _write_frames(frame_dir)
+    analysis, candidate, execution, _ = _run_until_execution(frame_dir, artifact_root)
+
+    health = verify_output(frame_dir, analysis, candidate, execution, frame_dir)
+
+    assert not health.valid
+    assert "unsafe_output_directory" in {issue.code for issue in health.issues}
+
+
+def test_verify_output_rejects_forged_execution_identity(tmp_path: Path) -> None:
+    frame_dir = tmp_path / "frames"
+    artifact_root = tmp_path / "output" / "forged_execution"
+    _write_frames(frame_dir)
+    analysis, candidate, execution, output_dir = _run_until_execution(frame_dir, artifact_root)
+    forged = replace(
+        execution,
+        schema_version=999,
+        run_id="other-run",
+        strategy_id="other-strategy",
+        input_digest="0" * 64,
+        candidate_digest="1" * 64,
+    )
+
+    health = verify_output(frame_dir, analysis, candidate, forged, output_dir)
+
+    assert not health.valid
+    assert {issue.code for issue in health.issues} >= {
+        "unsupported_execution_schema",
+        "run_id_mismatch",
+        "strategy_id_mismatch",
+        "input_digest_mismatch",
+        "candidate_digest_mismatch",
+    }
+
+
+def test_verify_output_rejects_manifest_output_count_forgery(tmp_path: Path) -> None:
+    frame_dir = tmp_path / "frames"
+    artifact_root = tmp_path / "output" / "manifest_count"
+    _write_frames(frame_dir)
+    analysis, candidate, execution, output_dir = _run_until_execution(frame_dir, artifact_root)
+    manifest_path = output_dir / "run_manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["output_count"] = execution.output_frame_count + 1
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    forged_execution = replace(execution, output_digest=compute_output_digest(output_dir))
+
+    health = verify_output(frame_dir, analysis, candidate, forged_execution, output_dir)
+
+    assert not health.valid
+    assert {issue.code for issue in health.issues} >= {"output_count_mismatch", "output_image_count_mismatch"}
+
+
+def test_verify_output_rejects_manifest_path_escape(tmp_path: Path) -> None:
+    frame_dir = tmp_path / "frames"
+    artifact_root = tmp_path / "output" / "manifest_escape"
+    _write_frames(frame_dir)
+    analysis, candidate, execution, output_dir = _run_until_execution(frame_dir, artifact_root)
+    forged = replace(execution, output_manifest="../run_manifest.json")
+
+    health = verify_output(frame_dir, analysis, candidate, forged, output_dir)
+
+    assert not health.valid
+    assert "unsafe_output_manifest" in {issue.code for issue in health.issues}
+
+
+def test_verify_output_rejects_selected_frame_path_escape(tmp_path: Path) -> None:
+    frame_dir = tmp_path / "frames"
+    artifact_root = tmp_path / "output" / "selected_path_escape"
+    _write_frames(frame_dir)
+    analysis, candidate, execution, output_dir = _run_until_execution(frame_dir, artifact_root)
+    selected_path = output_dir / "selected_frames.txt"
+    lines = selected_path.read_text(encoding="utf-8").splitlines()
+    header = lines[0].split("\t")
+    first_row = lines[1].split("\t")
+    first_row[header.index("path")] = "../escape.png"
+    lines[1] = "\t".join(first_row)
+    selected_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    forged_execution = replace(execution, output_digest=compute_output_digest(output_dir))
+
+    health = verify_output(frame_dir, analysis, candidate, forged_execution, output_dir)
+
+    assert not health.valid
+    assert "unsafe_output_path" in {issue.code for issue in health.issues}
+
+
+def test_verify_output_rejects_unknown_selected_source(tmp_path: Path) -> None:
+    frame_dir = tmp_path / "frames"
+    artifact_root = tmp_path / "output" / "unknown_source"
+    _write_frames(frame_dir)
+    analysis, candidate, execution, output_dir = _run_until_execution(frame_dir, artifact_root)
+    selected_path = output_dir / "selected_frames.txt"
+    lines = selected_path.read_text(encoding="utf-8").splitlines()
+    header = lines[0].split("\t")
+    first_row = lines[1].split("\t")
+    first_row[header.index("source_index")] = "999"
+    lines[1] = "\t".join(first_row)
+    selected_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    forged_execution = replace(execution, output_digest=compute_output_digest(output_dir))
+
+    health = verify_output(frame_dir, analysis, candidate, forged_execution, output_dir)
+
+    assert not health.valid
+    assert "unknown_source" in {issue.code for issue in health.issues}
 
 
 def test_capabilities_and_public_signatures_exclude_legacy_overrides() -> None:
