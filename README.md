@@ -1,38 +1,41 @@
 # Frame Timing Skill
 
-[English](README.md) | [中文](README.zh-CN.md)
+[English](README.en.md)
 
-Frame Timing Skill prepares already-clean extracted image frames before reconstruction, NeRF, Gaussian Splatting, photogrammetry, or visual review. It analyzes frame motion and quality, plans a safe frame selection strategy, copies selected frames byte-for-byte, and writes local audit artifacts.
+Frame Timing Skill 是一个面向三维重建、NeRF、Gaussian Splatting、摄影测量和人工审查流程的帧时序选择工具。它用于处理已经清理好的图片帧目录，在进入建模或人工复核之前，先把明显冗余、静止、低价值或高风险的帧选择问题转化为可验证的本地决策。
 
-It does not extract video, edit pixels, stabilize images, deblur frames, upload data, or run reconstruction. Agent-safe v3 provides coverage protection for frame selection; it is not a 3D geometry, parallax, or camera-baseline coverage optimizer.
+它会分析帧间运动、静止区间、抖动趋势、画面质量和策略风险，生成不同风险等级的候选方案，并在执行前进行独立验证。最终输出的帧会按字节级一致的方式从源目录复制，完整保留原始图像数据。
 
-## For Users
+Agent-safe v3 工作流把分析、规划、验证、应用和复核拆成明确阶段，方便 AI Agent、自动化管道和人工审查共同使用。它强调可复现、可追踪、可回滚的帧选择，而不是黑箱式删除帧。
 
-Ask your AI agent or AI coding tool to install this repository as a skill:
+它不负责视频抽帧、像素修改、上传数据或执行重建。Agent-safe v3 提供的是帧选择层面的覆盖保护。
+
+## 普通用户
+
+让你的 AI Agent 或 AI 编程工具安装这个仓库作为 skill：
 
 ```text
 Install this skill: https://github.com/Taiquan-Zhou/frame-timing-skill
 ```
 
-Then ask it to process an already-clean frame directory. The recommended Agent workflow uses `frame-timing-tool`:
+然后让它处理已经清理好的帧目录。推荐让 Agent 使用 v3 分阶段工作流：
 
 ```text
 Use frame-timing-skill on path/to/clean_frames.
 Analyze first, compare candidates if needed, validate before apply, and verify before using output_frames downstream.
 ```
 
-If you only need the compatibility one-command flow, use:
+如果只需要本地一条命令的兼容流程，可以使用：
 
 ```bash
 frame-timing path/to/clean_frames
 ```
 
-`frame-timing` is the legacy v2 compatibility entrypoint. It keeps the older `reconstruction_balanced` behavior and artifact layout for simple local use.
-Legacy v2 strategy files may contain operations such as `select_sources`.
+`frame-timing` 是 legacy v2 兼容入口，保留旧的 `reconstruction_balanced` 行为和产物结构，适合简单本地使用。legacy v2 策略文件可能包含 `select_sources` 等操作。
 
-## For Agents And Developers
+## AI Agent 和开发者
 
-Install from the repository:
+从仓库安装 Python 包：
 
 ```bash
 python -m pip install git+https://github.com/Taiquan-Zhou/frame-timing-skill.git
@@ -40,7 +43,7 @@ python -m pip install git+https://github.com/Taiquan-Zhou/frame-timing-skill.git
 
 ### Agent-safe v3 JSON CLI
 
-Use `frame-timing-tool` when an Agent needs explicit, auditable stages. The lifecycle uses `schema_version 3` and policy revision `coverage-static-thinning-v1`.
+当 Agent 需要明确、可审计的阶段时，使用 `frame-timing-tool`。该生命周期使用 `schema_version 3` 和策略修订号 `coverage-static-thinning-v1`。
 
 ```bash
 frame-timing-tool capabilities
@@ -51,13 +54,13 @@ frame-timing-tool apply --frames path/to/clean_frames --analysis output/frame_ti
 frame-timing-tool verify --frames path/to/clean_frames --artifact-root output/frame_timing_run
 ```
 
-Available v3 policies:
+v3 策略：
 
-- `coverage_first`: default for reconstruction-oriented Agent use; protects non-static coverage and thins only confirmed static ranges conservatively.
-- `balanced`: middle-risk comparison candidate.
-- `jitter_reduction`: aggressive comparison candidate; useful for visual review, but high-risk for reconstruction coverage.
+- `coverage_first`：推荐给重建场景使用的默认策略；保护非静止帧覆盖，只对确认的静止段做保守抽稀。
+- `balanced`：中等风险的对比候选。
+- `jitter_reduction`：更激进的对比候选；适合视觉审查，但对重建覆盖风险更高。
 
-Medium-risk and high-risk candidates should be shown to the user before applying. Failed validation must not be bypassed by editing JSON; apply revalidates the candidate digest and strategy identity.
+中高风险候选应先展示给用户确认。验证失败时不能靠手工编辑 JSON 绕过；apply 阶段会重新验证候选摘要和策略身份。
 
 ### Python API
 
@@ -82,41 +85,15 @@ execution = apply_validated_strategy(frame_dir, analysis, candidate, validation,
 health = verify_output(frame_dir, analysis, candidate, execution, artifact_root / "output_frames")
 ```
 
-### Benchmark protocol
+### Benchmark 协议
 
-`frame-timing-benchmark` records external smoke-test results without copying private frames:
+`frame-timing-benchmark` 用于记录外部冒烟验收结果，不复制私有帧：
 
 ```bash
-frame-timing-benchmark --case-id sample --frames path/to/clean_frames --artifact-root output/benchmark_sample
+frame-timing-benchmark --case-id sample --frames path/to/clean_frames --output-root output/benchmark_sample --device-category pipe --motion-type slow_forward --depth-structure low_texture --lighting normal --expected-active-range 0:100
 ```
 
-Benchmark results are release evidence, not a statistical accuracy claim.
-
-## Artifacts
-
-Agent-safe v3 writes:
-
-```text
-output/frame_timing_run/
-  analysis.json
-  strategy.json
-  validation.json
-  execution.json
-  health.json
-  report.md
-  human_review.md
-  output_frames/
-```
-
-Only `output_frames/` should be passed to downstream reconstruction. The copied images are byte-identical source-frame copies.
-
-## More Documentation
-
-- [Usage reference](references/usage.md)
-- [Artifact contract](references/artifact_contract.md)
-- [Agent integration](references/agent-integration.md)
-- [Migration from v2 to v3](references/migration-v2-to-v3.md)
-- [Benchmark protocol](benchmarks/README.md)
+Benchmark 结果是发布验收证据，不是统计准确率声明。
 
 ## License
 

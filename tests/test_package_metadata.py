@@ -79,6 +79,7 @@ class PackageMetadataTest(unittest.TestCase):
     def test_user_facing_docs_do_not_reference_private_project_paths(self):
         doc_paths = [
             Path("README.md"),
+            Path("README.en.md"),
             Path("README.zh-CN.md"),
             Path("SKILL.md"),
             Path("references") / "usage.md",
@@ -99,21 +100,25 @@ class PackageMetadataTest(unittest.TestCase):
         usage = (Path("references") / "usage.md").read_text(encoding="utf-8")
         artifact_contract = (Path("references") / "artifact_contract.md").read_text(encoding="utf-8")
         readme = Path("README.md").read_text(encoding="utf-8")
-        readme_zh = Path("README.zh-CN.md").read_text(encoding="utf-8")
+        readme_en = Path("README.en.md").read_text(encoding="utf-8")
+        readme_zh_compat = Path("README.zh-CN.md").read_text(encoding="utf-8")
 
         self.assertIn("<path-to-frame-timing-skill>", skill)
         self.assertIn("/path/to/frame-timing-skill", skill)
-        self.assertIn("[中文](README.zh-CN.md)", readme)
-        self.assertIn("[English](README.md)", readme_zh)
-        self.assertIn("## For Users", readme)
-        self.assertIn("## For Agents And Developers", readme)
+        self.assertIn("[English](README.en.md)", readme)
+        self.assertIn("[中文](README.md)", readme_en)
+        self.assertIn("[README.md](README.md)", readme_zh_compat)
+        self.assertIn("## 普通用户", readme)
+        self.assertIn("## AI Agent 和开发者", readme)
+        self.assertIn("## For Users", readme_en)
+        self.assertIn("## For Agents And Developers", readme_en)
         self.assertIn("### Agent-safe v3 JSON CLI", readme)
+        self.assertIn("### Agent-safe v3 JSON CLI", readme_en)
         self.assertIn("### Python API", readme)
+        self.assertIn("### Python API", readme_en)
         self.assertIn("Install this skill: https://github.com/Taiquan-Zhou/frame-timing-skill", readme)
-        self.assertIn("## 普通用户", readme_zh)
-        self.assertIn("## Agent 和开发者", readme_zh)
-        self.assertIn("### Agent-safe v3 JSON CLI", readme_zh)
-        for content in [readme, readme_zh, skill, usage, artifact_contract]:
+        self.assertIn("Install this skill: https://github.com/Taiquan-Zhou/frame-timing-skill", readme_en)
+        for content in [readme, readme_en, skill, usage, artifact_contract]:
             self.assertIn("coverage_first", content)
             self.assertIn("balanced", content)
             self.assertIn("jitter_reduction", content)
@@ -122,11 +127,16 @@ class PackageMetadataTest(unittest.TestCase):
             self.assertIn("reconstruction_balanced", content)
             self.assertIn("select_sources", content)
         self.assertIn("frame-timing path/to/clean_frames", readme)
-        self.assertIn("frame-timing path/to/clean_frames", readme_zh)
+        self.assertIn("frame-timing path/to/clean_frames", readme_en)
         self.assertIn("output/frame_timing_run", readme)
-        self.assertIn("output/frame_timing_run", readme_zh)
+        self.assertIn("output/frame_timing_run", readme_en)
         self.assertIn("git+https://github.com/Taiquan-Zhou/frame-timing-skill.git", readme)
+        self.assertIn("git+https://github.com/Taiquan-Zhou/frame-timing-skill.git", readme_en)
         self.assertIn("https://github.com/Taiquan-Zhou/frame-timing-skill", readme)
+        self.assertIn("frame-timing-benchmark --case-id sample --frames path/to/clean_frames --output-root", readme)
+        self.assertIn("frame-timing-benchmark --case-id sample --frames path/to/clean_frames --output-root", readme_en)
+        self.assertNotIn("--artifact-root output/benchmark_sample", readme)
+        self.assertNotIn("--artifact-root output/benchmark_sample", readme_en)
         self.assertIn("frame-timing-tool analyze", skill)
         self.assertIn("Agent-safe v3 Workflow", skill)
         self.assertIn("legacy v2", usage)
@@ -137,14 +147,15 @@ class PackageMetadataTest(unittest.TestCase):
         self.assertNotIn("Codex", readme)
         self.assertNotIn("for development", readme)
         self.assertNotIn("## Smoke Test", readme)
-        self.assertNotIn("## 功能测试", readme_zh)
         self.assertNotIn("From a local checkout", readme)
         self.assertNotIn("For development", readme)
-        self.assertNotIn("从本地 checkout 安装", readme_zh)
-        self.assertNotIn("开发安装", readme_zh)
         self.assertNotIn("Release Checklist", readme)
         self.assertNotIn("Release Artifact Scope", readme)
         self.assertNotIn("Repository Status", readme)
+        self.assertNotIn("Codex", readme_en)
+        self.assertNotIn("## Smoke Test", readme_en)
+        self.assertNotIn("From a local checkout", readme_en)
+        self.assertNotIn("For development", readme_en)
 
     def test_ci_workflow_runs_package_and_skill_verification(self):
         workflow = Path(".github") / "workflows" / "ci.yml"
@@ -196,6 +207,7 @@ class PackageMetadataTest(unittest.TestCase):
         self.assertIn("prune output", content)
         self.assertIn("prune scripts/*.egg-info", content)
         self.assertIn("include LICENSE", content)
+        self.assertIn("include README.en.md", content)
         self.assertIn("include README.zh-CN.md", content)
         self.assertIn("include CHANGELOG.md", content)
         self.assertIn("include SECURITY.md", content)
