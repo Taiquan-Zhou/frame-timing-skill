@@ -25,6 +25,12 @@ Use frame-timing-skill on path/to/clean_frames.
 Analyze first, compare candidates if needed, validate before apply, and verify before using output_frames downstream.
 ```
 
+<p align="center">
+  <img src="docs/assets/agent-safe-v3-flow.svg" alt="Agent-safe v3 workflow: clean_frames → analyze → plan → validate → apply → verify → output_frames" width="860">
+</p>
+
+`clean_frames` 是输入的已清理帧目录；中间阶段只生成可审计产物，验证通过后才按字节级一致复制到 `output_frames`，再交给下游三维重建、NeRF、Gaussian Splatting 或人工复核流程。
+
 如果只需要本地一条命令的兼容流程，可以使用：
 
 ```bash
