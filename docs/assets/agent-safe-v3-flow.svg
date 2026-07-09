@@ -1,0 +1,98 @@
+<svg width="920" height="250" viewBox="0 0 920 250" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">Agent-safe v3 workflow</title>
+  <desc id="desc">A compact workflow diagram from clean_frames through analyze, plan, validate, apply and verify to output_frames.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="920" y2="250" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#0F172A"/>
+      <stop offset="1" stop-color="#111827"/>
+    </linearGradient>
+    <linearGradient id="source" x1="34" y1="52" x2="150" y2="168" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#2563EB"/>
+      <stop offset="1" stop-color="#38BDF8"/>
+    </linearGradient>
+    <linearGradient id="stage" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#7C3AED"/>
+      <stop offset="1" stop-color="#A78BFA"/>
+    </linearGradient>
+    <linearGradient id="safe" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#F59E0B"/>
+      <stop offset="1" stop-color="#FCD34D"/>
+    </linearGradient>
+    <linearGradient id="output" x1="770" y1="52" x2="886" y2="168" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#10B981"/>
+      <stop offset="1" stop-color="#34D399"/>
+    </linearGradient>
+    <filter id="softShadow" x="-20%" y="-30%" width="140%" height="170%" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#020617" flood-opacity="0.35"/>
+    </filter>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto" markerUnits="strokeWidth">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#94A3B8"/>
+    </marker>
+    <style>
+      .title { font: 700 17px -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", "PingFang SC", "Microsoft YaHei", sans-serif; fill: #F8FAFC; }
+      .sub { font: 600 14px -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", "PingFang SC", "Microsoft YaHei", sans-serif; fill: #CBD5E1; }
+      .tiny { font: 500 12px -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", "PingFang SC", "Microsoft YaHei", sans-serif; fill: #94A3B8; }
+      .card { fill: #1E293B; stroke-width: 1.4; filter: url(#softShadow); }
+      .arrow { stroke: #94A3B8; stroke-width: 2.2; stroke-linecap: round; marker-end: url(#arrow); }
+    </style>
+  </defs>
+
+  <rect x="0.5" y="0.5" width="919" height="249" rx="22" fill="url(#bg)" stroke="#334155"/>
+  <text x="460" y="34" text-anchor="middle" class="tiny">Agent-safe v3 · analyze → plan → validate → apply → verify</text>
+
+  <g transform="translate(24 70)">
+    <rect class="card" x="0" y="0" width="116" height="100" rx="18" stroke="url(#source)"/>
+    <circle cx="26" cy="28" r="10" fill="#2563EB" opacity="0.24"/>
+    <path d="M18 31.5V24a4 4 0 0 1 4-4h13l7 7v20a4 4 0 0 1-4 4H22a4 4 0 0 1-4-4v-3.5" stroke="#93C5FD" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="58" y="55" text-anchor="middle" class="title">clean_frames</text>
+    <text x="58" y="78" text-anchor="middle" class="sub">已清理帧目录</text>
+  </g>
+
+  <line class="arrow" x1="150" y1="120" x2="183" y2="120"/>
+
+  <g transform="translate(192 70)">
+    <rect class="card" x="0" y="0" width="106" height="100" rx="18" stroke="url(#stage)"/>
+    <text x="53" y="45" text-anchor="middle" class="title">analyze</text>
+    <text x="53" y="69" text-anchor="middle" class="sub">运动/画质</text>
+  </g>
+
+  <line class="arrow" x1="308" y1="120" x2="341" y2="120"/>
+
+  <g transform="translate(350 70)">
+    <rect class="card" x="0" y="0" width="106" height="100" rx="18" stroke="url(#stage)"/>
+    <text x="53" y="45" text-anchor="middle" class="title">plan</text>
+    <text x="53" y="69" text-anchor="middle" class="sub">候选策略</text>
+  </g>
+
+  <line class="arrow" x1="466" y1="120" x2="499" y2="120"/>
+
+  <g transform="translate(508 70)">
+    <rect class="card" x="0" y="0" width="106" height="100" rx="18" stroke="url(#safe)"/>
+    <text x="53" y="45" text-anchor="middle" class="title">validate</text>
+    <text x="53" y="69" text-anchor="middle" class="sub">安全验证</text>
+  </g>
+
+  <line class="arrow" x1="624" y1="120" x2="657" y2="120"/>
+
+  <g transform="translate(666 70)">
+    <rect class="card" x="0" y="0" width="106" height="100" rx="18" stroke="url(#stage)"/>
+    <text x="53" y="45" text-anchor="middle" class="title">apply</text>
+    <text x="53" y="69" text-anchor="middle" class="sub">复制选中帧</text>
+  </g>
+
+  <line class="arrow" x1="782" y1="120" x2="815" y2="120"/>
+
+  <g transform="translate(824 70)">
+    <rect class="card" x="0" y="0" width="72" height="100" rx="18" stroke="url(#stage)"/>
+    <text x="36" y="44" text-anchor="middle" class="title">verify</text>
+    <text x="36" y="68" text-anchor="middle" class="sub">复核</text>
+  </g>
+
+  <path d="M 850 181 C 850 207, 820 214, 790 214 L 130 214 C 99 214, 69 207, 69 181" stroke="#334155" stroke-width="1.5" stroke-dasharray="5 7"/>
+  <text x="460" y="226" text-anchor="middle" class="tiny">中间阶段只产出可审计 artifacts；通过验证后才复制到 output_frames</text>
+
+  <g transform="translate(380 146)">
+    <rect x="0" y="0" width="160" height="34" rx="17" fill="#0B1220" stroke="#334155"/>
+    <text x="80" y="22" text-anchor="middle" class="tiny">coverage-first by default</text>
+  </g>
+</svg>
