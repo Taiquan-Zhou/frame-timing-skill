@@ -25,18 +25,13 @@ Use frame-timing-skill on path/to/clean_frames.
 Analyze first, compare candidates if needed, validate before apply, and verify before using output_frames downstream.
 ```
 
-<p align="center">
-  <img src="docs/assets/agent-safe-v3-flow.svg" alt="Agent-safe v3 workflow: clean_frames → analyze → plan → validate → apply → verify → output_frames" width="860">
-</p>
-
-`clean_frames` 是输入的已清理帧目录；中间阶段只生成可审计产物，验证通过后才按字节级一致复制到 `output_frames`，再交给下游三维重建、NeRF、Gaussian Splatting 或人工复核流程。
-
 如果只需要本地一条命令的兼容流程，可以使用：
 
 ```bash
 frame-timing path/to/clean_frames
 ```
 
+`frame-timing` 是 legacy v2 兼容入口，保留旧的 `reconstruction_balanced` 行为和产物结构，适合简单本地使用。legacy v2 策略文件可能包含 `select_sources` 等操作。
 
 ## AI Agent 和开发者
 
@@ -65,7 +60,40 @@ v3 策略：
 - `balanced`：中等风险的对比候选。
 - `jitter_reduction`：更激进的对比候选；适合视觉审查，但对重建覆盖风险更高。
 
-中高风险候选展示给用户确认。验证失败时不靠手工编辑 JSON 绕过；apply 阶段会重新验证候选摘要和策略身份。
+中高风险候选应先展示给用户确认。验证失败时不能靠手工编辑 JSON 绕过；apply 阶段会重新验证候选摘要和策略身份。
+
+### Python API
+
+```python
+from pathlib import Path
+from frame_timing_agent import (
+    PolicyName,
+    StrategyRequest,
+    analyze_frames,
+    apply_validated_strategy,
+    plan_strategy,
+    validate_strategy,
+    verify_output,
+)
+
+frame_dir = Path("path/to/clean_frames")
+artifact_root = Path("output/frame_timing_run")
+analysis = analyze_frames(frame_dir, artifact_root)
+candidate = plan_strategy(analysis, StrategyRequest(PolicyName.COVERAGE_FIRST), artifact_root)
+validation = validate_strategy(analysis, candidate, candidate.request, artifact_root)
+execution = apply_validated_strategy(frame_dir, analysis, candidate, validation, artifact_root / "output_frames")
+health = verify_output(frame_dir, analysis, candidate, execution, artifact_root / "output_frames")
+```
+
+### Benchmark 协议
+
+`frame-timing-benchmark` 用于记录外部冒烟验收结果，不复制私有帧：
+
+```bash
+frame-timing-benchmark --case-id sample --frames path/to/clean_frames --output-root output/benchmark_sample --device-category pipe --motion-type slow_forward --depth-structure low_texture --lighting normal --expected-active-range 0:100
+```
+
+Benchmark 结果是发布验收证据，不是统计准确率声明。
 
 ## License
 

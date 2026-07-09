@@ -27,6 +27,9 @@ If you only need the compatibility one-command flow, use:
 frame-timing path/to/clean_frames
 ```
 
+`frame-timing` is the legacy v2 compatibility entrypoint. It keeps the older `reconstruction_balanced` behavior and artifact layout for simple local use.
+Legacy v2 strategy files may contain operations such as `select_sources`.
+
 ## For Agents And Developers
 
 Install from the repository:
@@ -54,7 +57,40 @@ Available v3 policies:
 - `balanced`: middle-risk comparison candidate.
 - `jitter_reduction`: aggressive comparison candidate; useful for visual review, but high-risk for reconstruction coverage.
 
-Medium-risk and high-risk candidates will be shown to the user before applying. Failed validation must not be bypassed by editing JSON; apply revalidates the candidate digest and strategy identity.
+Medium-risk and high-risk candidates should be shown to the user before applying. Failed validation must not be bypassed by editing JSON; apply revalidates the candidate digest and strategy identity.
+
+### Python API
+
+```python
+from pathlib import Path
+from frame_timing_agent import (
+    PolicyName,
+    StrategyRequest,
+    analyze_frames,
+    apply_validated_strategy,
+    plan_strategy,
+    validate_strategy,
+    verify_output,
+)
+
+frame_dir = Path("path/to/clean_frames")
+artifact_root = Path("output/frame_timing_run")
+analysis = analyze_frames(frame_dir, artifact_root)
+candidate = plan_strategy(analysis, StrategyRequest(PolicyName.COVERAGE_FIRST), artifact_root)
+validation = validate_strategy(analysis, candidate, candidate.request, artifact_root)
+execution = apply_validated_strategy(frame_dir, analysis, candidate, validation, artifact_root / "output_frames")
+health = verify_output(frame_dir, analysis, candidate, execution, artifact_root / "output_frames")
+```
+
+### Benchmark protocol
+
+`frame-timing-benchmark` records external smoke-test results without copying private frames:
+
+```bash
+frame-timing-benchmark --case-id sample --frames path/to/clean_frames --output-root output/benchmark_sample --device-category pipe --motion-type slow_forward --depth-structure low_texture --lighting normal --expected-active-range 0:100
+```
+
+Benchmark results are release evidence, not a statistical accuracy claim.
 
 ## License
 
