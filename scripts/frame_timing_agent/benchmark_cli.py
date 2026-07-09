@@ -7,7 +7,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
-from typing import Never
+from typing import NoReturn
 
 from frame_timing_agent.artifact_layout import validate_artifact_root
 from frame_timing_agent.contracts import AnalysisRange, PolicyName, RiskLevel, StrategyRequest
@@ -31,7 +31,7 @@ class BenchmarkInputError(ValueError):
 
 
 class _ArgumentParser(argparse.ArgumentParser):
-    def error(self, message: str) -> Never:
+    def error(self, message: str) -> NoReturn:
         raise BenchmarkInputError(message)
 
 

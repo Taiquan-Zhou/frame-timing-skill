@@ -4,7 +4,7 @@ import argparse
 import sys
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Never
+from typing import NoReturn
 
 from frame_timing_agent.agent_artifact_health import HealthPublicationError, run_agent_artifact_health_check
 from frame_timing_agent.artifact_io import (
@@ -46,7 +46,7 @@ class CliInputError(ValueError):
 
 
 class _ArgumentParser(argparse.ArgumentParser):
-    def error(self, message: str) -> Never:
+    def error(self, message: str) -> NoReturn:
         raise CliInputError(message)
 
 

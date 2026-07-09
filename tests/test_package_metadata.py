@@ -68,6 +68,14 @@ class PackageMetadataTest(unittest.TestCase):
         self.assertEqual(data["project"]["scripts"]["frame-timing-tool"], "frame_timing_agent.tool_cli:main")
         self.assertEqual(data["project"]["scripts"]["frame-timing-benchmark"], "frame_timing_agent.benchmark_cli:main")
 
+    def test_console_entrypoints_use_python310_runtime_typing(self):
+        for path in [
+            Path("scripts") / "frame_timing_agent" / "tool_cli.py",
+            Path("scripts") / "frame_timing_agent" / "benchmark_cli.py",
+        ]:
+            with self.subTest(path=str(path)):
+                self.assertNotIn("from typing import Never", path.read_text(encoding="utf-8"))
+
     def test_user_facing_docs_do_not_reference_private_project_paths(self):
         doc_paths = [
             Path("README.md"),
