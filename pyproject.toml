@@ -30,7 +30,7 @@ classifiers = [
   "Topic :: Multimedia :: Video",
 ]
 dependencies = [
-  "opencv-python>=4.8,<4.13",
+  "opencv-python>=4.8,<5.1",
   "numpy>=1.26,<2.0",
 ]
 
