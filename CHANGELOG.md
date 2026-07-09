@@ -1,15 +1,46 @@
 # Changelog
 
-## 0.3.0 - Unreleased
+## 0.3.0 - 2026-07-09
 
-Agent-safe v3 readiness release.
+Agent-safe v3 readiness release for audited frame selection before reconstruction.
 
-- Document `frame-timing-tool` as the staged Agent-safe v3 JSON CLI.
-- Document `coverage_first`, `balanced`, and `jitter_reduction` policy selection.
-- Document `schema_version 3` and policy revision `coverage-static-thinning-v1`.
-- Clarify that `frame-timing` remains the legacy v2 compatibility entrypoint.
-- Add Agent integration and v2-to-v3 migration references.
-- Clarify that the package performs frame selection and byte-identical copying, not pixel stabilization, deblurring, 3D coverage optimization, or reconstruction-quality guarantees.
+### Added
+
+- Add `frame-timing-tool` as the staged Agent-safe v3 JSON CLI: `capabilities`, `analyze`, `plan`, `validate`, `apply`, and `verify`.
+- Add typed Agent strategy contracts using `schema_version 3` and policy revision `coverage-static-thinning-v1`.
+- Add three v3 policies: `coverage_first`, `balanced`, and `jitter_reduction`.
+- Add v3 audit artifacts: `analysis.json`, `strategy.json`, `validation.json`, `execution.json`, `health.json`, `report.md`, `human_review.md`, and `output_frames/`.
+- Add an external benchmark protocol for smoke-test release evidence without committing private frames or absolute paths.
+
+### Changed
+
+- Make `coverage_first` the recommended Agent policy for reconstruction-oriented use.
+- Preserve non-static frame coverage and apply only conservative thinning to confirmed static ranges.
+- Strengthen motion analysis, strategy validation, output verification, package build checks, CI matrix, and security/dependency gates.
+- Keep copied output frames byte-identical to source frames.
+
+### Compatibility
+
+- Keep `frame-timing`, `frame-timing-batch`, and `frame-timing-health` as legacy v2 compatibility entrypoints.
+- Do not automatically route legacy v2 calls into Agent-safe v3.
+- Do not map old v2 override files into v3 strategy requests.
+
+### Known Limits
+
+- This release performs frame selection, not pixel stabilization, deblurring, interpolation, 3D coverage optimization, or reconstruction.
+- Benchmark results are smoke-test release evidence only; they are not statistical accuracy claims and do not guarantee zero false positives on unknown videos.
+- Reconstruction quality still requires downstream validation and human review for high-risk footage.
+
+### Verification
+
+- `python -m ruff check scripts tests`
+- `python -m ruff format --check scripts tests`
+- `python -m mypy scripts/frame_timing_agent`
+- `python -m pytest --cov=frame_timing_agent --cov-report=term-missing --cov-fail-under=90`
+- `python -m compileall -q scripts examples tests`
+- `python -m build`
+- `python -m twine check dist/*`
+- `python -m pip_audit`
 
 ## 0.2.0rc1
 

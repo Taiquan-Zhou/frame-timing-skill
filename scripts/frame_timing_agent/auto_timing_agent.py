@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 import argparse
@@ -11,7 +12,7 @@ if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from frame_timing_agent.apply_frame_strategy import apply_strategy
-from frame_timing_agent.frame_source import load_frame_records
+from frame_timing_agent.frame_source import FrameRecord, load_frame_records
 from frame_timing_agent.frame_strategy import build_strategy
 from frame_timing_agent.human_review import write_human_review
 from frame_timing_agent.jitter_strategy import build_jitter_reduction_strategy, merge_jitter_with_base_strategy
@@ -144,7 +145,7 @@ def run_timing_agent(
     )
 
 
-def _estimate_output_count(records, strategy: dict) -> int:
+def _estimate_output_count(records: Sequence[FrameRecord], strategy: dict) -> int:
     source_indices = {record.source_index for record in records}
     count = len(records)
     for operation in strategy.get("operations", []):

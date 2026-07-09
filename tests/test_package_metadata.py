@@ -26,6 +26,7 @@ class PackageMetadataTest(unittest.TestCase):
     def test_repository_declares_public_release_metadata(self):
         data = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
 
+        self.assertEqual(data["project"]["version"], "0.3.0")
         self.assertTrue(Path("LICENSE").is_file())
         self.assertTrue(Path("CHANGELOG.md").is_file())
         self.assertTrue(Path("SECURITY.md").is_file())
@@ -35,6 +36,19 @@ class PackageMetadataTest(unittest.TestCase):
             data["project"]["urls"]["Source"],
             "https://github.com/Taiquan-Zhou/frame-timing-skill",
         )
+
+    def test_release_metadata_is_finalized_for_v030(self):
+        changelog = Path("CHANGELOG.md").read_text(encoding="utf-8")
+        data = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
+
+        self.assertTrue(data["tool"]["mypy"]["strict"])
+        self.assertIn("## 0.3.0 - 2026-07-09", changelog)
+        self.assertNotIn("## 0.3.0 - Unreleased", changelog)
+        self.assertIn("Agent-safe v3", changelog)
+        self.assertIn("frame-timing-tool", changelog)
+        self.assertIn("coverage_first", changelog)
+        self.assertIn("statistical accuracy claims", changelog)
+        self.assertIn("not pixel stabilization", changelog)
 
     def test_runtime_dependencies_are_bounded_for_reproducible_installs(self):
         data = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
