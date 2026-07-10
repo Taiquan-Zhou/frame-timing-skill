@@ -10,6 +10,10 @@ Agent-safe v3 工作流把分析、规划、验证、应用和复核拆成明确
 
 它不负责视频抽帧、像素修改、上传数据或执行重建。Agent-safe v3 提供的是帧选择层面的覆盖保护。
 
+<p align="center">
+  <img src="assets/frame-timing-workflow.png" alt="Frame Timing workflow: clean_frames -> analyze -> plan -> validate -> apply -> verify -> output_frames" width="100%">
+</p>
+
 ## 普通用户
 
 让你的 AI Agent 或 AI 编程工具安装这个仓库作为 skill：

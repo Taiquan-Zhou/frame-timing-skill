@@ -6,6 +6,10 @@ Frame Timing Skill prepares already-clean extracted image frames before reconstr
 
 It does not extract video, edit pixels, stabilize images, deblur frames, upload data, or run reconstruction. Agent-safe v3 provides coverage protection for frame selection; it is not a 3D geometry, parallax, or camera-baseline coverage optimizer.
 
+<p align="center">
+  <img src="assets/frame-timing-workflow.png" alt="Frame Timing workflow: clean_frames -> analyze -> plan -> validate -> apply -> verify -> output_frames" width="100%">
+</p>
+
 ## For Users
 
 Ask your AI agent or AI coding tool to install this repository as a skill:
