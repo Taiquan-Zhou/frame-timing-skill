@@ -6,6 +6,7 @@ import cv2
 import numpy as np
 
 from frame_timing_agent.frame_source import FrameRecord
+from frame_timing_agent.image_io import read_image
 
 
 @dataclass(frozen=True)
@@ -59,7 +60,7 @@ def estimate_frame_motion(records: list[FrameRecord], min_sharpness: float = 100
 
 
 def _load_gray_image(record: FrameRecord) -> np.ndarray:
-    gray = cv2.imread(str(record.path), cv2.IMREAD_GRAYSCALE)
+    gray = read_image(record.path, cv2.IMREAD_GRAYSCALE)
     if gray is None:
         raise ValueError(f"Cannot read frame image: {record.path}")
     return gray

@@ -15,6 +15,7 @@ if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from frame_timing_agent.frame_source import FrameRecord, load_frame_records
+from frame_timing_agent.image_io import read_image, write_image
 
 
 @dataclass(frozen=True)
@@ -116,7 +117,7 @@ def _sample_records(records: Sequence[FrameRecord], count: int) -> list[FrameRec
 def _write_contact_sheet(path: Path, records: Sequence[FrameRecord], tile_width: int) -> None:
     tiles = []
     for record in records:
-        image = cv2.imread(str(record.path), cv2.IMREAD_COLOR)
+        image = read_image(record.path, cv2.IMREAD_COLOR)
         if image is None:
             continue
         tile = _resize_to_width(image, tile_width)
@@ -128,7 +129,7 @@ def _write_contact_sheet(path: Path, records: Sequence[FrameRecord], tile_width:
     height = max(tile.shape[0] for tile in tiles)
     normalized_tiles = [_pad_to_height(tile, height) for tile in tiles]
     sheet = np.concatenate(normalized_tiles, axis=1)
-    ok = cv2.imwrite(str(path), sheet)
+    ok = write_image(path, sheet)
     if not ok:
         raise ValueError(f"failed to write contact sheet: {path}")
 

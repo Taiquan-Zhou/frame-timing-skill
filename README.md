@@ -54,6 +54,17 @@ For direct CLI or Python API use:
 python -m pip install git+https://github.com/Taiquan-Zhou/frame-timing-skill.git
 ```
 
+For the optional Windows desktop interface, install the UI extra from a checkout:
+
+```powershell
+python -m pip install -e ".[ui]"
+frame-timing-ui
+```
+
+The desktop interface runs locally and writes generated artifacts to a sibling output area, normally
+`output/frame_timing_ui/<frame-directory-name>`. It never writes artifacts inside the selected source directory
+and does not upload source frames.
+
 ### CLI Usage
 
 Run frame timing on a directory of already-clean extracted frames:

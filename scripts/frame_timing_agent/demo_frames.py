@@ -7,6 +7,8 @@ from typing import Sequence
 import cv2
 import numpy as np
 
+from frame_timing_agent.image_io import write_image
+
 
 DEFAULT_OUTPUT_DIR = Path("output") / "demo_frames" / "sample"
 
@@ -24,7 +26,7 @@ def generate_demo_frames(output_dir: Path | str = DEFAULT_OUTPUT_DIR, count: int
     for index in range(count):
         image = _build_demo_image(index=index, count=count)
         path = output_dir / f"frame_{index:06d}_src_{index:06d}.jpg"
-        ok = cv2.imwrite(str(path), image)
+        ok = write_image(path, image)
         if not ok:
             raise OSError(f"failed to write demo frame: {path}")
         paths.append(path)

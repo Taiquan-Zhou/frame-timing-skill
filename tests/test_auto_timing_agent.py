@@ -9,6 +9,7 @@ import cv2
 import numpy as np
 
 from frame_timing_agent.auto_timing_agent import run_timing_agent
+from frame_timing_agent.image_io import write_image
 
 
 def _write_image(path: Path, value: int) -> None:
@@ -19,6 +20,22 @@ def _write_image(path: Path, value: int) -> None:
 
 
 class AutoTimingAgentTest(unittest.TestCase):
+    def test_preview_supports_unicode_frame_and_artifact_paths(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            frames = root / "中文帧目录"
+            artifact_dir = root / "output" / "中文结果"
+            frames.mkdir()
+            for index in range(6):
+                image = np.full((16, 16, 3), 100 + index, dtype=np.uint8)
+                self.assertTrue(write_image(frames / f"frame_{index:06d}.jpg", image))
+
+            result = run_timing_agent(frames, artifact_dir, limit_first_n=None, write=False)
+
+            self.assertEqual(result.analyzed_count, 6)
+            self.assertTrue((artifact_dir / "analysis" / "strategy.json").exists())
+            self.assertTrue((artifact_dir / "analysis" / "visual_review" / "index.md").exists())
+
     def test_preview_writes_analysis_but_not_output_frames(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

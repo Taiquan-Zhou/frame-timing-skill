@@ -9,6 +9,8 @@ on:
 jobs:
   test:
     runs-on: windows-latest
+    env:
+      QT_QPA_PLATFORM: offscreen
 
     steps:
       - name: Check out repository
@@ -20,7 +22,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install package and test tools
-        run: python -m pip install . pytest build
+        run: python -m pip install ".[ui]" pytest build
 
       - name: Run tests
         run: python -m pytest
@@ -91,6 +93,7 @@ jobs:
           New-Item -ItemType Directory -Force -Path $hostDir | Out-Null
           Set-Location $hostDir
           python -m pip install $source
+          frame-timing-ui --smoke-test
           frame-timing-demo --output_dir output\demo_frames\sample --count 12
           frame-timing output\demo_frames\sample --artifact_root output\ci_demo --limit_first_n 12
           frame-timing-health --artifact_root output\ci_demo

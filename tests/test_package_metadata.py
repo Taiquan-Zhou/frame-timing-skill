@@ -49,6 +49,8 @@ class PackageMetadataTest(unittest.TestCase):
         self.assertEqual(data["project"]["scripts"]["frame-timing-batch"], "frame_timing_agent.batch_timing_agent:main")
         self.assertEqual(data["project"]["scripts"]["frame-timing-health"], "frame_timing_agent.batch_artifact_health:main")
         self.assertEqual(data["project"]["scripts"]["frame-timing-demo"], "frame_timing_agent.demo_frames:main")
+        self.assertEqual(data["project"]["scripts"]["frame-timing-ui"], "frame_timing_agent.ui.app:main")
+        self.assertIn("PySide6-Essentials>=6.6,<6.9", data["project"]["optional-dependencies"]["ui"])
 
     def test_user_facing_docs_do_not_reference_private_project_paths(self):
         doc_paths = [
@@ -122,6 +124,9 @@ class PackageMetadataTest(unittest.TestCase):
         content = workflow.read_text(encoding="utf-8")
 
         self.assertIn("python -m pytest", content)
+        self.assertIn('python -m pip install ".[ui]" pytest build', content)
+        self.assertIn("QT_QPA_PLATFORM: offscreen", content)
+        self.assertIn("frame-timing-ui --smoke-test", content)
         self.assertIn("python -m compileall -q scripts examples tests", content)
         self.assertIn("python -m build --outdir $dist", content)
         self.assertIn("non-release files", content)

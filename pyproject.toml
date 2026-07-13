@@ -34,6 +34,11 @@ dependencies = [
   "numpy>=1.26,<2.0",
 ]
 
+[project.optional-dependencies]
+ui = [
+  "PySide6-Essentials>=6.6,<6.9",
+]
+
 [project.urls]
 Homepage = "https://github.com/Taiquan-Zhou/frame-timing-skill"
 Source = "https://github.com/Taiquan-Zhou/frame-timing-skill"
@@ -44,6 +49,7 @@ frame-timing = "frame_timing_agent.simple_cli:main"
 frame-timing-batch = "frame_timing_agent.batch_timing_agent:main"
 frame-timing-health = "frame_timing_agent.batch_artifact_health:main"
 frame-timing-demo = "frame_timing_agent.demo_frames:main"
+frame-timing-ui = "frame_timing_agent.ui.app:main"
 
 [tool.setuptools]
 package-dir = {"" = "scripts"}
