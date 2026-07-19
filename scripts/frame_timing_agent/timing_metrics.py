@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Callable
 
 import cv2
 import numpy as np
@@ -38,11 +39,15 @@ def _compute_motion_score(current_gray_normalized: np.ndarray, previous_gray_nor
     return float(np.mean(np.abs(current_gray_normalized - previous_gray_normalized)))
 
 
-def compute_frame_metrics(records: list[FrameRecord]) -> list[FrameMetric]:
+def compute_frame_metrics(
+    records: list[FrameRecord],
+    progress_callback: Callable[[int, int], None] | None = None,
+) -> list[FrameMetric]:
     metrics: list[FrameMetric] = []
     previous_gray_normalized: np.ndarray | None = None
 
-    for record in records:
+    total = len(records)
+    for completed, record in enumerate(records, start=1):
         gray = _load_gray_image(record.path)
         gray_normalized = gray.astype(np.float32) / 255.0
         sharpness = float(cv2.Laplacian(gray, cv2.CV_64F).var())
@@ -71,5 +76,7 @@ def compute_frame_metrics(records: list[FrameRecord]) -> list[FrameMetric]:
             )
         )
         previous_gray_normalized = gray_normalized
+        if progress_callback is not None:
+            progress_callback(completed, total)
 
     return metrics

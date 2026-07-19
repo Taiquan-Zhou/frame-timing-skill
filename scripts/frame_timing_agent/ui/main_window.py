@@ -1,14 +1,18 @@
 from __future__ import annotations
 
+from dataclasses import dataclass, replace
+from datetime import datetime
 from functools import partial
 from pathlib import Path
 
-from PySide6.QtCore import QPointF, QRectF, Qt, QThreadPool, QUrl
-from PySide6.QtGui import QColor, QDesktopServices, QFont, QPainter, QPainterPath, QPen, QPixmap
+from PySide6.QtCore import QSettings, QSignalBlocker, Qt, QThreadPool, QUrl
+from PySide6.QtGui import QColor, QDesktopServices, QPixmap
 from PySide6.QtWidgets import (
     QButtonGroup,
+    QDialog,
     QFileDialog,
     QFrame,
+    QGraphicsDropShadowEffect,
     QGridLayout,
     QHBoxLayout,
     QLabel,
@@ -24,205 +28,128 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from frame_timing_agent.ui.view_model import AnalysisViewData, SegmentView, ThumbnailView
-from frame_timing_agent.ui.worker import RunSettings, create_task, default_artifact_dir, run_analysis, run_export
+from frame_timing_agent.ui.history import RunHistoryStore, RunRecord
+from frame_timing_agent.ui.history_dialog import RunHistoryDialog
+from frame_timing_agent.ui.style import (
+    LINE_COLOR,
+    OPERATION_COLORS,
+    OPERATION_LABELS,
+    main_window_stylesheet,
+    make_line_icon as _make_line_icon,
+)
+from frame_timing_agent.ui.view_model import AnalysisViewData, ThumbnailView
+from frame_timing_agent.ui.widgets import LineChart, SegmentBar, ThumbnailImage
+from frame_timing_agent.ui.worker import (
+    RunSettings,
+    create_task,
+    default_artifact_dir,
+    delete_history_run,
+    load_existing_run,
+    new_run_artifact_dir,
+    run_analysis,
+    run_export,
+)
 
 
-SEGMENT_COLORS = {
-    "static": QColor("#36a269"),
-    "fast_motion": QColor("#f39c3d"),
-    "very_fast_motion": QColor("#e5484d"),
-    "low_motion_review": QColor("#8b5cf6"),
-}
-
-OPERATION_COLORS = {
-    "keep": "#36a269",
-    "keep_uniform": "#36a269",
-    "duplicate_range": "#2878f0",
-    "select_sources": "#f39c3d",
-    "mark_review": "#e5484d",
-}
-
-SEGMENT_LABELS = {
-    "static": "静止",
-    "fast_motion": "快速运动",
-    "very_fast_motion": "极快运动",
-    "low_motion_review": "低运动待复核",
-}
-
-OPERATION_LABELS = {
-    "keep": "原样保留",
-    "keep_uniform": "静止段压缩",
-    "duplicate_range": "运动段补帧",
-    "select_sources": "稳定帧选择",
-    "mark_review": "待人工复核",
-}
-
-
-class LineChart(QWidget):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self._sources: tuple[int, ...] = ()
-        self._values: tuple[float, ...] = ()
-        self._label = "运动强度"
-        self.setMinimumHeight(210)
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-
-    def set_series(self, sources: tuple[int, ...], values: tuple[float, ...], label: str) -> None:
-        self._sources = sources
-        self._values = values
-        self._label = label
-        self.update()
-
-    def paintEvent(self, event):
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        painter.fillRect(self.rect(), QColor("#ffffff"))
-        plot = self.rect().adjusted(52, 22, -18, -34)
-        axis_pen = QPen(QColor("#d9dee8"), 1)
-        painter.setPen(axis_pen)
-        for index in range(5):
-            y = plot.top() + plot.height() * index / 4
-            painter.drawLine(plot.left(), int(y), plot.right(), int(y))
-
-        painter.setPen(QColor("#667085"))
-        painter.setFont(QFont("Segoe UI", 9))
-        painter.drawText(8, 18, self._label)
-        if not self._values or not self._sources:
-            painter.drawText(plot, Qt.AlignmentFlag.AlignCenter, "选择帧目录并开始分析")
-            return
-
-        minimum = min(self._values)
-        maximum = max(self._values)
-        span = maximum - minimum or 1.0
-        path = QPainterPath()
-        for index, value in enumerate(self._values):
-            x = plot.left() + plot.width() * index / max(1, len(self._values) - 1)
-            y = plot.bottom() - plot.height() * (value - minimum) / span
-            point = QPointF(x, y)
-            if index == 0:
-                path.moveTo(point)
-            else:
-                path.lineTo(point)
-        painter.setPen(QPen(QColor("#2878f0"), 2))
-        painter.drawPath(path)
-
-        painter.setPen(QColor("#667085"))
-        painter.drawText(4, plot.top() + 5, f"{maximum:.2f}")
-        painter.drawText(4, plot.bottom(), f"{minimum:.2f}")
-        painter.drawText(plot.left(), self.height() - 8, str(self._sources[0]))
-        end_text = str(self._sources[-1])
-        painter.drawText(plot.right() - 42, self.height() - 8, end_text)
-        painter.drawText(plot, Qt.AlignmentFlag.AlignBottom | Qt.AlignmentFlag.AlignHCenter, "源帧索引")
-
-
-class SegmentBar(QWidget):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self._segments: tuple[SegmentView, ...] = ()
-        self._source_min = 0
-        self._source_max = 1
-        self.setFixedHeight(58)
-
-    def set_segments(self, segments: tuple[SegmentView, ...], source_min: int, source_max: int) -> None:
-        self._segments = segments
-        self._source_min = source_min
-        self._source_max = max(source_min + 1, source_max)
-        self.update()
-
-    def paintEvent(self, event):
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        bar = QRectF(0, 4, self.width(), 12)
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QColor("#edf0f5"))
-        painter.drawRoundedRect(bar, 4, 4)
-        span = self._source_max - self._source_min + 1
-        for segment in self._segments:
-            start_ratio = (segment.start - self._source_min) / span
-            end_ratio = (segment.end - self._source_min + 1) / span
-            segment_rect = QRectF(
-                max(0.0, start_ratio) * self.width(),
-                4,
-                max(3.0, (end_ratio - start_ratio) * self.width()),
-                12,
-            )
-            painter.setBrush(SEGMENT_COLORS.get(segment.segment_type, QColor("#98a2b3")))
-            painter.drawRoundedRect(segment_rect, 3, 3)
-
-        painter.setFont(QFont("Segoe UI", 8))
-        x = 0
-        for segment_type in ("static", "fast_motion", "very_fast_motion", "low_motion_review"):
-            painter.setBrush(SEGMENT_COLORS[segment_type])
-            painter.drawRoundedRect(QRectF(x, 31, 10, 10), 2, 2)
-            painter.setPen(QColor("#667085"))
-            label = SEGMENT_LABELS[segment_type]
-            painter.drawText(x + 15, 41, label)
-            x += painter.fontMetrics().horizontalAdvance(label) + 38
-            painter.setPen(Qt.PenStyle.NoPen)
+@dataclass(frozen=True)
+class CurrentResultState:
+    settings: RunSettings | None
+    view: AnalysisViewData
+    record: RunRecord | None
+    export_completed: bool
+    status_text: str
+    progress: int
 
 
 class MainWindow(QMainWindow):
-    def __init__(self):
+    def __init__(
+        self,
+        settings: QSettings | None = None,
+        history_store: RunHistoryStore | None = None,
+    ):
         super().__init__()
         self.setWindowTitle("Frame Timing Skill")
-        self.resize(1240, 780)
-        self.setMinimumSize(980, 680)
+        self.resize(1320, 840)
+        self.setMinimumSize(1100, 700)
         self._thread_pool = QThreadPool(self)
         self._thread_pool.setMaxThreadCount(1)
+        self._active_task = None
         self._busy = False
+        self._settings = settings
+        self._history_store = history_store
         self._current_settings: RunSettings | None = None
         self._current_view: AnalysisViewData | None = None
+        self._current_record: RunRecord | None = None
+        self._current_result_state: CurrentResultState | None = None
+        self._pending_current_result_state: CurrentResultState | None = None
+        self._history_read_only = False
+        self._export_completed = False
         self._metric_name = "motion"
         self._build_ui()
         self._apply_style()
+        self._restore_preferences()
 
     def _build_ui(self) -> None:
         central = QWidget()
         root = QVBoxLayout(central)
-        root.setContentsMargins(18, 14, 18, 16)
-        root.setSpacing(12)
+        root.setContentsMargins(16, 14, 16, 16)
+        root.setSpacing(14)
         root.addWidget(self._build_header())
         root.addLayout(self._build_summary())
 
         body = QHBoxLayout()
-        body.setSpacing(12)
+        body.setSpacing(14)
         left = QVBoxLayout()
-        left.setSpacing(12)
+        left.setSpacing(14)
         left.addWidget(self._build_analysis_panel(), 3)
         left.addWidget(self._build_thumbnail_panel(), 2)
         body.addLayout(left, 7)
 
         right = QVBoxLayout()
-        right.setSpacing(12)
+        right.setSpacing(14)
         right.addWidget(self._build_strategy_panel(), 3)
         right.addWidget(self._build_execution_panel(), 2)
         body.addLayout(right, 3)
+        body.setStretch(0, 7)
+        body.setStretch(1, 3)
         root.addLayout(body, 1)
         self.setCentralWidget(central)
 
     def _build_header(self) -> QWidget:
         header = QFrame()
         header.setObjectName("header")
+        header.setMinimumHeight(60)
         layout = QHBoxLayout(header)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(9)
+        layout.setContentsMargins(14, 8, 14, 8)
+        layout.setSpacing(10)
+
+        brand_icon = QLabel()
+        brand_icon.setObjectName("brandIcon")
+        brand_icon.setFixedSize(34, 34)
+        brand_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        brand_icon.setPixmap(_make_line_icon("brand", LINE_COLOR, 20))
+        layout.addWidget(brand_icon)
 
         title = QLabel("Frame Timing Skill")
         title.setObjectName("title")
         layout.addWidget(title)
-        layout.addSpacing(12)
+        layout.addSpacing(20)
 
         self.path_edit = QLineEdit()
+        self.path_edit.setMinimumWidth(240)
         self.path_edit.setPlaceholderText("选择已清理的帧目录")
         self.path_edit.setClearButtonEnabled(True)
+        self.path_edit.addAction(
+            self.style().standardIcon(QStyle.StandardPixmap.SP_DirIcon),
+            QLineEdit.ActionPosition.LeadingPosition,
+        )
         self.path_edit.textChanged.connect(self._invalidate_analysis)
         layout.addWidget(self.path_edit, 1)
 
-        browse = QPushButton("选择目录")
-        browse.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_DirOpenIcon))
-        browse.clicked.connect(self._choose_directory)
-        layout.addWidget(browse)
+        self.browse_button = QPushButton("选择目录")
+        self.browse_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_DirOpenIcon))
+        self.browse_button.clicked.connect(self._choose_directory)
+        layout.addWidget(self.browse_button)
 
         fps_label = QLabel("FPS")
         fps_label.setObjectName("muted")
@@ -243,51 +170,111 @@ class MainWindow(QMainWindow):
 
     def _build_summary(self) -> QHBoxLayout:
         layout = QHBoxLayout()
-        layout.setSpacing(12)
-        self.input_value = self._summary_box(layout, "输入帧数", "--")
-        self.strategy_value = self._summary_box(layout, "当前策略", "reconstruction_balanced")
-        self.output_value = self._summary_box(layout, "预计输出", "--")
+        layout.setSpacing(14)
+        self.input_value = self._summary_box(
+            layout,
+            "输入帧数",
+            "--",
+            "summaryIconBlue",
+            "frames",
+            LINE_COLOR,
+        )
+        self.strategy_value = self._summary_box(
+            layout,
+            "当前策略",
+            "reconstruction_balanced",
+            "summaryIconPurple",
+            "strategy",
+            "#7c3aed",
+        )
+        self.output_value = self._summary_box(
+            layout,
+            "预计输出",
+            "--",
+            "summaryIconGreen",
+            "output",
+            "#159f6d",
+        )
         return layout
 
-    def _summary_box(self, parent: QHBoxLayout, label: str, value: str) -> QLabel:
+    def _summary_box(
+        self,
+        parent: QHBoxLayout,
+        label: str,
+        value: str,
+        icon_object_name: str,
+        icon_kind: str,
+        icon_color: str,
+    ) -> QLabel:
         frame = QFrame()
-        frame.setObjectName("panel")
-        layout = QVBoxLayout(frame)
-        layout.setContentsMargins(16, 12, 16, 12)
-        layout.setSpacing(2)
+        frame.setObjectName("summaryCard")
+        frame.setMinimumHeight(92)
+        layout = QHBoxLayout(frame)
+        layout.setContentsMargins(18, 14, 18, 14)
+        layout.setSpacing(14)
+        icon_label = QLabel()
+        icon_label.setObjectName(icon_object_name)
+        icon_label.setProperty("iconKind", icon_kind)
+        icon_label.setFixedSize(46, 46)
+        icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        icon_label.setPixmap(_make_line_icon(icon_kind, icon_color, 24))
+        layout.addWidget(icon_label)
+        text_layout = QVBoxLayout()
+        text_layout.setSpacing(3)
+        text_layout.addStretch()
         caption = QLabel(label)
-        caption.setObjectName("muted")
+        caption.setObjectName("summaryCaption")
         value_label = QLabel(value)
         value_label.setObjectName("summaryValue")
         value_label.setWordWrap(True)
-        layout.addWidget(caption)
-        layout.addWidget(value_label)
+        value_label.setMinimumWidth(0)
+        value_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        text_layout.addWidget(caption)
+        text_layout.addWidget(value_label)
+        text_layout.addStretch()
+        layout.addLayout(text_layout, 1)
         parent.addWidget(frame, 1)
+        self._apply_card_shadow(frame)
         return value_label
+
+    @staticmethod
+    def _apply_card_shadow(widget: QWidget) -> None:
+        shadow = QGraphicsDropShadowEffect(widget)
+        shadow.setBlurRadius(18)
+        shadow.setOffset(0, 2)
+        shadow.setColor(QColor(15, 23, 42, 20))
+        widget.setGraphicsEffect(shadow)
 
     def _build_analysis_panel(self) -> QWidget:
         panel = QFrame()
         panel.setObjectName("panel")
         layout = QVBoxLayout(panel)
-        layout.setContentsMargins(16, 12, 16, 10)
-        layout.setSpacing(5)
+        layout.setContentsMargins(20, 16, 20, 14)
+        layout.setSpacing(8)
 
         header = QHBoxLayout()
         title = QLabel("时序分析")
         title.setObjectName("sectionTitle")
         header.addWidget(title)
         header.addStretch()
+        switch = QFrame()
+        switch.setObjectName("metricSwitch")
+        switch_layout = QHBoxLayout(switch)
+        switch_layout.setContentsMargins(0, 0, 0, 0)
+        switch_layout.setSpacing(0)
         group = QButtonGroup(self)
         for key, label in (("motion", "运动"), ("sharpness", "清晰度"), ("contrast", "对比度")):
             button = QPushButton(label)
             button.setCheckable(True)
             button.setObjectName("segmentButton")
-            button.setFixedHeight(28)
+            button.setProperty("last", key == "contrast")
+            button.setFixedHeight(34)
             button.clicked.connect(partial(self._switch_metric, key))
             group.addButton(button)
-            header.addWidget(button)
+            switch_layout.addWidget(button)
             if key == "motion":
                 button.setChecked(True)
+        header.addWidget(switch)
         layout.addLayout(header)
         self.chart = LineChart()
         layout.addWidget(self.chart, 1)
@@ -299,7 +286,8 @@ class MainWindow(QMainWindow):
         panel = QFrame()
         panel.setObjectName("panel")
         layout = QVBoxLayout(panel)
-        layout.setContentsMargins(16, 12, 16, 14)
+        layout.setContentsMargins(20, 16, 20, 18)
+        layout.setSpacing(10)
         title = QLabel("代表帧")
         title.setObjectName("sectionTitle")
         layout.addWidget(title)
@@ -316,8 +304,8 @@ class MainWindow(QMainWindow):
         panel = QFrame()
         panel.setObjectName("panel")
         layout = QVBoxLayout(panel)
-        layout.setContentsMargins(16, 14, 16, 14)
-        layout.setSpacing(10)
+        layout.setContentsMargins(20, 10, 20, 10)
+        layout.setSpacing(5)
         title = QLabel("策略摘要")
         title.setObjectName("sectionTitle")
         layout.addWidget(title)
@@ -331,23 +319,30 @@ class MainWindow(QMainWindow):
         layout.addWidget(note)
         self.operation_grid = QGridLayout()
         self.operation_grid.setHorizontalSpacing(8)
-        self.operation_grid.setVerticalSpacing(8)
+        self.operation_grid.setVerticalSpacing(2)
         self.operation_labels: dict[str, QLabel] = {}
         for row, op in enumerate(("keep_uniform", "duplicate_range", "select_sources", "mark_review")):
+            self.operation_grid.setRowMinimumHeight(row, 22)
             caption = QLabel(OPERATION_LABELS[op])
             caption.setObjectName("muted")
             value = QLabel("0 个区间")
             value.setAlignment(Qt.AlignmentFlag.AlignRight)
+            value.setMinimumWidth(84)
+            value.setContentsMargins(8, 0, 2, 0)
             self.operation_grid.addWidget(caption, row, 0)
             self.operation_grid.addWidget(value, row, 1)
             self.operation_labels[op] = value
         layout.addLayout(self.operation_grid)
-        layout.addStretch()
         destination_label = QLabel("输出位置")
         destination_label.setObjectName("muted")
-        self.destination_value = QLabel("选择帧目录后自动生成")
-        self.destination_value.setWordWrap(True)
-        self.destination_value.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.destination_value = QLineEdit("选择帧目录后自动生成")
+        self.destination_value.setObjectName("destinationField")
+        self.destination_value.setReadOnly(True)
+        self.destination_value.setFixedHeight(30)
+        self.destination_value.setMinimumWidth(0)
+        self.destination_value.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
+        self.destination_value.setCursorPosition(0)
+        self.destination_value.setToolTip(self.destination_value.text())
         layout.addWidget(destination_label)
         layout.addWidget(self.destination_value)
         return panel
@@ -356,16 +351,26 @@ class MainWindow(QMainWindow):
         panel = QFrame()
         panel.setObjectName("panel")
         layout = QVBoxLayout(panel)
-        layout.setContentsMargins(16, 14, 16, 14)
-        layout.setSpacing(8)
+        layout.setContentsMargins(20, 18, 20, 18)
+        layout.setSpacing(9)
         title = QLabel("执行状态")
         title.setObjectName("sectionTitle")
         layout.addWidget(title)
+        status_row = QHBoxLayout()
+        status_row.setSpacing(8)
         self.status_label = QLabel("等待选择帧目录")
         self.status_label.setWordWrap(True)
-        layout.addWidget(self.status_label)
+        status_row.addWidget(self.status_label, 1)
+        self.progress_percent_label = QLabel("")
+        self.progress_percent_label.setObjectName("progressPercent")
+        self.progress_percent_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop)
+        self.progress_percent_label.setFixedWidth(44)
+        self.progress_percent_label.hide()
+        status_row.addWidget(self.progress_percent_label)
+        layout.addLayout(status_row)
         self.progress = QProgressBar()
-        self.progress.setRange(0, 0)
+        self.progress.setRange(0, 100)
+        self.progress.setValue(0)
         self.progress.setTextVisible(False)
         self.progress.hide()
         layout.addWidget(self.progress)
@@ -376,11 +381,26 @@ class MainWindow(QMainWindow):
         self.export_button.setEnabled(False)
         self.export_button.clicked.connect(self._start_export)
         layout.addWidget(self.export_button)
+        self.return_current_button = QPushButton("返回当前结果")
+        self.return_current_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_ArrowBack))
+        self.return_current_button.clicked.connect(self._return_to_current_result)
+        self.return_current_button.hide()
+        layout.addWidget(self.return_current_button)
+        self.open_artifact_button = QPushButton("打开分析产物")
+        self.open_artifact_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_DirOpenIcon))
+        self.open_artifact_button.setEnabled(False)
+        self.open_artifact_button.clicked.connect(self._open_artifact)
+        layout.addWidget(self.open_artifact_button)
         self.open_output_button = QPushButton("打开输出目录")
         self.open_output_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_DirOpenIcon))
         self.open_output_button.setEnabled(False)
         self.open_output_button.clicked.connect(self._open_output)
         layout.addWidget(self.open_output_button)
+        self.history_button = QPushButton("运行记录")
+        self.history_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_FileDialogDetailedView))
+        self.history_button.setEnabled(self._history_store is not None)
+        self.history_button.clicked.connect(self._show_history)
+        layout.addWidget(self.history_button)
         local_note = QLabel("● 本地处理，不上传原图")
         local_note.setObjectName("localNote")
         local_note.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -388,6 +408,8 @@ class MainWindow(QMainWindow):
         return panel
 
     def _choose_directory(self) -> None:
+        if self._busy:
+            return
         directory = QFileDialog.getExistingDirectory(self, "选择帧目录", self.path_edit.text() or str(Path.home()))
         if directory:
             self.path_edit.setText(directory)
@@ -397,20 +419,29 @@ class MainWindow(QMainWindow):
             return
         self._current_view = None
         self._current_settings = None
+        self._current_record = None
+        self._current_result_state = None
+        self._pending_current_result_state = None
+        self.return_current_button.hide()
+        self._history_read_only = False
+        self._export_completed = False
+        self.export_button.setToolTip("")
         self.export_button.setEnabled(False)
+        self.open_artifact_button.setEnabled(False)
         self.open_output_button.setEnabled(False)
         raw_path = self.path_edit.text().strip()
         if raw_path:
-            self.destination_value.setText(str(default_artifact_dir(Path(raw_path)) / "output_frames"))
+            preview = default_artifact_dir(Path(raw_path)) / "[新运行]" / "output_frames"
+            self._set_destination_path(str(preview))
 
     def _settings_from_form(self) -> RunSettings | None:
-        frame_dir = Path(self.path_edit.text().strip())
+        frame_dir = Path(self.path_edit.text().strip()).expanduser().resolve()
         if not self.path_edit.text().strip() or not frame_dir.is_dir():
             QMessageBox.warning(self, "帧目录无效", "请选择一个存在的帧目录。")
             return None
         return RunSettings(
             frame_dir=frame_dir,
-            artifact_dir=default_artifact_dir(frame_dir),
+            artifact_dir=new_run_artifact_dir(frame_dir),
             fps=float(self.fps_spin.value()),
             limit_first_n=None,
         )
@@ -420,51 +451,140 @@ class MainWindow(QMainWindow):
         if settings is None:
             return
         self._current_settings = settings
-        self._set_busy(True, "正在分析帧目录…")
-        task = create_task(lambda: run_analysis(settings), self._analysis_finished, self._task_failed)
+        self._current_result_state = None
+        self._pending_current_result_state = None
+        self.return_current_button.hide()
+        path_blocker = QSignalBlocker(self.path_edit)
+        self.path_edit.setText(str(settings.frame_dir))
+        del path_blocker
+        self._history_read_only = False
+        self._export_completed = False
+        self.export_button.setToolTip("")
+        self._set_destination_path(str(settings.artifact_dir / "output_frames"))
+        self._save_preferences()
+        self._begin_task("正在分析帧目录")
+        task = create_task(
+            lambda progress: run_analysis(settings, progress),
+            self._analysis_finished,
+            self._task_failed,
+            self._task_progress,
+        )
+        self._active_task = task
         self._thread_pool.start(task)
 
     def _start_export(self) -> None:
-        if self._current_settings is None:
+        if self._current_settings is None or not self._can_export():
             return
-        self._set_busy(True, "正在重新检查输入并生成 output_frames…")
-        task = create_task(lambda: run_export(self._current_settings), self._export_finished, self._task_failed)
+        self._begin_task("正在重新检查输入并生成 output_frames")
+        task = create_task(
+            lambda progress: run_export(self._current_settings, progress),
+            self._export_finished,
+            self._task_failed,
+            self._task_progress,
+        )
+        self._active_task = task
         self._thread_pool.start(task)
 
     def _analysis_finished(self, view: AnalysisViewData) -> None:
+        self._active_task = None
+        try:
+            self._render_view(view)
+        except Exception as exc:
+            self._task_failed(f"{type(exc).__name__}: {exc}")
+            return
         self._current_view = view
-        self._render_view(view)
-        self._set_busy(False, f"分析完成：发现 {len(view.segments)} 个重点区间")
-        self.export_button.setEnabled(True)
+        if self._history_store is not None:
+            self._current_record = self._record_from_view(view, "analyzed")
+            self._persist_current_record()
+        self._finish_task("分析帧目录完成")
+        self._sync_action_buttons()
 
     def _export_finished(self, view: AnalysisViewData) -> None:
+        self._active_task = None
+        try:
+            self._render_view(view)
+        except Exception as exc:
+            self._task_failed(f"{type(exc).__name__}: {exc}")
+            return
         self._current_view = view
-        self._render_view(view)
+        self._export_completed = True
         execution = view.execution
         if execution is not None and execution.status == "ok":
+            self._update_current_record(view, "exported")
             text = f"导出完成：{execution.output_count} 帧，执行审计通过"
             if execution.warning_count:
                 text += f"，{execution.warning_count} 条警告"
-            self._set_busy(False, text)
-            self.open_output_button.setEnabled(view.output_dir is not None)
+            self._finish_task(text)
         else:
+            self._update_current_record(view, "export_warning")
             error_count = execution.error_count if execution is not None else 1
-            self._set_busy(False, f"导出完成，但执行审计发现 {error_count} 个问题")
-        self.export_button.setEnabled(True)
+            self._finish_task(f"导出完成，但执行审计发现 {error_count} 个问题")
+        self._sync_action_buttons()
 
     def _task_failed(self, message: str) -> None:
-        self._set_busy(False, f"处理失败：{message}")
-        self.export_button.setEnabled(self._current_view is not None)
+        self._active_task = None
+        self._pending_current_result_state = None
+        self._busy = False
+        self.status_label.setText(f"处理失败：{message}")
+        self.progress.setVisible(True)
+        self.progress_percent_label.setVisible(True)
+        self._set_controls_busy(False)
+        self._sync_action_buttons()
         QMessageBox.critical(self, "处理失败", message)
 
-    def _set_busy(self, busy: bool, text: str) -> None:
-        self._busy = busy
+    def _begin_task(self, text: str) -> None:
+        self._busy = True
         self.status_label.setText(text)
-        self.progress.setVisible(busy)
+        self._set_progress(0)
+        self.progress.setVisible(True)
+        self.progress_percent_label.setVisible(True)
+        self._set_controls_busy(True)
+
+    def _task_progress(self, percent: int, text: str) -> None:
+        if not self._busy:
+            return
+        self.status_label.setText(text)
+        self._set_progress(percent)
+
+    def _finish_task(self, text: str) -> None:
+        self._busy = False
+        self.status_label.setText(text)
+        self._set_progress(100)
+        self.progress.setVisible(True)
+        self.progress_percent_label.setVisible(True)
+        self._set_controls_busy(False)
+
+    def _set_progress(self, percent: int) -> None:
+        self.progress.setValue(max(0, min(100, int(percent))))
+        self.progress_percent_label.setText(f"{self.progress.value()}%")
+
+    def _set_controls_busy(self, busy: bool) -> None:
         self.analyze_button.setEnabled(not busy)
-        self.export_button.setEnabled(not busy and self._current_view is not None)
+        self.export_button.setEnabled(not busy and self._can_export())
         self.path_edit.setEnabled(not busy)
+        self.browse_button.setEnabled(not busy)
         self.fps_spin.setEnabled(not busy)
+        self.history_button.setEnabled(not busy and self._history_store is not None)
+        self.open_artifact_button.setEnabled(not busy and self._artifact_available())
+        self.open_output_button.setEnabled(not busy and self._output_available())
+
+    def _can_export(self) -> bool:
+        return self._current_view is not None and not self._history_read_only and not self._export_completed
+
+    def _artifact_available(self) -> bool:
+        return self._current_view is not None and self._current_view.artifact_dir.is_dir()
+
+    def _output_available(self) -> bool:
+        return (
+            self._current_view is not None
+            and self._current_view.output_dir is not None
+            and self._current_view.output_dir.is_dir()
+        )
+
+    def _sync_action_buttons(self) -> None:
+        self.export_button.setEnabled(not self._busy and self._can_export())
+        self.open_artifact_button.setEnabled(not self._busy and self._artifact_available())
+        self.open_output_button.setEnabled(not self._busy and self._output_available())
 
     def _render_view(self, view: AnalysisViewData) -> None:
         self.input_value.setText(f"{view.analyzed_count:,}")
@@ -475,24 +595,31 @@ class MainWindow(QMainWindow):
             label.setText(f"{view.operation_counts.get(op, 0)} 个区间")
         if view.source_indices:
             self.segment_bar.set_segments(view.segments, view.source_indices[0], view.source_indices[-1])
-        self._render_metric()
+        self._render_metric(view)
         self._render_thumbnails(view.thumbnails)
-        self.destination_value.setText(str(view.artifact_dir / "output_frames"))
+        self._set_destination_path(str(view.artifact_dir / "output_frames"))
+        self.open_artifact_button.setEnabled(view.artifact_dir.is_dir())
+
+    def _set_destination_path(self, path: str) -> None:
+        self.destination_value.setText(path)
+        self.destination_value.setCursorPosition(0)
+        self.destination_value.setToolTip(path)
 
     def _switch_metric(self, metric_name: str) -> None:
         self._metric_name = metric_name
         self._render_metric()
 
-    def _render_metric(self) -> None:
-        if self._current_view is None:
+    def _render_metric(self, view: AnalysisViewData | None = None) -> None:
+        view = view or self._current_view
+        if view is None:
             return
         mapping = {
-            "motion": (self._current_view.motion_values, "运动强度"),
-            "sharpness": (self._current_view.sharpness_values, "清晰度"),
-            "contrast": (self._current_view.contrast_values, "对比度"),
+            "motion": (view.motion_values, "运动强度"),
+            "sharpness": (view.sharpness_values, "清晰度"),
+            "contrast": (view.contrast_values, "对比度"),
         }
         values, label = mapping[self._metric_name]
-        self.chart.set_series(self._current_view.source_indices, values, label)
+        self.chart.set_series(view.source_indices, values, label)
 
     def _render_thumbnails(self, thumbnails: tuple[ThumbnailView, ...]) -> None:
         while self.thumbnail_layout.count():
@@ -518,14 +645,12 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout(frame)
         layout.setContentsMargins(4, 4, 4, 5)
         layout.setSpacing(3)
-        image = QLabel()
-        image.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        image.setMinimumHeight(78)
+        image = ThumbnailImage()
         pixmap = QPixmap(str(thumbnail.path))
         if pixmap.isNull():
             image.setText("无法读取")
         else:
-            image.setPixmap(pixmap.scaled(150, 88, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
+            image.set_source_pixmap(pixmap)
         source = QLabel(f"src {thumbnail.source_index}")
         source.setAlignment(Qt.AlignmentFlag.AlignCenter)
         source.setObjectName("thumbnailSource")
@@ -542,40 +667,237 @@ class MainWindow(QMainWindow):
         if self._current_view is not None and self._current_view.output_dir is not None:
             QDesktopServices.openUrl(QUrl.fromLocalFile(str(self._current_view.output_dir)))
 
+    def _open_artifact(self) -> None:
+        if self._current_view is None:
+            return
+        analysis_dir = self._current_view.artifact_dir / "analysis"
+        path = analysis_dir if analysis_dir.is_dir() else self._current_view.artifact_dir
+        if path.is_dir():
+            QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
+
+    def _show_history(self) -> None:
+        if self._history_store is None:
+            return
+        try:
+            records = self._history_store.list_records()
+        except ValueError as exc:
+            QMessageBox.critical(self, "运行记录无法读取", str(exc))
+            return
+        protected_run_ids = set()
+        if self._current_record is not None and not self._history_read_only:
+            protected_run_ids.add(self._current_record.run_id)
+        if self._current_result_state is not None and self._current_result_state.record is not None:
+            protected_run_ids.add(self._current_result_state.record.run_id)
+        dialog = RunHistoryDialog(
+            records,
+            self,
+            delete_callback=self._delete_history_record,
+            protected_run_ids=protected_run_ids,
+        )
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        record = dialog.selected_record()
+        if record is not None:
+            self._load_history_record(record)
+
+    def _load_history_record(self, record: RunRecord) -> None:
+        if self._history_read_only:
+            self._pending_current_result_state = self._current_result_state
+        elif self._current_view is not None:
+            self._pending_current_result_state = CurrentResultState(
+                settings=self._current_settings,
+                view=self._current_view,
+                record=self._current_record,
+                export_completed=self._export_completed,
+                status_text=self.status_label.text(),
+                progress=self.progress.value(),
+            )
+        else:
+            self._pending_current_result_state = None
+        settings = RunSettings(
+            frame_dir=record.frame_dir,
+            artifact_dir=record.artifact_dir,
+            fps=record.fps,
+            limit_first_n=None,
+        )
+        self._begin_task("正在打开历史结果")
+        self._set_progress(20)
+        task = create_task(
+            lambda: load_existing_run(
+                settings,
+                analyzed_count=record.analyzed_count,
+                estimated_output_count=record.estimated_output_count,
+            ),
+            partial(self._history_loaded, record, settings),
+            self._task_failed,
+        )
+        self._active_task = task
+        self._thread_pool.start(task)
+
+    def _history_loaded(self, record: RunRecord, settings: RunSettings, view: AnalysisViewData) -> None:
+        self._active_task = None
+        try:
+            self._render_view(view)
+        except Exception as exc:
+            self._task_failed(f"{type(exc).__name__}: {exc}")
+            return
+        path_blocker = QSignalBlocker(self.path_edit)
+        fps_blocker = QSignalBlocker(self.fps_spin)
+        self.path_edit.setText(str(record.frame_dir))
+        self.fps_spin.setValue(round(record.fps))
+        del path_blocker, fps_blocker
+        self._current_settings = settings
+        self._current_view = view
+        self._current_record = record
+        self._current_result_state = self._pending_current_result_state
+        self._pending_current_result_state = None
+        self._history_read_only = True
+        self._export_completed = view.output_dir is not None
+        self.export_button.setToolTip("历史结果只读；如需重新处理，请重新开始分析")
+        self.return_current_button.setVisible(self._current_result_state is not None)
+        self._finish_task("历史结果已打开")
+        self._sync_action_buttons()
+        self._save_preferences()
+
+    def _return_to_current_result(self) -> None:
+        state = self._current_result_state
+        if state is None:
+            return
+        self._render_view(state.view)
+        path_blocker = QSignalBlocker(self.path_edit)
+        fps_blocker = QSignalBlocker(self.fps_spin)
+        if state.settings is not None:
+            self.path_edit.setText(str(state.settings.frame_dir))
+            self.fps_spin.setValue(round(state.settings.fps))
+        del path_blocker, fps_blocker
+        self._current_settings = state.settings
+        self._current_view = state.view
+        self._current_record = state.record
+        self._history_read_only = False
+        self._export_completed = state.export_completed
+        self._current_result_state = None
+        self.return_current_button.hide()
+        self.export_button.setToolTip("")
+        self.status_label.setText(state.status_text)
+        self._set_progress(state.progress)
+        self._sync_action_buttons()
+        self._save_preferences()
+
+    def _delete_history_record(self, record: RunRecord) -> bool:
+        if self._history_store is None:
+            return False
+        if self._current_record is not None and not self._history_read_only and self._current_record.run_id == record.run_id:
+            QMessageBox.warning(self, "无法删除", "当前结果正在使用，请先打开其他结果或开始新的分析。")
+            return False
+        try:
+            delete_history_run(record, self._history_store)
+        except (OSError, ValueError) as exc:
+            QMessageBox.critical(self, "删除失败", str(exc))
+            return False
+        if self._history_read_only and self._current_record is not None and self._current_record.run_id == record.run_id:
+            if self._current_result_state is not None:
+                self._return_to_current_result()
+            else:
+                self._clear_result_display("历史结果已删除")
+        return True
+
+    def _clear_result_display(self, status: str) -> None:
+        self._current_settings = None
+        self._current_view = None
+        self._current_record = None
+        self._history_read_only = False
+        self._export_completed = False
+        self._current_result_state = None
+        self._pending_current_result_state = None
+        self.return_current_button.hide()
+        self.input_value.setText("--")
+        self.strategy_value.setText("reconstruction_balanced")
+        self.output_value.setText("--")
+        for label in self.operation_labels.values():
+            label.setText("0 个区间")
+        self.chart.set_series((), (), "运动强度")
+        self.segment_bar.set_segments((), 0, 1)
+        self._render_thumbnails(())
+        self.status_label.setText(status)
+        self.progress.hide()
+        self.progress_percent_label.hide()
+        self._sync_action_buttons()
+
+    def _record_from_view(self, view: AnalysisViewData, status: str) -> RunRecord:
+        if self._current_settings is None:
+            raise RuntimeError("run settings are not available")
+        now = datetime.now().astimezone().isoformat(timespec="seconds")
+        execution_count = view.execution.output_count if view.execution is not None else None
+        return RunRecord(
+            run_id=self._current_settings.artifact_dir.name,
+            created_at=now,
+            updated_at=now,
+            frame_dir=self._current_settings.frame_dir,
+            artifact_dir=self._current_settings.artifact_dir,
+            fps=self._current_settings.fps,
+            analyzed_count=view.analyzed_count,
+            estimated_output_count=view.estimated_output_count,
+            output_count=execution_count,
+            output_dir=view.output_dir,
+            status=status,
+            strategy_name=view.strategy_name,
+        )
+
+    def _update_current_record(self, view: AnalysisViewData, status: str) -> None:
+        if self._history_store is None:
+            return
+        if self._current_record is None:
+            self._current_record = self._record_from_view(view, status)
+        else:
+            output_count = view.execution.output_count if view.execution is not None else None
+            self._current_record = replace(
+                self._current_record,
+                updated_at=datetime.now().astimezone().isoformat(timespec="seconds"),
+                analyzed_count=view.analyzed_count,
+                estimated_output_count=view.estimated_output_count,
+                output_count=output_count,
+                output_dir=view.output_dir,
+                status=status,
+            )
+        self._persist_current_record()
+
+    def _persist_current_record(self) -> None:
+        if self._history_store is None or self._current_record is None:
+            return
+        try:
+            self._history_store.upsert(self._current_record)
+        except (OSError, ValueError) as exc:
+            QMessageBox.warning(self, "运行记录未保存", str(exc))
+
+    def _restore_preferences(self) -> None:
+        if self._settings is None:
+            return
+        frame_dir = self._settings.value("ui/frame_dir", "", str)
+        fps = self._settings.value("ui/fps", 30, int)
+        geometry = self._settings.value("ui/geometry")
+        if frame_dir:
+            self.path_edit.setText(frame_dir)
+        self.fps_spin.setValue(max(1, min(240, fps)))
+        if geometry is not None:
+            self.restoreGeometry(geometry)
+
+    def _save_preferences(self) -> None:
+        if self._settings is None:
+            return
+        raw_path = self.path_edit.text().strip()
+        persisted_path = str(Path(raw_path).expanduser().resolve()) if raw_path else ""
+        self._settings.setValue("ui/frame_dir", persisted_path)
+        self._settings.setValue("ui/fps", self.fps_spin.value())
+        self._settings.setValue("ui/geometry", self.saveGeometry())
+        self._settings.sync()
+
     def closeEvent(self, event) -> None:
         if self._busy:
             QMessageBox.information(self, "任务进行中", "请等待当前分析或导出任务完成后再关闭窗口。")
             event.ignore()
             return
+        self._save_preferences()
         super().closeEvent(event)
 
     def _apply_style(self) -> None:
-        self.setStyleSheet(
-            """
-            QMainWindow, QWidget { background: #f4f6f9; color: #172033; font-family: "Segoe UI", "Microsoft YaHei UI"; font-size: 13px; }
-            QLabel { background: transparent; }
-            QFrame#header { background: transparent; }
-            QFrame#panel { background: #ffffff; border: 1px solid #dfe4ec; border-radius: 7px; }
-            QFrame#thumbnail { background: #ffffff; border: 1px solid #e3e7ee; border-radius: 5px; }
-            QLabel#title { font-size: 20px; font-weight: 700; color: #101828; }
-            QLabel#sectionTitle { font-size: 15px; font-weight: 700; color: #101828; }
-            QLabel#summaryValue { font-size: 22px; font-weight: 700; color: #101828; }
-            QLabel#strategyName { font-size: 17px; font-weight: 650; color: #101828; }
-            QLabel#muted, QLabel#thumbnailOp { color: #667085; }
-            QLabel#emptyState { color: #98a2b3; padding: 18px; }
-            QLabel#thumbnailSource { font-weight: 600; }
-            QLabel#localNote { color: #248a52; padding-top: 4px; }
-            QLineEdit, QSpinBox { background: #ffffff; border: 1px solid #cfd6e2; border-radius: 5px; padding: 7px 9px; min-height: 20px; }
-            QLineEdit:focus, QSpinBox:focus { border: 1px solid #2878f0; }
-            QPushButton { background: #ffffff; border: 1px solid #cfd6e2; border-radius: 5px; padding: 7px 13px; min-height: 20px; }
-            QPushButton:hover { border-color: #2878f0; color: #155ec7; }
-            QPushButton:disabled { background: #eef1f5; color: #98a2b3; border-color: #e1e5eb; }
-            QPushButton#primaryButton { background: #2878f0; color: #ffffff; border-color: #2878f0; font-weight: 600; }
-            QPushButton#primaryButton:hover { background: #1f68d8; }
-            QPushButton#primaryButton:disabled { background: #aebed4; border-color: #aebed4; color: #eef2f7; }
-            QPushButton#segmentButton { padding: 3px 12px; min-height: 18px; border-radius: 4px; }
-            QPushButton#segmentButton:checked { background: #e9f1ff; color: #155ec7; border-color: #75a8f8; }
-            QProgressBar { background: #e9edf3; border: none; border-radius: 3px; max-height: 6px; }
-            QProgressBar::chunk { background: #2878f0; border-radius: 3px; }
-            """
-        )
+        self.setStyleSheet(main_window_stylesheet())

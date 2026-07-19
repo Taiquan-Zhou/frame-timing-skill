@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Sequence
+from typing import Callable, Sequence
 import argparse
 import json
 import sys
@@ -43,6 +43,7 @@ def write_strategy_visual_review(
     max_samples_per_operation: int = 6,
     tile_width: int = 180,
     fps: float = 30.0,
+    progress_callback: Callable[[int, int], None] | None = None,
 ) -> StrategyVisualReviewResult:
     if max_samples_per_operation <= 0:
         raise ValueError(f"max_samples_per_operation must be positive: {max_samples_per_operation}")
@@ -59,9 +60,13 @@ def write_strategy_visual_review(
     operation_results: list[VisualOperationResult] = []
     contact_sheets: list[Path] = []
 
-    for operation_index, operation in enumerate(strategy.get("operations", [])):
+    operations = strategy.get("operations", [])
+    total = len(operations)
+    for operation_index, operation in enumerate(operations):
         source_range = operation.get("range", {})
         if "start" not in source_range or "end" not in source_range:
+            if progress_callback is not None:
+                progress_callback(operation_index + 1, total)
             continue
         start = int(source_range["start"])
         end = int(source_range["end"])
@@ -88,6 +93,8 @@ def write_strategy_visual_review(
                 contact_sheet=sheet_path,
             )
         )
+        if progress_callback is not None:
+            progress_callback(operation_index + 1, total)
 
     index_path = visual_dir / "index.md"
     _write_index(index_path, frame_dir, operation_results)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Callable
 
 import cv2
 import numpy as np
@@ -21,11 +22,17 @@ class MotionEstimate:
     bad_quality_candidate: bool
 
 
-def estimate_frame_motion(records: list[FrameRecord], min_sharpness: float = 100.0) -> list[MotionEstimate]:
+def estimate_frame_motion(
+    records: list[FrameRecord],
+    min_sharpness: float = 100.0,
+    progress_callback: Callable[[int, int], None] | None = None,
+) -> list[MotionEstimate]:
     estimates: list[MotionEstimate] = []
     previous_gray: np.ndarray | None = None
 
-    for record in sorted(records, key=lambda item: item.output_index):
+    ordered_records = sorted(records, key=lambda item: item.output_index)
+    total = len(ordered_records)
+    for completed, record in enumerate(ordered_records, start=1):
         gray = _load_gray_image(record)
         sharpness = float(cv2.Laplacian(gray, cv2.CV_64F).var())
         bad_quality_candidate = sharpness < min_sharpness
@@ -55,6 +62,8 @@ def estimate_frame_motion(records: list[FrameRecord], min_sharpness: float = 100
             )
         )
         previous_gray = gray
+        if progress_callback is not None:
+            progress_callback(completed, total)
 
     return estimates
 

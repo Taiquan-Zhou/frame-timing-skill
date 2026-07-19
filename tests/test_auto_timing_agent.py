@@ -20,6 +20,55 @@ def _write_image(path: Path, value: int) -> None:
 
 
 class AutoTimingAgentTest(unittest.TestCase):
+    def test_preview_reports_monotonic_work_progress(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            frames = root / "frames"
+            artifact_dir = root / "output" / "progress"
+            frames.mkdir()
+            for index in range(6):
+                _write_image(frames / f"frame_{index:06d}_src_{index:06d}.jpg", 100 + index)
+            updates: list[tuple[int, str]] = []
+
+            run_timing_agent(
+                frames,
+                artifact_dir,
+                limit_first_n=None,
+                write=False,
+                progress_callback=lambda percent, message: updates.append((percent, message)),
+            )
+
+            percentages = [percent for percent, _message in updates]
+            self.assertEqual(percentages[0], 0)
+            self.assertEqual(percentages[-1], 100)
+            self.assertEqual(percentages, sorted(percentages))
+            self.assertGreater(len(set(percentages)), 6)
+            self.assertTrue(all(0 <= percent <= 100 for percent in percentages))
+
+    def test_write_reports_monotonic_progress_through_export(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            frames = root / "frames"
+            artifact_dir = root / "output" / "progress"
+            frames.mkdir()
+            for index in range(6):
+                _write_image(frames / f"frame_{index:06d}_src_{index:06d}.jpg", 100 + index)
+            updates: list[tuple[int, str]] = []
+
+            run_timing_agent(
+                frames,
+                artifact_dir,
+                limit_first_n=None,
+                write=True,
+                progress_callback=lambda percent, message: updates.append((percent, message)),
+            )
+
+            percentages = [percent for percent, _message in updates]
+            self.assertEqual(percentages[0], 0)
+            self.assertEqual(percentages[-1], 100)
+            self.assertEqual(percentages, sorted(percentages))
+            self.assertTrue(any(message == "正在生成 output_frames" for _percent, message in updates))
+
     def test_preview_supports_unicode_frame_and_artifact_paths(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
