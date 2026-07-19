@@ -25,7 +25,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--smoke-test", action="store_true", help="Create the main window and exit immediately.")
     args = parser.parse_args(list(argv) if argv is not None else None)
     try:
-        from PySide6.QtCore import QTimer
+        from PySide6.QtCore import QSettings, QTimer
         from PySide6.QtWidgets import QMessageBox
     except ModuleNotFoundError:
         print('PySide6 is required. Install it with: python -m pip install -e ".[ui]"', file=sys.stderr)
@@ -34,10 +34,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"PySide6 could not start: {exc}", file=sys.stderr)
         return 1
 
+    from frame_timing_agent.ui.history import RunHistoryStore, default_history_path
     from frame_timing_agent.ui.main_window import MainWindow
 
     application = create_application(["frame-timing-ui"] if args.smoke_test else None)
-    window = MainWindow()
+    if args.smoke_test:
+        window = MainWindow()
+    else:
+        window = MainWindow(settings=QSettings(), history_store=RunHistoryStore(default_history_path()))
     window.show()
     if args.smoke_test:
         QTimer.singleShot(0, application.quit)

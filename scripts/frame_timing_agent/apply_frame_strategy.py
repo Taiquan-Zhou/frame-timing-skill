@@ -6,6 +6,7 @@ import hashlib
 import json
 import re
 import shutil
+from typing import Callable
 
 from frame_timing_agent.frame_source import FrameRecord
 
@@ -46,7 +47,12 @@ def choose_uniform_sources(source_indices: list[int], count: int) -> list[int]:
     return sorted(deduped)
 
 
-def apply_strategy(records: list[FrameRecord], strategy: dict, output_dir: Path | str) -> ApplyResult:
+def apply_strategy(
+    records: list[FrameRecord],
+    strategy: dict,
+    output_dir: Path | str,
+    progress_callback: Callable[[int, int], None] | None = None,
+) -> ApplyResult:
     output_dir = Path(output_dir)
     sorted_records = sorted(records, key=lambda record: (record.source_index, record.instance_id, record.output_index))
     operation_map = _operation_by_source(strategy.get("operations", []), sorted_records)
@@ -59,9 +65,12 @@ def apply_strategy(records: list[FrameRecord], strategy: dict, output_dir: Path 
     output_dir.mkdir(parents=True, exist_ok=True)
     _clear_previous_outputs(output_dir)
 
-    for record in sorted_records:
+    total = len(sorted_records)
+    for completed, record in enumerate(sorted_records, start=1):
         operation = operation_map.get(record.source_index, {"op": "keep", "reason": "unchanged"})
         if operation["op"] == "skip":
+            if progress_callback is not None:
+                progress_callback(completed, total)
             continue
 
         total_instances = int(operation.get("total_instances", 1))
@@ -86,6 +95,8 @@ def apply_strategy(records: list[FrameRecord], strategy: dict, output_dir: Path 
                 f"{1 if instance_id > 0 else 0}\t{operation['op']}\t{source_hash}\t{destination_name}"
             )
             output_index += 1
+        if progress_callback is not None:
+            progress_callback(completed, total)
 
     selected_frames_path = output_dir / "selected_frames.txt"
     selected_frames_path.write_text("\n".join(output_rows) + "\n", encoding="utf-8")

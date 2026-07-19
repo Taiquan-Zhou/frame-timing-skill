@@ -5,6 +5,7 @@ from pathlib import Path
 import argparse
 import json
 import sys
+from typing import Callable
 
 
 if __package__ in {None, ""}:
@@ -24,6 +25,7 @@ from frame_timing_agent.timing_report import write_analysis_artifacts
 
 
 DEFAULT_CONFIG_PATH = Path(__file__).parent / "config" / "timing_default.json"
+ProgressCallback = Callable[[int, str], None]
 
 
 @dataclass(frozen=True)
@@ -47,10 +49,12 @@ def run_timing_agent(
     write: bool = False,
     fps: float | None = None,
     override_config_path: Path | str | None = None,
+    progress_callback: ProgressCallback | None = None,
 ) -> TimingAgentResult:
     if mode != "reconstruction_balanced":
         raise ValueError(f"unsupported timing agent mode: {mode}")
 
+    _report_progress(progress_callback, 0, "正在读取帧目录")
     config = load_config()
     override_config = _load_override_config(override_config_path)
     config = _merge_config(config, override_config.get("config", {}))
@@ -62,7 +66,12 @@ def run_timing_agent(
     analysis_dir = artifact_dir / "analysis"
 
     records = load_frame_records(frames, fps=fps, limit_first_n=limit_first_n)
-    metrics = compute_frame_metrics(records)
+    _report_progress(progress_callback, 5, "正在计算帧指标")
+    metrics = compute_frame_metrics(
+        records,
+        progress_callback=_map_stage_progress(progress_callback, 5, 45, "正在计算帧指标"),
+    )
+    _report_progress(progress_callback, 47, "正在检测时序区间")
     segments = detect_segments(
         metrics,
         static_motion_quantile=float(config["static_motion_quantile"]),
@@ -82,8 +91,13 @@ def run_timing_agent(
         very_fast_motion_total_instances=int(config["very_fast_motion_total_instances"]),
         overrides=override_config.get("overrides"),
     )
+    _report_progress(progress_callback, 50, "正在估计相邻帧运动")
     jitter_min_sharpness = float(config.get("jitter_min_sharpness", 100.0))
-    motion_estimates = estimate_frame_motion(records, min_sharpness=jitter_min_sharpness)
+    motion_estimates = estimate_frame_motion(
+        records,
+        min_sharpness=jitter_min_sharpness,
+        progress_callback=_map_stage_progress(progress_callback, 50, 78, "正在估计相邻帧运动"),
+    )
     jitter_strategy = build_jitter_reduction_strategy(
         records=records,
         estimates=motion_estimates,
@@ -98,6 +112,7 @@ def run_timing_agent(
     strategy = merge_jitter_with_base_strategy(base_strategy, jitter_strategy, records)
     estimated_output_count = _estimate_output_count(records, strategy)
 
+    _report_progress(progress_callback, 80, "正在写入分析结果")
     write_analysis_artifacts(
         analysis_dir=analysis_dir,
         metrics=metrics,
@@ -113,7 +128,13 @@ def run_timing_agent(
     audit = None
     if write:
         output_dir = artifact_dir / "output_frames"
-        apply_strategy(records, strategy, output_dir)
+        apply_strategy(
+            records,
+            strategy,
+            output_dir,
+            progress_callback=_map_stage_progress(progress_callback, 82, 94, "正在生成 output_frames"),
+        )
+        _report_progress(progress_callback, 95, "正在校验输出结果")
         audit = audit_strategy_execution(records, strategy, output_dir, fps=fps)
         write_execution_audit(audit, analysis_dir)
 
@@ -128,12 +149,18 @@ def run_timing_agent(
         audit=audit,
         preview_only=not write,
     )
+    visual_start = 96 if write else 82
+    _report_progress(progress_callback, visual_start, "正在生成代表帧")
     write_strategy_visual_review(
         frame_dir=frames,
         analysis_dir=analysis_dir,
         strategy=strategy,
         fps=fps,
+        progress_callback=_map_stage_progress(progress_callback, visual_start, 99, "正在生成代表帧"),
     )
+
+    terminal_message = "output_frames 生成完成" if write else "分析帧目录完成"
+    _report_progress(progress_callback, 100, terminal_message)
 
     return TimingAgentResult(
         analyzed_count=len(records),
@@ -142,6 +169,28 @@ def run_timing_agent(
         strategy_path=analysis_dir / "strategy.json",
         output_dir=output_dir,
     )
+
+
+def _report_progress(callback: ProgressCallback | None, percent: int, message: str) -> None:
+    if callback is not None:
+        callback(max(0, min(100, int(percent))), message)
+
+
+def _map_stage_progress(
+    callback: ProgressCallback | None,
+    start: int,
+    end: int,
+    message: str,
+) -> Callable[[int, int], None] | None:
+    if callback is None:
+        return None
+
+    def report(completed: int, total: int) -> None:
+        ratio = completed / max(1, total)
+        percent = start + round((end - start) * ratio)
+        _report_progress(callback, percent, message)
+
+    return report
 
 
 def _estimate_output_count(records, strategy: dict) -> int:
