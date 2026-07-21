@@ -1,11 +1,22 @@
 from __future__ import annotations
 
+from bisect import bisect_left
+
 from PySide6.QtCore import QPointF, QRectF, QSize, Qt
 from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import QLabel, QSizePolicy, QWidget
 
 from frame_timing_agent.ui.style import LINE_COLOR, SEGMENT_COLORS, SEGMENT_LABELS
 from frame_timing_agent.ui.view_model import SegmentView
+
+
+def source_boundary_ratio(source_boundary: float, source_min: int, source_max: int) -> float:
+    span = max(1, source_max - source_min + 1)
+    return (source_boundary - source_min) / span
+
+
+def source_center_ratio(source: int, source_min: int, source_max: int) -> float:
+    return source_boundary_ratio(source + 0.5, source_min, source_max)
 
 
 class LineChart(QWidget):
@@ -19,6 +30,11 @@ class LineChart(QWidget):
         self._minimum = 0.0
         self._maximum = 0.0
         self._span = 1.0
+        self._source_min = 0
+        self._source_max = 0
+        self._x_ratios: tuple[float, ...] = ()
+        self._hover_order: tuple[tuple[float, int], ...] = ()
+        self._hover_ratios: tuple[float, ...] = ()
         self.setMouseTracking(True)
         self.setMinimumHeight(210)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
@@ -33,6 +49,13 @@ class LineChart(QWidget):
         self._minimum = min(values) if values else 0.0
         self._maximum = max(values) if values else 0.0
         self._span = self._maximum - self._minimum or 1.0
+        self._source_min = min(sources) if sources else 0
+        self._source_max = max(sources) if sources else 0
+        self._x_ratios = tuple(
+            source_center_ratio(source, self._source_min, self._source_max) for source in sources
+        )
+        self._hover_order = tuple(sorted((ratio, index) for index, ratio in enumerate(self._x_ratios)))
+        self._hover_ratios = tuple(item[0] for item in self._hover_order)
         self._base_pixmap = None
         self.update()
 
@@ -44,9 +67,9 @@ class LineChart(QWidget):
         return QRectF(plot.left() + 50, plot.bottom() + 5, max(0.0, plot.width() - 100), 20)
 
     def _point_x(self, index: int, plot: QRectF) -> float:
-        if len(self._sources) <= 1:
+        if not self._x_ratios:
             return plot.left()
-        return plot.left() + plot.width() * index / (len(self._sources) - 1)
+        return plot.left() + plot.width() * self._x_ratios[index]
 
     def _data_point(self, index: int, plot: QRectF) -> QPointF:
         x = self._point_x(index, plot)
@@ -148,11 +171,10 @@ class LineChart(QWidget):
         position = event.position()
         hover_index: int | None = None
         if self._sources and self._values and plot.contains(position):
-            if len(self._sources) == 1:
-                hover_index = 0
-            else:
-                ratio = (position.x() - plot.left()) / max(1.0, plot.width())
-                hover_index = max(0, min(len(self._sources) - 1, round(ratio * (len(self._sources) - 1))))
+            ratio = (position.x() - plot.left()) / max(1.0, plot.width())
+            insertion = bisect_left(self._hover_ratios, ratio)
+            candidates = self._hover_order[max(0, insertion - 1) : min(len(self._hover_order), insertion + 1)]
+            hover_index = min(candidates, key=lambda item: abs(item[0] - ratio))[1]
         if hover_index != self._hover_index:
             self._hover_index = hover_index
             self.update()
@@ -214,7 +236,7 @@ class SegmentBar(QWidget):
     def set_segments(self, segments: tuple[SegmentView, ...], source_min: int, source_max: int) -> None:
         self._segments = segments
         self._source_min = source_min
-        self._source_max = max(source_min + 1, source_max)
+        self._source_max = max(source_min, source_max)
         self.update()
 
     def paintEvent(self, event) -> None:
@@ -224,10 +246,9 @@ class SegmentBar(QWidget):
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(QColor("#eef2f7"))
         painter.drawRoundedRect(bar, 4, 4)
-        span = self._source_max - self._source_min + 1
         for segment in self._segments:
-            start_ratio = (segment.start - self._source_min) / span
-            end_ratio = (segment.end - self._source_min + 1) / span
+            start_ratio = source_boundary_ratio(segment.start, self._source_min, self._source_max)
+            end_ratio = source_boundary_ratio(segment.end + 1, self._source_min, self._source_max)
             segment_rect = QRectF(
                 max(0.0, start_ratio) * self.width(),
                 4,

@@ -243,6 +243,39 @@ class UiSmokeTest(unittest.TestCase):
         finally:
             chart.close()
 
+    def test_line_chart_and_segment_bar_share_sparse_source_coordinates(self):
+        from frame_timing_agent.ui.widgets import LineChart, source_center_ratio
+
+        chart = LineChart()
+        chart.resize(1000, 300)
+        chart.set_series((0, 100, 101), (0.01, 0.02, 0.03), "运动强度")
+        try:
+            plot = chart._plot_rect()
+            actual_ratio = (chart._point_x(1, plot) - plot.left()) / plot.width()
+            expected_ratio = source_center_ratio(100, 0, 101)
+
+            self.assertAlmostEqual(actual_ratio, expected_ratio)
+            self.assertGreater(actual_ratio, 0.98)
+        finally:
+            chart.close()
+
+    def test_single_source_uses_full_segment_bar_and_centered_chart_point(self):
+        from frame_timing_agent.ui.view_model import SegmentView
+        from frame_timing_agent.ui.widgets import LineChart, SegmentBar
+
+        chart = LineChart()
+        bar = SegmentBar()
+        chart.resize(1000, 300)
+        chart.set_series((5,), (0.01,), "运动强度")
+        bar.set_segments((SegmentView(5, 5, "static", 1),), 5, 5)
+        try:
+            plot = chart._plot_rect()
+            self.assertAlmostEqual(chart._point_x(0, plot), plot.center().x())
+            self.assertEqual(bar._source_min, bar._source_max)
+        finally:
+            chart.close()
+            bar.close()
+
     def test_line_chart_rejects_mismatched_series_lengths(self):
         from frame_timing_agent.ui.widgets import LineChart
 
@@ -286,7 +319,10 @@ class UiSmokeTest(unittest.TestCase):
 
     def test_run_history_dialog_exposes_reopen_and_output_actions(self):
         import tempfile
+        import time
         from pathlib import Path
+
+        from PySide6.QtWidgets import QApplication
 
         from frame_timing_agent.ui.history import RunRecord
         from frame_timing_agent.ui.history_dialog import RunHistoryDialog
@@ -342,9 +378,82 @@ class UiSmokeTest(unittest.TestCase):
                     return_value=QMessageBox.StandardButton.Yes,
                 ):
                     dialog.delete_button.click()
+                deadline = time.monotonic() + 2
+                while dialog._delete_task is not None and time.monotonic() < deadline:
+                    QApplication.processEvents()
+                    time.sleep(0.01)
                 self.assertEqual(deleted, [record])
                 self.assertEqual(dialog.table.rowCount(), 0)
             finally:
+                dialog.close()
+
+    def test_run_history_dialog_deletes_in_background(self):
+        import tempfile
+        import threading
+        import time
+        from pathlib import Path
+
+        from PySide6.QtWidgets import QApplication, QMessageBox
+
+        from frame_timing_agent.ui.history import RunRecord
+        from frame_timing_agent.ui.history_dialog import RunHistoryDialog
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            frame_dir = root / "frames"
+            artifact_dir = root / "run"
+            frame_dir.mkdir()
+            artifact_dir.mkdir()
+            record = RunRecord(
+                run_id="run-1",
+                created_at="2026-07-15T10:00:00+08:00",
+                updated_at="2026-07-15T10:00:00+08:00",
+                frame_dir=frame_dir,
+                artifact_dir=artifact_dir,
+                fps=30.0,
+                analyzed_count=1,
+                estimated_output_count=1,
+                output_count=None,
+                output_dir=None,
+                status="analyzed",
+                strategy_name="reconstruction_balanced",
+            )
+            started = threading.Event()
+            release = threading.Event()
+
+            def slow_delete(_record):
+                started.set()
+                release.wait(timeout=2)
+
+            dialog = RunHistoryDialog([record], delete_callback=slow_delete)
+            dialog.show()
+            try:
+                with patch(
+                    "frame_timing_agent.ui.history_dialog.QMessageBox.question",
+                    return_value=QMessageBox.StandardButton.Yes,
+                ):
+                    dialog.delete_button.click()
+                deadline = time.monotonic() + 2
+                while not started.is_set() and time.monotonic() < deadline:
+                    QApplication.processEvents()
+                    time.sleep(0.01)
+
+                self.assertTrue(started.is_set())
+                self.assertEqual(dialog.table.rowCount(), 1)
+                self.assertFalse(dialog.delete_button.isEnabled())
+                self.assertTrue(dialog.isVisible())
+                dialog.reject()
+                QApplication.processEvents()
+                self.assertTrue(dialog.isVisible())
+
+                release.set()
+                deadline = time.monotonic() + 2
+                while dialog._delete_task is not None and time.monotonic() < deadline:
+                    QApplication.processEvents()
+                    time.sleep(0.01)
+                self.assertEqual(dialog.table.rowCount(), 0)
+            finally:
+                release.set()
                 dialog.close()
 
     def test_main_window_restores_persisted_directory_fps_and_geometry(self):
@@ -486,6 +595,7 @@ class UiSmokeTest(unittest.TestCase):
                 strategy_name="reconstruction_balanced",
             )
             settings = RunSettings(frames, artifact_dir)
+            view = replace(view, source_snapshot_matches=False)
             window = MainWindow()
             try:
                 window._begin_task("正在打开历史结果")
@@ -493,6 +603,7 @@ class UiSmokeTest(unittest.TestCase):
 
                 self.assertFalse(window.export_button.isEnabled())
                 self.assertIn("历史结果只读", window.export_button.toolTip())
+                self.assertIn("源帧已变化", window.status_label.text())
 
                 window._begin_task("正在处理")
                 self.assertFalse(window.browse_button.isEnabled())

@@ -47,6 +47,7 @@ class AnalysisViewData:
     artifact_dir: Path
     output_dir: Path | None
     execution: ExecutionSummary | None
+    source_snapshot_matches: bool | None = None
 
 
 def build_analysis_view(
@@ -54,6 +55,7 @@ def build_analysis_view(
     frame_dir: Path | str,
     fps: float,
     limit_first_n: int | None,
+    persisted_thumbnails: tuple[ThumbnailView, ...] | None = None,
 ) -> AnalysisViewData:
     analysis_dir = result.artifact_dir / "analysis"
     metrics = _read_metrics(analysis_dir / "frame_metrics.csv")
@@ -65,8 +67,11 @@ def build_analysis_view(
         op = str(operation.get("op", "unknown"))
         operation_counts[op] = operation_counts.get(op, 0) + 1
 
-    records = load_frame_records(frame_dir, fps=fps, limit_first_n=limit_first_n)
-    thumbnails = _choose_thumbnails(records, operations)
+    if persisted_thumbnails is None:
+        records = load_frame_records(frame_dir, fps=fps, limit_first_n=limit_first_n)
+        thumbnails = _choose_thumbnails(records, operations)
+    else:
+        thumbnails = persisted_thumbnails
     return AnalysisViewData(
         analyzed_count=result.analyzed_count,
         estimated_output_count=result.estimated_output_count,

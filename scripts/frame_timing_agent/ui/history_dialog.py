@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from functools import partial
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QUrl
+from PySide6.QtCore import QThreadPool, Qt, QUrl
 from PySide6.QtGui import QColor, QDesktopServices, QPalette
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -21,6 +22,7 @@ from PySide6.QtWidgets import (
 )
 
 from frame_timing_agent.ui.history import RunRecord
+from frame_timing_agent.ui.worker import create_task
 
 
 STATUS_LABELS = {
@@ -35,13 +37,19 @@ class RunHistoryDialog(QDialog):
         self,
         records: list[RunRecord],
         parent=None,
-        delete_callback: Callable[[RunRecord], bool] | None = None,
+        delete_callback: Callable[[RunRecord], object] | None = None,
+        deleted_callback: Callable[[RunRecord], None] | None = None,
         protected_run_ids: set[str] | None = None,
     ):
         super().__init__(parent)
         self._records = list(records)
         self._delete_callback = delete_callback
+        self._deleted_callback = deleted_callback
         self._protected_run_ids = protected_run_ids or set()
+        self._thread_pool = QThreadPool(self)
+        self._thread_pool.setMaxThreadCount(1)
+        self._delete_task = None
+        self._delete_busy = False
         self.setWindowTitle("运行记录")
         self.resize(920, 430)
         self.setMinimumSize(760, 360)
@@ -118,9 +126,9 @@ class RunHistoryDialog(QDialog):
         self.open_output_button.clicked.connect(self._open_output)
         actions.addWidget(self.open_output_button)
         actions.addStretch()
-        close_button = QPushButton("关闭")
-        close_button.clicked.connect(self.reject)
-        actions.addWidget(close_button)
+        self.close_button = QPushButton("关闭")
+        self.close_button.clicked.connect(self.reject)
+        actions.addWidget(self.close_button)
         self.reopen_button = QPushButton("重新打开结果")
         self.reopen_button.setObjectName("primaryButton")
         self.reopen_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_DialogOpenButton))
@@ -156,6 +164,19 @@ class RunHistoryDialog(QDialog):
                 self.table.setItem(row, column, item)
 
     def _update_actions(self) -> None:
+        if self._delete_busy:
+            for widget in (
+                self.reopen_button,
+                self.open_artifact_button,
+                self.open_output_button,
+                self.delete_button,
+                self.close_button,
+                self.table,
+            ):
+                widget.setEnabled(False)
+            return
+        self.table.setEnabled(True)
+        self.close_button.setEnabled(True)
         record = self.selected_record()
         self.reopen_button.setEnabled(record is not None and self._can_reopen(record))
         self.open_artifact_button.setEnabled(record is not None and record.artifact_dir.is_dir())
@@ -169,7 +190,7 @@ class RunHistoryDialog(QDialog):
         )
 
     def _can_reopen(self, record: RunRecord) -> bool:
-        return record.frame_dir.is_dir() and (record.artifact_dir / "analysis" / "strategy.json").is_file()
+        return (record.artifact_dir / "analysis" / "strategy.json").is_file()
 
     def _accept_selected(self) -> None:
         record = self.selected_record()
@@ -198,15 +219,50 @@ class RunHistoryDialog(QDialog):
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
         )
-        if answer != QMessageBox.StandardButton.Yes or not self._delete_callback(record):
+        if answer != QMessageBox.StandardButton.Yes:
             return
-        row = self.table.currentRow()
+        self._delete_busy = True
+        self._update_actions()
+        task = create_task(
+            lambda: self._delete_callback(record),
+            partial(self._delete_succeeded, record),
+            self._delete_failed,
+        )
+        self._delete_task = task
+        self._thread_pool.start(task)
+
+    def _delete_succeeded(self, record: RunRecord, _result: object) -> None:
+        self._delete_task = None
+        self._delete_busy = False
+        try:
+            row = self._records.index(record)
+        except ValueError:
+            self._update_actions()
+            return
         self._records.pop(row)
         self.table.setRowCount(len(self._records))
         self._populate()
         if self._records:
             self.table.selectRow(min(row, len(self._records) - 1))
         self._update_actions()
+        if self._deleted_callback is not None:
+            self._deleted_callback(record)
+
+    def _delete_failed(self, message: str) -> None:
+        self._delete_task = None
+        self._delete_busy = False
+        self._update_actions()
+        QMessageBox.critical(self, "删除失败", message)
+
+    def closeEvent(self, event) -> None:
+        if self._delete_busy:
+            event.ignore()
+            return
+        super().closeEvent(event)
+
+    def reject(self) -> None:
+        if not self._delete_busy:
+            super().reject()
 
     def _open_path(self, path: Path) -> None:
         if path.is_dir():
