@@ -691,7 +691,8 @@ class MainWindow(QMainWindow):
         dialog = RunHistoryDialog(
             records,
             self,
-            delete_callback=self._delete_history_record,
+            delete_callback=partial(delete_history_run, history_store=self._history_store),
+            deleted_callback=self._history_record_deleted,
             protected_run_ids=protected_run_ids,
         )
         if dialog.exec() != QDialog.DialogCode.Accepted:
@@ -755,7 +756,12 @@ class MainWindow(QMainWindow):
         self._export_completed = view.output_dir is not None
         self.export_button.setToolTip("历史结果只读；如需重新处理，请重新开始分析")
         self.return_current_button.setVisible(self._current_result_state is not None)
-        self._finish_task("历史结果已打开")
+        history_status = "历史结果已打开"
+        if view.source_snapshot_matches is False:
+            history_status += "（源帧已变化，当前显示冻结预览）"
+        elif view.source_snapshot_matches is None:
+            history_status += "（旧记录没有输入快照）"
+        self._finish_task(history_status)
         self._sync_action_buttons()
         self._save_preferences()
 
@@ -783,23 +789,12 @@ class MainWindow(QMainWindow):
         self._sync_action_buttons()
         self._save_preferences()
 
-    def _delete_history_record(self, record: RunRecord) -> bool:
-        if self._history_store is None:
-            return False
-        if self._current_record is not None and not self._history_read_only and self._current_record.run_id == record.run_id:
-            QMessageBox.warning(self, "无法删除", "当前结果正在使用，请先打开其他结果或开始新的分析。")
-            return False
-        try:
-            delete_history_run(record, self._history_store)
-        except (OSError, ValueError) as exc:
-            QMessageBox.critical(self, "删除失败", str(exc))
-            return False
+    def _history_record_deleted(self, record: RunRecord) -> None:
         if self._history_read_only and self._current_record is not None and self._current_record.run_id == record.run_id:
             if self._current_result_state is not None:
                 self._return_to_current_result()
             else:
                 self._clear_result_display("历史结果已删除")
-        return True
 
     def _clear_result_display(self, status: str) -> None:
         self._current_settings = None
