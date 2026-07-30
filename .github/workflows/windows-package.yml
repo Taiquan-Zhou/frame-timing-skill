@@ -36,7 +36,7 @@ jobs:
         run: dist\FrameTimingSkill\FrameTimingSkill.exe --smoke-test
 
       - name: Upload Windows package
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: FrameTimingSkill-Windows-x64
           path: dist/FrameTimingSkill-Windows-x64.zip
