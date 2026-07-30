@@ -1,0 +1,56 @@
+name: Windows Package
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install release dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install ".[release]"
+
+      - name: Build portable desktop package
+        shell: pwsh
+        run: packaging\windows\build.ps1
+
+      - name: Smoke-test packaged executable
+        shell: pwsh
+        run: dist\FrameTimingSkill\FrameTimingSkill.exe --smoke-test
+
+      - name: Upload Windows package
+        uses: actions/upload-artifact@v4
+        with:
+          name: FrameTimingSkill-Windows-x64
+          path: dist/FrameTimingSkill-Windows-x64.zip
+          if-no-files-found: error
+
+      - name: Publish Windows package to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = "${{ github.ref_name }}"
+          gh release view $tag *> $null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $tag --verify-tag --title $tag --generate-notes
+          }
+          gh release upload $tag dist/FrameTimingSkill-Windows-x64.zip --clobber

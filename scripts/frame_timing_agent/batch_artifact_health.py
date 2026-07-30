@@ -6,7 +6,6 @@ import argparse
 import csv
 import hashlib
 import json
-import os
 import re
 import sys
 
@@ -102,9 +101,13 @@ def _check_summary_counts(summary: dict, items: list[dict], errors: list[str]) -
     success_count = sum(1 for item in items if item.get("status") == "ok")
     failure_count = sum(1 for item in items if item.get("status") != "ok")
     if int(summary.get("success_count", -1)) != success_count:
-        errors.append(f"batch_summary success_count mismatch: summary={summary.get('success_count')}, items={success_count}")
+        errors.append(
+            f"batch_summary success_count mismatch: summary={summary.get('success_count')}, items={success_count}"
+        )
     if int(summary.get("failure_count", -1)) != failure_count:
-        errors.append(f"batch_summary failure_count mismatch: summary={summary.get('failure_count')}, items={failure_count}")
+        errors.append(
+            f"batch_summary failure_count mismatch: summary={summary.get('failure_count')}, items={failure_count}"
+        )
 
 
 def _check_unregistered_item_dirs(artifact_root: Path, items: list[dict], errors: list[str]) -> None:
@@ -136,26 +139,37 @@ def _check_item(artifact_root: Path, item: dict, errors: list[str], warnings: li
             _check_inside_root(artifact_root, path, label, name, errors)
 
     if item.get("status") == "ok":
-        _require_file(human_review, errors)
-        _require_file(strategy_path, errors)
-        _require_file(visual_index, errors)
+        _require_item_file(name, "human_review_path", human_review, errors)
+        _require_item_file(name, "strategy_path", strategy_path, errors)
+        if artifact_dir is None:
+            errors.append(f"{name}: missing artifact_dir")
+        else:
+            visual_index = artifact_dir / "analysis" / "visual_review" / "index.md"
+            _require_file(visual_index, errors)
         if output_dir is None:
             warnings.append(f"{name}: preview mode has no output_frames")
             return 0
-        else:
+        if artifact_dir is not None:
             _check_output_audit(name, output_dir, artifact_dir / "analysis" / "execution_audit.json", errors)
-            return _check_output_provenance(name, frame_dir, output_dir, errors)
+        return _check_output_provenance(name, frame_dir, output_dir, errors)
     else:
         if human_review is not None and not human_review.is_file():
             errors.append(f"{name}: missing failure human_review.md")
     return 0
 
 
+def _require_item_file(name: str, label: str, path: Path | None, errors: list[str]) -> None:
+    if path is None:
+        errors.append(f"{name}: missing {label}")
+        return
+    _require_file(path, errors)
+
+
 def _path_from_item(item: dict, key: str, artifact_root: Path) -> Path | None:
     value = item.get(key)
-    if value in {None, ""}:
+    if value is None or value == "":
         return None
-    path = Path(value)
+    path = Path(str(value))
     if path.is_absolute():
         return path
     return artifact_root / path

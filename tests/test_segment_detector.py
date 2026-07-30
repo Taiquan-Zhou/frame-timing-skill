@@ -123,31 +123,26 @@ class SegmentDetectorTest(unittest.TestCase):
             0.007099,
         ]
         fast_motions = [0.055884, 0.035491, 0.026732, 0.031651, 0.035710, 0.036844, 0.031242, 0.032971]
-        metrics = [
-            _metric(index, motion)
-            for index, motion in enumerate(calm_motions + fast_motions)
-        ]
+        metrics = [_metric(index, motion) for index, motion in enumerate(calm_motions + fast_motions)]
 
         segments = detect_segments(metrics, min_static_frames=21, min_fast_frames=5)
 
-        self.assertIn(("low_motion_review", 0, 54, 55), [
-            (segment.segment_type, segment.start, segment.end, segment.frame_count)
-            for segment in segments
-        ])
-        self.assertTrue(any(
-            segment.segment_type in {"fast_motion", "very_fast_motion"} and segment.start == 58 and segment.end == 62
-            for segment in segments
-        ))
+        self.assertIn(
+            ("low_motion_review", 0, 54, 55),
+            [(segment.segment_type, segment.start, segment.end, segment.frame_count) for segment in segments],
+        )
+        self.assertTrue(
+            any(
+                segment.segment_type in {"fast_motion", "very_fast_motion"}
+                and segment.start == 58
+                and segment.end == 62
+                for segment in segments
+            )
+        )
 
     def test_detect_segments_finds_fast_and_very_fast_motion_segments(self):
         metrics = []
-        motions = (
-            [0.05] * 10
-            + [0.55] * 5
-            + [0.20] * 3
-            + [0.95] * 5
-            + [0.30] * 2
-        )
+        motions = [0.05] * 10 + [0.55] * 5 + [0.20] * 3 + [0.95] * 5 + [0.30] * 2
         for index, motion_score in enumerate(motions, start=200):
             metrics.append(_metric(index, motion_score))
 

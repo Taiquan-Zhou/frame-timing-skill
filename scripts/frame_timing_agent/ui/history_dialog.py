@@ -184,9 +184,7 @@ class RunHistoryDialog(QDialog):
             record is not None and record.output_dir is not None and record.output_dir.is_dir()
         )
         self.delete_button.setEnabled(
-            record is not None
-            and self._delete_callback is not None
-            and record.run_id not in self._protected_run_ids
+            record is not None and self._delete_callback is not None and record.run_id not in self._protected_run_ids
         )
 
     def _can_reopen(self, record: RunRecord) -> bool:

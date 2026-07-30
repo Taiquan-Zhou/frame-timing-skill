@@ -51,9 +51,7 @@ class LineChart(QWidget):
         self._span = self._maximum - self._minimum or 1.0
         self._source_min = min(sources) if sources else 0
         self._source_max = max(sources) if sources else 0
-        self._x_ratios = tuple(
-            source_center_ratio(source, self._source_min, self._source_max) for source in sources
-        )
+        self._x_ratios = tuple(source_center_ratio(source, self._source_min, self._source_max) for source in sources)
         self._hover_order = tuple(sorted((ratio, index) for index, ratio in enumerate(self._x_ratios)))
         self._hover_ratios = tuple(item[0] for item in self._hover_order)
         self._base_pixmap = None

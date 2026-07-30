@@ -141,8 +141,9 @@ class UiSmokeTest(unittest.TestCase):
         try:
             window._begin_task("正在分析帧目录")
             window._task_progress(98, "正在准备分析结果")
-            with patch.object(window, "_render_view", side_effect=ValueError("bad view")), patch(
-                "frame_timing_agent.ui.main_window.QMessageBox.critical"
+            with (
+                patch.object(window, "_render_view", side_effect=ValueError("bad view")),
+                patch("frame_timing_agent.ui.main_window.QMessageBox.critical"),
             ):
                 window._analysis_finished(view)
 
@@ -207,7 +208,8 @@ class UiSmokeTest(unittest.TestCase):
             self.assertAlmostEqual(marker.x(), target_x)
             self.assertAlmostEqual(
                 marker.y(),
-                plot.bottom() - plot.height() * (0.037 - min(chart._values)) / (max(chart._values) - min(chart._values)),
+                plot.bottom()
+                - plot.height() * (0.037 - min(chart._values)) / (max(chart._values) - min(chart._values)),
             )
 
             chart.resize(820, 340)
@@ -854,6 +856,203 @@ class UiSmokeTest(unittest.TestCase):
             self.assertIn("QPushButton#primaryButton", style)
         finally:
             window.close()
+
+    def test_ui_smoke_entrypoint_runs_the_real_window_lifecycle(self):
+        from frame_timing_agent.ui.app import main
+
+        self.assertEqual(main(["--smoke-test"]), 0)
+
+    def test_main_window_validates_form_and_schedules_analysis_and_export(self):
+        import tempfile
+        from pathlib import Path
+
+        from frame_timing_agent.ui.main_window import MainWindow
+        from frame_timing_agent.ui.view_model import AnalysisViewData
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            frames = root / "frames"
+            frames.mkdir()
+            (frames / "frame_000000.jpg").write_bytes(b"frame")
+            artifact = root / "artifact"
+            view = AnalysisViewData(
+                analyzed_count=1,
+                estimated_output_count=1,
+                strategy_name="reconstruction_balanced",
+                source_indices=(0,),
+                motion_values=(0.0,),
+                sharpness_values=(1.0,),
+                contrast_values=(1.0,),
+                segments=(),
+                operation_counts={},
+                thumbnails=(),
+                artifact_dir=artifact,
+                output_dir=None,
+                execution=None,
+            )
+            window = MainWindow()
+            try:
+                window.path_edit.setText(str(root / "missing"))
+                with patch("frame_timing_agent.ui.main_window.QMessageBox.warning") as warning:
+                    self.assertIsNone(window._settings_from_form())
+                warning.assert_called_once()
+
+                window.path_edit.setText(str(frames))
+                settings = window._settings_from_form()
+                self.assertIsNotNone(settings)
+                self.assertEqual(settings.frame_dir, frames.resolve())
+
+                scheduled = []
+                with (
+                    patch("frame_timing_agent.ui.main_window.create_task", return_value=object()) as create,
+                    patch.object(window._thread_pool, "start", side_effect=scheduled.append),
+                ):
+                    window._start_analysis()
+                self.assertEqual(scheduled, [window._active_task])
+                self.assertTrue(window._busy)
+                self.assertIn("output_frames", window.destination_value.text())
+                self.assertTrue(callable(create.call_args.args[0]))
+
+                window._busy = False
+                window._current_view = view
+                window._current_settings = settings
+                window._export_completed = False
+                scheduled.clear()
+                with (
+                    patch("frame_timing_agent.ui.main_window.create_task", return_value=object()) as create,
+                    patch.object(window._thread_pool, "start", side_effect=scheduled.append),
+                ):
+                    window._start_export()
+                self.assertEqual(scheduled, [window._active_task])
+                self.assertTrue(window._busy)
+                self.assertTrue(callable(create.call_args.args[0]))
+            finally:
+                window._busy = False
+                window.close()
+
+    def test_main_window_directory_open_reset_and_close_guards(self):
+        import tempfile
+        from pathlib import Path
+        from types import SimpleNamespace
+
+        from frame_timing_agent.ui.main_window import MainWindow
+        from frame_timing_agent.ui.view_model import AnalysisViewData
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            frames = root / "frames"
+            artifact = root / "artifact"
+            analysis = artifact / "analysis"
+            output = artifact / "output_frames"
+            frames.mkdir()
+            analysis.mkdir(parents=True)
+            output.mkdir()
+            view = AnalysisViewData(
+                analyzed_count=1,
+                estimated_output_count=1,
+                strategy_name="reconstruction_balanced",
+                source_indices=(0,),
+                motion_values=(0.0,),
+                sharpness_values=(1.0,),
+                contrast_values=(1.0,),
+                segments=(),
+                operation_counts={},
+                thumbnails=(),
+                artifact_dir=artifact,
+                output_dir=output,
+                execution=None,
+            )
+            window = MainWindow()
+            try:
+                with patch(
+                    "frame_timing_agent.ui.main_window.QFileDialog.getExistingDirectory",
+                    return_value=str(frames),
+                ):
+                    window._choose_directory()
+                self.assertEqual(window.path_edit.text(), str(frames))
+
+                window._current_view = view
+                window._current_settings = SimpleNamespace(frame_dir=frames, fps=30.0)
+                with patch("frame_timing_agent.ui.main_window.QDesktopServices.openUrl") as opened:
+                    window._open_artifact()
+                    window._open_output()
+                self.assertEqual(opened.call_count, 2)
+
+                window._switch_metric("sharpness")
+                self.assertEqual(window.chart._values, view.sharpness_values)
+                window._switch_metric("contrast")
+                self.assertEqual(window.chart._values, view.contrast_values)
+
+                window._clear_result_display("cleared")
+                self.assertEqual(window.status_label.text(), "cleared")
+                self.assertEqual(window.input_value.text(), "--")
+                self.assertFalse(window.export_button.isEnabled())
+
+                ignored = SimpleNamespace(ignore=lambda: None)
+                window._busy = True
+                with (
+                    patch("frame_timing_agent.ui.main_window.QMessageBox.information") as information,
+                    patch.object(ignored, "ignore") as ignore,
+                ):
+                    window.closeEvent(ignored)
+                information.assert_called_once()
+                ignore.assert_called_once()
+            finally:
+                window._busy = False
+                window.close()
+
+    def test_main_window_handles_history_read_errors_and_record_updates(self):
+        import tempfile
+        from pathlib import Path
+
+        from frame_timing_agent.ui.history import RunHistoryStore
+        from frame_timing_agent.ui.main_window import MainWindow
+        from frame_timing_agent.ui.view_model import AnalysisViewData, ExecutionSummary
+        from frame_timing_agent.ui.worker import RunSettings
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            frames = root / "frames"
+            artifact = root / "artifact"
+            frames.mkdir()
+            artifact.mkdir()
+            store = RunHistoryStore(root / "history.json")
+            window = MainWindow(history_store=store)
+            view = AnalysisViewData(
+                analyzed_count=2,
+                estimated_output_count=1,
+                strategy_name="reconstruction_balanced",
+                source_indices=(0, 1),
+                motion_values=(0.0, 0.1),
+                sharpness_values=(1.0, 2.0),
+                contrast_values=(1.0, 2.0),
+                segments=(),
+                operation_counts={},
+                thumbnails=(),
+                artifact_dir=artifact,
+                output_dir=artifact / "output_frames",
+                execution=ExecutionSummary("ok", 1, 0, 0),
+            )
+            try:
+                window._current_settings = RunSettings(frames, artifact)
+                record = window._record_from_view(view, "analyzed")
+                window._current_record = record
+                window._persist_current_record()
+                self.assertEqual(store.list_records(), [record])
+
+                window._update_current_record(view, "exported")
+                updated = store.list_records()[0]
+                self.assertEqual(updated.status, "exported")
+                self.assertEqual(updated.output_count, 1)
+
+                with (
+                    patch.object(store, "list_records", side_effect=ValueError("broken history")),
+                    patch("frame_timing_agent.ui.main_window.QMessageBox.critical") as critical,
+                ):
+                    window._show_history()
+                critical.assert_called_once()
+            finally:
+                window.close()
 
 
 if __name__ == "__main__":

@@ -240,6 +240,33 @@ class BatchArtifactHealthTest(unittest.TestCase):
             self.assertEqual(result.status, "failed")
             self.assertTrue(any("human_review_path is outside artifact_root" in error for error in result.errors))
 
+    def test_ok_item_missing_required_paths_fails_without_crashing(self):
+        with _tempdir() as tmp:
+            root = Path(tmp)
+            frames = root / "frames"
+            artifact_root = root / "output" / "health_missing_paths"
+            _make_frames(frames, 6)
+
+            run_batch_timing_agent(
+                [BatchTimingItem(name="sample", frames=frames)],
+                artifact_root=artifact_root,
+                limit_first_n=6,
+                write=True,
+            )
+            summary_path = artifact_root / "analysis" / "batch_summary.json"
+            summary = json.loads(summary_path.read_text(encoding="utf-8"))
+            summary["items"][0].pop("human_review_path")
+            summary["items"][0].pop("strategy_path")
+            summary["items"][0].pop("artifact_dir")
+            summary_path.write_text(json.dumps(summary, ensure_ascii=False), encoding="utf-8")
+
+            result = run_batch_artifact_health_check(artifact_root)
+
+            self.assertEqual(result.status, "failed")
+            self.assertTrue(any("missing human_review_path" in error for error in result.errors))
+            self.assertTrue(any("missing strategy_path" in error for error in result.errors))
+            self.assertTrue(any("missing artifact_dir" in error for error in result.errors))
+
     def test_unregistered_item_directory_is_failed(self):
         with _tempdir() as tmp:
             root = Path(tmp)

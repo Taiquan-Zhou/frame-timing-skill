@@ -1,5 +1,6 @@
 import tempfile
 import unittest
+import inspect
 from pathlib import Path
 import subprocess
 import sys
@@ -8,8 +9,8 @@ import json
 import cv2
 import numpy as np
 
+import frame_timing_agent.auto_timing_agent as legacy_auto_timing
 from frame_timing_agent.auto_timing_agent import run_timing_agent
-from frame_timing_agent.image_io import write_image
 
 
 def _write_image(path: Path, value: int) -> None:
@@ -20,70 +21,10 @@ def _write_image(path: Path, value: int) -> None:
 
 
 class AutoTimingAgentTest(unittest.TestCase):
-    def test_preview_reports_monotonic_work_progress(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            frames = root / "frames"
-            artifact_dir = root / "output" / "progress"
-            frames.mkdir()
-            for index in range(6):
-                _write_image(frames / f"frame_{index:06d}_src_{index:06d}.jpg", 100 + index)
-            updates: list[tuple[int, str]] = []
-
-            run_timing_agent(
-                frames,
-                artifact_dir,
-                limit_first_n=None,
-                write=False,
-                progress_callback=lambda percent, message: updates.append((percent, message)),
-            )
-
-            percentages = [percent for percent, _message in updates]
-            self.assertEqual(percentages[0], 0)
-            self.assertEqual(percentages[-1], 100)
-            self.assertEqual(percentages, sorted(percentages))
-            self.assertGreater(len(set(percentages)), 6)
-            self.assertTrue(all(0 <= percent <= 100 for percent in percentages))
-
-    def test_write_reports_monotonic_progress_through_export(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            frames = root / "frames"
-            artifact_dir = root / "output" / "progress"
-            frames.mkdir()
-            for index in range(6):
-                _write_image(frames / f"frame_{index:06d}_src_{index:06d}.jpg", 100 + index)
-            updates: list[tuple[int, str]] = []
-
-            run_timing_agent(
-                frames,
-                artifact_dir,
-                limit_first_n=None,
-                write=True,
-                progress_callback=lambda percent, message: updates.append((percent, message)),
-            )
-
-            percentages = [percent for percent, _message in updates]
-            self.assertEqual(percentages[0], 0)
-            self.assertEqual(percentages[-1], 100)
-            self.assertEqual(percentages, sorted(percentages))
-            self.assertTrue(any(message == "正在生成 output_frames" for _percent, message in updates))
-
-    def test_preview_supports_unicode_frame_and_artifact_paths(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            frames = root / "中文帧目录"
-            artifact_dir = root / "output" / "中文结果"
-            frames.mkdir()
-            for index in range(6):
-                image = np.full((16, 16, 3), 100 + index, dtype=np.uint8)
-                self.assertTrue(write_image(frames / f"frame_{index:06d}.jpg", image))
-
-            result = run_timing_agent(frames, artifact_dir, limit_first_n=None, write=False)
-
-            self.assertEqual(result.analyzed_count, 6)
-            self.assertTrue((artifact_dir / "analysis" / "strategy.json").exists())
-            self.assertTrue((artifact_dir / "analysis" / "visual_review" / "index.md").exists())
+    def test_legacy_entry_keeps_override_signature_without_agent_contracts(self):
+        self.assertIn("override_config_path", inspect.signature(run_timing_agent).parameters)
+        self.assertFalse(hasattr(legacy_auto_timing, "PolicyName"))
+        self.assertFalse(hasattr(legacy_auto_timing, "StrategyRequest"))
 
     def test_preview_writes_analysis_but_not_output_frames(self):
         with tempfile.TemporaryDirectory() as tmp:

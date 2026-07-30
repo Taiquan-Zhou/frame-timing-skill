@@ -120,10 +120,7 @@ class JitterReductionTest(unittest.TestCase):
         self.assertNotIn(3, operation["sources"])
 
     def test_merge_jitter_with_base_strategy_clips_overlapping_base_operations(self):
-        records = [
-            type("Record", (), {"source_index": source_index})()
-            for source_index in range(10)
-        ]
+        records = [type("Record", (), {"source_index": source_index})() for source_index in range(10)]
         base_strategy = {
             "version": 1,
             "input": {"frame_dir_name": "frames", "limit_first_n": None},
@@ -171,10 +168,7 @@ class JitterReductionTest(unittest.TestCase):
         )
 
     def test_merge_jitter_with_base_strategy_preserves_manual_overrides(self):
-        records = [
-            type("Record", (), {"source_index": source_index})()
-            for source_index in range(10)
-        ]
+        records = [type("Record", (), {"source_index": source_index})() for source_index in range(10)]
         base_strategy = {
             "version": 1,
             "input": {"frame_dir_name": "frames", "limit_first_n": None},
@@ -242,10 +236,7 @@ class JitterReductionTest(unittest.TestCase):
         self.assertLessEqual(max(right - left for left, right in zip(selected, selected[1:])), 5)
 
     def test_jitter_strategy_records_configured_detection_thresholds(self):
-        records = [
-            type("Record", (), {"source_index": source_index})()
-            for source_index in range(8)
-        ]
+        records = [type("Record", (), {"source_index": source_index})() for source_index in range(8)]
         estimates = [
             MotionEstimate(
                 source_index=index,

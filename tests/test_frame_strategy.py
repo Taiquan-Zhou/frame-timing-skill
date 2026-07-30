@@ -102,15 +102,9 @@ class FrameStrategyTest(unittest.TestCase):
             frame_dir="input",
             limit_first_n=300,
             overrides={
-                "force_duplicate": [
-                    {"start": 10, "end": 20, "total_instances": 5, "reason": "manual fast"}
-                ],
-                "force_keep_uniform": [
-                    {"start": 100, "end": 180, "count": 30, "reason": "manual static"}
-                ],
-                "ignore_range": [
-                    {"start": 220, "end": 230, "reason": "manual keep"}
-                ],
+                "force_duplicate": [{"start": 10, "end": 20, "total_instances": 5, "reason": "manual fast"}],
+                "force_keep_uniform": [{"start": 100, "end": 180, "count": 30, "reason": "manual static"}],
+                "ignore_range": [{"start": 220, "end": 230, "reason": "manual keep"}],
             },
         )
 

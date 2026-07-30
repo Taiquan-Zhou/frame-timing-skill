@@ -197,7 +197,9 @@ def _write_engineering_log_md(
     timestamp_source: str,
 ) -> None:
     operation_count = len(strategy.get("operations", []))
-    manual_count = sum(1 for operation in strategy.get("operations", []) if operation.get("source") == "manual_override")
+    manual_count = sum(
+        1 for operation in strategy.get("operations", []) if operation.get("source") == "manual_override"
+    )
     bad_count = sum(1 for metric in metrics if metric.bad_quality_candidate)
     options = strategy.get("options", {})
     static_keep_count = int(options.get("static_keep_count", 20))
@@ -320,11 +322,7 @@ def _review_range_summary(
         }
 
     motions = [metric.motion_score for metric in selected]
-    below_static = (
-        sum(1 for motion in motions if motion <= static_threshold)
-        if static_threshold is not None
-        else "n/a"
-    )
+    below_static = sum(1 for motion in motions if motion <= static_threshold) if static_threshold is not None else "n/a"
     longest_run = _longest_static_run(selected, static_threshold) if static_threshold is not None else 0
     return {
         "name": name,

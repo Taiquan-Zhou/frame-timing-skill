@@ -1,4 +1,5 @@
 import csv
+import inspect
 import json
 import subprocess
 import sys
@@ -9,6 +10,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
+import frame_timing_agent.batch_timing_agent as legacy_batch_timing
 from frame_timing_agent.batch_timing_agent import BatchTimingItem, load_batch_manifest, run_batch_timing_agent
 
 
@@ -35,6 +37,11 @@ def _make_frames(frame_dir: Path, count: int, offset: int = 0) -> None:
 
 
 class BatchTimingAgentTest(unittest.TestCase):
+    def test_legacy_entry_keeps_override_signature_without_agent_contracts(self):
+        self.assertIn("override_config_path", inspect.signature(run_batch_timing_agent).parameters)
+        self.assertFalse(hasattr(legacy_batch_timing, "PolicyName"))
+        self.assertFalse(hasattr(legacy_batch_timing, "StrategyRequest"))
+
     def test_write_mode_processes_each_frame_directory_independently(self):
         with _tempdir() as tmp:
             root = Path(tmp)
@@ -128,7 +135,7 @@ class BatchTimingAgentTest(unittest.TestCase):
             self.assertEqual(result.failure_count, 1)
             self.assertEqual(result.items[1].status, "failed")
             self.assertIn("frame directory does not exist", result.items[1].error)
-            failure_review = (artifact_root / "missing_item" / "analysis" / "human_review.md")
+            failure_review = artifact_root / "missing_item" / "analysis" / "human_review.md"
             self.assertTrue(failure_review.exists())
             failure_text = failure_review.read_text(encoding="utf-8")
             self.assertIn("阶段 8 子任务失败", failure_text)

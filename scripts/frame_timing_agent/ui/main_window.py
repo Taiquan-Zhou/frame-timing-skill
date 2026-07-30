@@ -641,7 +641,9 @@ class MainWindow(QMainWindow):
     def _thumbnail_widget(self, thumbnail: ThumbnailView) -> QWidget:
         frame = QFrame()
         frame.setObjectName("thumbnail")
-        frame.setStyleSheet(f"QFrame#thumbnail {{ border-top: 3px solid {OPERATION_COLORS.get(thumbnail.operation, '#98a2b3')}; }}")
+        frame.setStyleSheet(
+            f"QFrame#thumbnail {{ border-top: 3px solid {OPERATION_COLORS.get(thumbnail.operation, '#98a2b3')}; }}"
+        )
         layout = QVBoxLayout(frame)
         layout.setContentsMargins(4, 4, 4, 5)
         layout.setSpacing(3)
@@ -790,7 +792,11 @@ class MainWindow(QMainWindow):
         self._save_preferences()
 
     def _history_record_deleted(self, record: RunRecord) -> None:
-        if self._history_read_only and self._current_record is not None and self._current_record.run_id == record.run_id:
+        if (
+            self._history_read_only
+            and self._current_record is not None
+            and self._current_record.run_id == record.run_id
+        ):
             if self._current_result_state is not None:
                 self._return_to_current_result()
             else:

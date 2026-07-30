@@ -114,9 +114,7 @@ class RunHistoryStore:
             lock.unlock()
 
     def _write_payload(self, payload: dict) -> None:
-        temporary = self.path.with_name(
-            f".{self.path.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp"
-        )
+        temporary = self.path.with_name(f".{self.path.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp")
         try:
             temporary.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
             temporary.replace(self.path)

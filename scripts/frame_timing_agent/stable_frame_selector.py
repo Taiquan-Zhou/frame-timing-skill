@@ -18,9 +18,7 @@ def select_stable_sources(
         raise ValueError(f"min_keep_count must be positive: {min_keep_count}")
 
     selected_estimates = [
-        estimate
-        for estimate in estimates
-        if jitter_range.start <= estimate.source_index <= jitter_range.end
+        estimate for estimate in estimates if jitter_range.start <= estimate.source_index <= jitter_range.end
     ]
     if not selected_estimates:
         return []

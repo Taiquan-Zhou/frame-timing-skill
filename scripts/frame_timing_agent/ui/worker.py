@@ -137,6 +137,7 @@ def run_export(settings: RunSettings, progress_callback: ProgressCallback | None
     )
     output_dir = settings.artifact_dir / "output_frames"
     staging_dir = settings.artifact_dir / f".output_frames.export-{uuid.uuid4().hex}"
+    audit_staging_dir = settings.artifact_dir / f".execution_audit.export-{uuid.uuid4().hex}"
     _report(progress_callback, 20, "正在生成 output_frames")
     try:
         apply_result = apply_strategy(
@@ -156,11 +157,17 @@ def run_export(settings: RunSettings, progress_callback: ProgressCallback | None
         audit = audit_strategy_execution(records, strategy, staging_dir, fps=settings.fps)
         if audit.get("status") != "ok":
             raise ValueError(f"output verification failed: {'; '.join(audit.get('errors', []))}")
-        _replace_output_directory(staging_dir, output_dir)
-        write_execution_audit(audit, analysis_dir)
+        write_execution_audit(audit, audit_staging_dir)
+        _replace_output_directory(
+            staging_dir,
+            output_dir,
+            lambda: _replace_execution_audit(audit_staging_dir, analysis_dir),
+        )
     finally:
         if staging_dir.exists():
             shutil.rmtree(staging_dir)
+        if audit_staging_dir.exists():
+            shutil.rmtree(audit_staging_dir)
     result = TimingAgentResult(
         analyzed_count=len(records),
         estimated_output_count=apply_result.output_count,
@@ -263,18 +270,50 @@ def _map_progress(
     return report
 
 
-def _replace_output_directory(staging_dir: Path, output_dir: Path) -> None:
+def _replace_output_directory(
+    staging_dir: Path,
+    output_dir: Path,
+    commit_metadata: Callable[[], None] | None = None,
+) -> None:
     backup_dir = output_dir.with_name(f".{output_dir.name}.backup-{uuid.uuid4().hex}")
     if output_dir.exists():
         output_dir.rename(backup_dir)
     try:
         staging_dir.rename(output_dir)
+        if commit_metadata is not None:
+            commit_metadata()
     except Exception:
+        if output_dir.exists():
+            shutil.rmtree(output_dir)
         if backup_dir.exists() and not output_dir.exists():
             backup_dir.rename(output_dir)
         raise
     if backup_dir.exists():
-        shutil.rmtree(backup_dir)
+        shutil.rmtree(backup_dir, ignore_errors=True)
+
+
+def _replace_execution_audit(staging_dir: Path, analysis_dir: Path) -> None:
+    names = ("execution_audit.json", "execution_audit.md")
+    backup_dir = analysis_dir / f".execution_audit.backup-{uuid.uuid4().hex}"
+    backup_dir.mkdir()
+    try:
+        for name in names:
+            target = analysis_dir / name
+            if target.exists():
+                target.rename(backup_dir / name)
+        for name in names:
+            (staging_dir / name).rename(analysis_dir / name)
+    except Exception:
+        for name in names:
+            target = analysis_dir / name
+            if target.exists():
+                target.unlink()
+            backup = backup_dir / name
+            if backup.exists():
+                backup.rename(target)
+        raise
+    finally:
+        shutil.rmtree(backup_dir, ignore_errors=True)
 
 
 def create_task(

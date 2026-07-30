@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-import json
 
 
 def write_human_review(
@@ -112,7 +111,8 @@ def _human_review_markdown(
 
     lines.extend(["", "## 5. 重点保留帧"])
     kept_sections = [
-        result for result in (audit or {}).get("operation_results", [])
+        result
+        for result in (audit or {}).get("operation_results", [])
         if result.get("op") == "keep_uniform" and result.get("kept_sources")
     ]
     if kept_sections:

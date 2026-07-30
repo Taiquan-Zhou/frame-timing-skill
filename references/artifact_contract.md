@@ -1,47 +1,70 @@
 # Artifact Contract
 
-This skill separates model-safe outputs from analysis outputs.
+This package separates model-safe outputs from analysis and audit outputs. Agent-safe v3 artifacts use `schema_version 3` and policy revision `coverage-static-thinning-v1`.
 
-## Model-Safe Output
+## Agent-safe v3 Layout
 
-Only `output_frames/` should be passed to downstream reconstruction.
+```text
+output/frame_timing_run/
+  analysis.json
+  strategy.json
+  validation.json
+  execution.json
+  health.json
+  report.md
+  human_review.md
+  output_frames/
+```
+
+## JSON Artifacts
+
+- `analysis.json`: deterministic analysis of input frame quality, motion, ranges, and input digest.
+- `strategy.json`: selected sources, policy, request, `policy_revision`, risk, reasons, and estimated metrics.
+- `validation.json`: validation result, candidate digest, and blocking issues.
+- `execution.json`: copied output frame count, selected sources, output manifest, and output digest.
+- `health.json`: lifecycle health summary created by `verify`.
+
+All JSON is canonicalized before writing. Paths inside JSON must be artifact-relative or sanitized names; private absolute input paths must not be written.
+
+## Reports
+
+- `report.md`: machine-readable summary for the run.
+- `human_review.md`: concise human review checklist.
+
+Reports are audit material. Do not pass them to downstream reconstruction tools.
+
+## Model-safe Output
+
+Only `output_frames/` should be passed downstream.
 
 Allowed files:
 
-- image frames with supported extensions;
+- copied image frames with supported image extensions;
 - `selected_frames.txt`;
 - `run_manifest.json`.
 
-Each output image must be a byte-identical copy of its recorded source frame. `selected_frames.txt` records `source_sha256` for each output image so health checks can verify provenance without storing private input paths.
+Each output image must be a byte-identical copy of its recorded source frame. The package does not warp, crop, interpolate, deblur, or stabilize pixels.
 
-In `reconstruction_balanced` mode, strategy version `2` may combine `keep_uniform`, `duplicate_range`, and `select_sources` operations. `select_sources` drops unstable frames from the selected range and keeps only explicit source indices. It must not create duplicate frames or modify pixels.
+## Policy Behavior
 
-Manual override operations are authoritative. Automatic jitter-reduction operations must be skipped or clipped when they overlap manual override ranges.
+Agent-safe v3 supports `coverage_first`, `balanced`, and `jitter_reduction`.
 
-## Analysis Output
+- `coverage_first` protects non-static coverage and only thins high-confidence static ranges conservatively.
+- `balanced` is a medium-risk comparison candidate.
+- `jitter_reduction` is an aggressive comparison candidate.
 
-Reports, strategy files, contact sheets, dashboards, and health reports belong under `analysis/`.
+`validate` must pass before `apply`. `apply` revalidates strategy identity and candidate digest. Validation failure is not an invitation to edit JSON.
 
-Expected per-item files:
+## Legacy v2 Artifacts
 
-- `analysis/human_review.md`;
-- `analysis/strategy.json`;
-- `analysis/visual_review/index.md`.
-
-Expected batch files:
-
-- `analysis/review_dashboard.md`;
-- `analysis/maintenance_report.md`;
-- `analysis/maintenance_report.json`.
-
-Analysis artifacts must never be copied into `output_frames/`. They should use item names and artifact-relative paths instead of private absolute input paths.
+The legacy v2 `frame-timing` and `frame-timing-batch` paths use `reconstruction_balanced` and may write older batch analysis folders and strategy version `2` with operations such as `keep_uniform`, `duplicate_range`, and `select_sources`. These artifacts remain supported for compatibility, but they are not the Agent-safe v3 staged contract.
 
 ## Health Pass Conditions
 
-`frame-timing-health` must exit 0 and report status `ok`. A passing run means:
+`frame-timing-tool verify` or `frame-timing-health` must exit 0 before downstream use. A passing v3 run means:
 
-- every item has allowed `output_frames/` files only;
-- every selected output frame has a recorded `source_sha256`;
-- output frame bytes match recorded provenance;
-- required review and maintenance artifacts are present;
-- analysis artifacts do not depend on private absolute source paths.
+- required artifacts exist: `analysis.json`, `strategy.json`, `validation.json`, `execution.json`, `health.json`, `report.md`, `human_review.md`, and `output_frames/`;
+- selected output frames match source provenance;
+- output frame bytes match recorded source hashes;
+- validation and execution identity match the current candidate;
+- no private absolute source paths are published.

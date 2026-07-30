@@ -1,14 +1,28 @@
 from __future__ import annotations
 
+import csv
+import math
+import re
 from dataclasses import dataclass
 from pathlib import Path
-import csv
-import re
 
+from frame_timing_agent.contracts import AnalysisError
 
 SUPPORTED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp"}
 FRAME_WITH_SOURCE_PATTERN = re.compile(r"^frame_(\d+)_src_(\d+)(?:_dup_\d+)?$", re.IGNORECASE)
 FRAME_PATTERN = re.compile(r"^frame_(\d+)$", re.IGNORECASE)
+
+
+def normalize_fps(value: object) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise AnalysisError("fps must be positive and finite", code="invalid_fps", fields=("fps",))
+    try:
+        normalized = float(value)
+    except (OverflowError, ValueError) as exc:
+        raise AnalysisError("fps must be positive and finite", code="invalid_fps", fields=("fps",)) from exc
+    if not math.isfinite(normalized) or normalized <= 0:
+        raise AnalysisError("fps must be positive and finite", code="invalid_fps", fields=("fps",))
+    return normalized
 
 
 @dataclass(frozen=True)
@@ -43,7 +57,7 @@ def _iter_frame_paths(frame_dir: Path) -> list[Path]:
 
 
 def _build_filename_records(frame_dir: Path, fps: float) -> list[FrameRecord]:
-    records = []
+    records: list[FrameRecord] = []
     for path in _iter_frame_paths(frame_dir):
         source_index = _parse_source_index_from_path(path)
         records.append(
@@ -59,7 +73,7 @@ def _build_filename_records(frame_dir: Path, fps: float) -> list[FrameRecord]:
 
 def _build_selected_records(frame_dir: Path, fps: float) -> list[FrameRecord]:
     selected_path = frame_dir / "selected_frames.txt"
-    records = []
+    records: list[FrameRecord] = []
     with selected_path.open("r", encoding="utf-8", newline="") as handle:
         reader = csv.DictReader(handle, delimiter="\t")
         for row in reader:
@@ -125,8 +139,7 @@ def load_frame_records(frame_dir: Path | str, fps: float = 30.0, limit_first_n: 
     frame_dir = Path(frame_dir)
     if not frame_dir.exists():
         raise FileNotFoundError(f"frame directory does not exist: {frame_dir}")
-    if fps <= 0:
-        raise ValueError(f"fps must be positive: {fps}")
+    fps = normalize_fps(fps)
 
     selected_path = frame_dir / "selected_frames.txt"
 

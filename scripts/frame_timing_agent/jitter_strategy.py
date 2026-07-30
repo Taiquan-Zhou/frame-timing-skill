@@ -85,9 +85,7 @@ def merge_jitter_with_base_strategy(
     )
     source_indices = sorted({record.source_index for record in records})
     manual_operations = [
-        operation
-        for operation in base_strategy.get("operations", [])
-        if operation.get("source") == "manual_override"
+        operation for operation in base_strategy.get("operations", []) if operation.get("source") == "manual_override"
     ]
     merge_warnings: list[str] = []
     jitter_operations = _clip_jitter_operations_around_manual_overrides(
@@ -103,7 +101,9 @@ def merge_jitter_with_base_strategy(
             continue
         merged_operations.extend(_clip_base_operation(base_operation, jitter_operations, source_indices))
     merged_operations.extend(jitter_operations)
-    merged_operations.sort(key=lambda operation: (int(operation["range"]["start"]), int(operation["range"]["end"]), operation["op"]))
+    merged_operations.sort(
+        key=lambda operation: (int(operation["range"]["start"]), int(operation["range"]["end"]), operation["op"])
+    )
 
     merged_options = dict(base_strategy.get("options", {}))
     merged_options.update(jitter_strategy.get("options", {}))
@@ -164,8 +164,7 @@ def _clip_jitter_operations_around_manual_overrides(
         return jitter_operations
 
     manual_ranges = [
-        (int(operation["range"]["start"]), int(operation["range"]["end"]))
-        for operation in manual_operations
+        (int(operation["range"]["start"]), int(operation["range"]["end"])) for operation in manual_operations
     ]
     retained_operations: list[dict[str, Any]] = []
     for operation in jitter_operations:

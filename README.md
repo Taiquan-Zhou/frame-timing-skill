@@ -1,140 +1,121 @@
 # Frame Timing Skill
 
-[English](README.md) | [中文](README.zh-CN.md)
+[English](README.en.md)
 
-Frame Timing Skill is a local Python package and portable Agent Skill for preparing already-clean extracted video frames before reconstruction, NeRF, Gaussian Splatting, photogrammetry, or visual review.
+Frame Timing Skill 是一个面向三维重建、NeRF、Gaussian Splatting 和摄影测量的本地帧时序分析与选择工具。它分析已经清理好的图片帧目录，帮助识别静止、快速运动、抖动和需要人工复核的区间，并生成可审计的建模帧输出。
 
-It detects static ranges, fast-motion ranges, and high-frequency camera jitter. It writes byte-identical copied output frames and local review artifacts under `output/`. It does not extract video, remove watermarks, run OCR, edit pixels, upload data, or run reconstruction.
+[![Latest Release](https://img.shields.io/github/v/release/Taiquan-Zhou/frame-timing-skill?label=Release)](https://github.com/Taiquan-Zhou/frame-timing-skill/releases/latest)
+[![CI](https://github.com/Taiquan-Zhou/frame-timing-skill/actions/workflows/ci.yml/badge.svg)](https://github.com/Taiquan-Zhou/frame-timing-skill/actions/workflows/ci.yml)
+[![下载 Windows 桌面版](https://img.shields.io/badge/Windows-下载桌面版-2563eb?logo=windows)](https://github.com/Taiquan-Zhou/frame-timing-skill/releases/latest/download/FrameTimingSkill-Windows-x64.zip)
 
-## Features
+## 普通用户
 
-- Detect static and fast-motion frame ranges.
-- Reduce severe camera jitter with stable keyframe selection.
-- Generate timing strategies for downstream reconstruction workflows.
-- Write model-safe `output_frames/` using byte-identical source-frame copies.
-- Record `source_sha256` provenance for copied frames.
-- Generate human review, visual review, execution audit, and health reports.
-- Provide both CLI entrypoints and a Python API.
+### Windows 桌面版
 
-## Version Overview
+桌面版适合直接检查本地帧目录，不需要上传原图，也不需要先配置 Python。
 
-| Version | Strategy | Main behavior | Reconstruction impact | Status |
-| --- | --- | --- | --- | --- |
-| v1 / 0.1.0 | `aggressive_motion` | Detected static and fast-motion ranges, compressed long static sections with `keep_uniform`, and duplicated fast-motion ranges with `duplicate_range`. | Useful for basic frame timing, but severe camera jitter could still be duplicated or mixed into static-like handling. | Replaced by v2. |
-| v2 / 0.2.0 | `reconstruction_balanced` | Adds high-frequency jitter detection, stable keyframe selection, `select_sources`, execution audit, configurable jitter thresholds, and manual-override protection. | Better suited for reconstruction, NeRF, Gaussian Splatting, and photogrammetry because unstable jitter ranges can be reduced without modifying pixels. | Current default. |
+**[下载 FrameTimingSkill Windows x64](https://github.com/Taiquan-Zhou/frame-timing-skill/releases/latest/download/FrameTimingSkill-Windows-x64.zip)**
 
-v2 is a strategy upgrade. Output frame counts and `strategy.json` operations can differ from v1. The package still writes byte-identical source-frame copies only; it does not warp, crop, interpolate, or visually stabilize images.
+<p align="center">
+  <img src="https://raw.githubusercontent.com/Taiquan-Zhou/frame-timing-skill/main/assets/frame-timing-ui.png" alt="Frame Timing Skill Windows desktop interface" width="100%">
+</p>
 
-## For Users
+桌面端目前提供：
 
-### Use as an Agent Skill
+- 选择已清理的帧目录并设置 FPS。
+- 查看运动、清晰度和对比度时序曲线。
+- 查看静止、快速运动、极快速运动和待复核区间。
+- 预览与策略区间相关的代表帧。
+- 生成独立的 `output_frames/`，不修改源帧目录。
+- 保存本地设置、运行记录和历史结果缩略图。
+- 导出前绑定输入和策略摘要，并校验复制后的输出帧。
 
-For regular users, ask your AI agent or AI coding tool to install this repository as a skill:
+使用步骤：
+
+1. 下载并解压 `FrameTimingSkill-Windows-x64.zip`。
+2. 运行 `FrameTimingSkill.exe`。
+3. 选择已经清理好的图片帧目录，设置 FPS，然后点击“开始分析”。
+4. 检查曲线、区间和代表帧，确认后点击“生成 output_frames”。
+
+所有分析和复制操作都在本机完成。源目录不会被覆盖；运行产物默认写入源目录旁的 `output/frame_timing_ui/`。
+
+### 作为 Agent Skill 使用
+
+让 AI Agent 或 AI 编程工具安装本仓库：
 
 ```text
 Install this skill: https://github.com/Taiquan-Zhou/frame-timing-skill
 ```
 
-Then ask it to process your frame directory:
+然后让 Agent 处理已清理的帧目录：
 
 ```text
-/skill frame-timing-skill
-Use frame-timing-skill on path/to/clean_frames
+Use frame-timing-skill on path/to/clean_frames.
+Analyze first, compare candidates if needed, validate before apply, and verify before using output_frames downstream.
 ```
 
-The agent should run `frame-timing path/to/clean_frames` with the default `reconstruction_balanced` mode and verify the result with `frame-timing-health`.
+## AI Agent 和开发者
 
-## For Developers
+### Agent-safe v3 JSON CLI
 
-### Install Python Package
+Agent-safe v3 把处理过程拆成 `analyze -> plan -> validate -> apply -> verify`，使用 `schema_version 3` 和策略修订号 `coverage-static-thinning-v1`。
 
-For direct CLI or Python API use:
+<p align="center">
+  <img src="https://raw.githubusercontent.com/Taiquan-Zhou/frame-timing-skill/main/assets/frame-timing-workflow.png" alt="Frame Timing workflow: clean_frames to analyze, plan, validate, apply, verify and output_frames" width="100%">
+</p>
+
+```bash
+frame-timing-tool capabilities
+frame-timing-tool analyze --frames path/to/clean_frames --artifact-root output/frame_timing_run
+frame-timing-tool plan --analysis output/frame_timing_run/analysis.json --policy coverage_first
+frame-timing-tool validate --analysis output/frame_timing_run/analysis.json --strategy output/frame_timing_run/strategy.json
+frame-timing-tool apply --frames path/to/clean_frames --analysis output/frame_timing_run/analysis.json --strategy output/frame_timing_run/strategy.json --validation output/frame_timing_run/validation.json --output-dir output/frame_timing_run/output_frames
+frame-timing-tool verify --frames path/to/clean_frames --artifact-root output/frame_timing_run
+```
+
+三种候选策略：
+
+- `coverage_first`：推荐默认策略，优先保护非静止帧覆盖。
+- `balanced`：用于比较覆盖率与帧数之间的折中。
+- `jitter_reduction`：更积极地减少抖动候选帧，需要更严格的人工复核。
+
+### 从源码安装
+
+安装命令行工具：
 
 ```bash
 python -m pip install git+https://github.com/Taiquan-Zhou/frame-timing-skill.git
 ```
 
-For the optional Windows desktop interface, install the UI extra from a checkout:
+安装可选桌面界面：
 
-```powershell
-python -m pip install -e ".[ui]"
+```bash
+git clone https://github.com/Taiquan-Zhou/frame-timing-skill.git
+cd frame-timing-skill
+python -m pip install ".[ui]"
 frame-timing-ui
 ```
 
-The desktop interface runs locally and writes generated artifacts to a sibling output area, normally
-`output/frame_timing_ui/<frame-directory-name>`. It never writes artifacts inside the selected source directory
-and does not upload source frames.
-
-### CLI Usage
-
-Run frame timing on a directory of already-clean extracted frames:
+兼容的一条命令流程：
 
 ```bash
 frame-timing path/to/clean_frames
 ```
 
-By default, artifacts are written to `output/frame_timing_run` using the `reconstruction_balanced` strategy.
+### 输出与审计
 
-For multiple frame directories or custom batch settings, use the advanced batch command:
+Agent-safe v3 会在 `output/frame_timing_run/` 下写入：
 
-```bash
-frame-timing-batch \
-  --frames "sample=path/to/clean_frames" \
-  --artifact_root output/frame_timing_run \
-  --write
-```
+- `analysis.json`
+- `strategy.json`
+- `validation.json`
+- `execution.json`
+- `health.json`
+- `report.md`
+- `human_review.md`
+- `output_frames/`
 
-Check the generated artifacts:
-
-```bash
-frame-timing-health --artifact_root output/frame_timing_run
-```
-
-### CLI Reference
-
-- `frame-timing`: process one clean frame directory with the default local artifact layout.
-- `frame-timing-demo`: generate deterministic demo frames for local checks.
-- `frame-timing-batch`: analyze clean frame directories and write `output_frames/` plus review artifacts.
-- `frame-timing-health`: verify artifact structure and copied-frame provenance.
-
-Default mode:
-
-- `reconstruction_balanced`: compresses long static ranges moderately, duplicates fast-motion ranges to slow them down for reconstruction, and selects stable keyframes in jitter ranges.
-
-Pass multiple frame sets by repeating `--frames "<item_name>=<clean_frame_dir>"`.
-
-### Python API
-
-```python
-from pathlib import Path
-from frame_timing_agent.batch_timing_agent import BatchTimingItem, run_batch_timing_agent
-
-result = run_batch_timing_agent(
-    [BatchTimingItem(name="sample", frames=Path("path/to/clean_frames"))],
-    artifact_root=Path("output/frame_timing_run"),
-    limit_first_n=300,
-    write=True,
-)
-```
-
-## Output
-
-Model-safe output is written to:
-
-```text
-output/<run_name>/<item_name>/output_frames/
-```
-
-Review, audit, and health artifacts are written under:
-
-```text
-output/<run_name>/analysis/
-output/<run_name>/<item_name>/analysis/
-```
-
-Only `output_frames/` should be passed to downstream reconstruction tools.
-
-In `reconstruction_balanced` mode, `strategy.json` uses strategy version `2`. It may contain `keep_uniform`, `duplicate_range`, and `select_sources` operations. Output images are still byte-identical source-frame copies; the package does not warp, crop, interpolate, or stabilize pixels.
+只有 `output_frames/` 应传给下游建模工具。输出图像是源帧的字节级复制；本项目不做视频抽帧、像素修改、去模糊、图像稳定、云端上传或三维重建。
 
 ## License
 

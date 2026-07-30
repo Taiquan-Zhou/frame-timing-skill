@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable
+from pathlib import Path
+from typing import Callable, cast
 
 import cv2
 import numpy as np
+import numpy.typing as npt
 
 from frame_timing_agent.frame_source import FrameRecord
 from frame_timing_agent.image_io import read_image
@@ -23,18 +25,20 @@ class FrameMetric:
     bad_quality_candidate: bool
 
 
-def _load_gray_image(path) -> np.ndarray:
+def _load_gray_image(path: Path) -> npt.NDArray[np.uint8]:
     image = read_image(path, cv2.IMREAD_GRAYSCALE)
     if image is None:
         raise ValueError(f"Cannot read frame image: {path}")
-    return image
+    return cast(npt.NDArray[np.uint8], image)
 
 
-def _compute_motion_score(current_gray_normalized: np.ndarray, previous_gray_normalized: np.ndarray) -> float:
+def _compute_motion_score(
+    current_gray_normalized: npt.NDArray[np.float32],
+    previous_gray_normalized: npt.NDArray[np.float32],
+) -> float:
     if current_gray_normalized.shape != previous_gray_normalized.shape:
         raise ValueError(
-            "frame size mismatch: "
-            f"previous={previous_gray_normalized.shape}, current={current_gray_normalized.shape}"
+            f"frame size mismatch: previous={previous_gray_normalized.shape}, current={current_gray_normalized.shape}"
         )
     return float(np.mean(np.abs(current_gray_normalized - previous_gray_normalized)))
 
@@ -44,7 +48,7 @@ def compute_frame_metrics(
     progress_callback: Callable[[int, int], None] | None = None,
 ) -> list[FrameMetric]:
     metrics: list[FrameMetric] = []
-    previous_gray_normalized: np.ndarray | None = None
+    previous_gray_normalized: npt.NDArray[np.float32] | None = None
 
     total = len(records)
     for completed, record in enumerate(records, start=1):

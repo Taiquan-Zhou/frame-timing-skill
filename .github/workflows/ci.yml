@@ -6,11 +6,24 @@ on:
     branches:
       - main
 
+permissions:
+  contents: read
+
 jobs:
   test:
-    runs-on: windows-latest
+    name: Python ${{ matrix.python-version }} on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
     env:
       QT_QPA_PLATFORM: offscreen
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - windows-latest
+        python-version:
+          - "3.10"
+          - "3.12"
 
     steps:
       - name: Check out repository
@@ -19,25 +32,34 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: ${{ matrix.python-version }}
 
-      - name: Install package and test tools
-        run: python -m pip install ".[ui]" pytest build
-
-      - name: Run tests
-        run: python -m pytest
-
-      - name: Compile Python sources
-        run: python -m compileall -q scripts examples tests
-
-      - name: Build and audit distributions
-        shell: pwsh
+      - name: Install package and release tools
+        shell: bash
         run: |
-          $dist = Join-Path $env:RUNNER_TEMP "dist-audit"
-          python -m build --outdir $dist
-          $env:DIST_AUDIT_DIR = $dist
-          @'
-          import os
+          set -euo pipefail
+          python -m pip install --upgrade pip setuptools wheel
+          python -m pip install ".[dev,ui]"
+
+      - name: Run release quality gates
+        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m ruff check scripts tests
+          python -m ruff format --check scripts tests
+          python -m mypy scripts/frame_timing_agent
+          python -m pytest --cov=frame_timing_agent --cov-report=term-missing --cov-fail-under=90
+          python -m compileall -q scripts examples tests
+
+      - name: Build, check, and audit distributions
+        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m build
+          python -m twine check dist/*
+          python - <<'PY'
           import tarfile
           import zipfile
           from pathlib import Path
@@ -52,7 +74,7 @@ jobs:
               "handoff.md",
               "__pycache__",
           )
-          dist = Path(os.environ["DIST_AUDIT_DIR"])
+          dist = Path("dist")
           archives = list(dist.glob("*.whl")) + list(dist.glob("*.tar.gz"))
           if not archives:
               raise SystemExit("no distributions built")
@@ -66,34 +88,40 @@ jobs:
               bad = [name for name in names if any(token in name for token in blocked)]
               if bad:
                   raise SystemExit(f"{archive.name} contains non-release files: {bad}")
-          '@ | python -
+          PY
 
       - name: Validate skill metadata
-        shell: pwsh
+        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12'
+        shell: bash
         run: |
-          $text = Get-Content -Raw SKILL.md
-          $normalized = $text -replace "`r`n", "`n"
-          if (-not $normalized.StartsWith("---`n")) {
-            throw "SKILL.md missing YAML frontmatter"
-          }
-          $parts = $normalized -split "---", 3
-          $frontmatter = $parts[1]
-          if ($frontmatter -notmatch "(?m)^name:\s*frame-timing-skill\s*$") {
-            throw "unexpected skill name"
-          }
-          if ($frontmatter -notmatch "(?m)^description:\s*Use when") {
-            throw "skill description must start with 'Use when'"
-          }
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          text = Path("SKILL.md").read_text(encoding="utf-8")
+          normalized = text.replace("\r\n", "\n")
+          if not normalized.startswith("---\n"):
+              raise SystemExit("SKILL.md missing YAML frontmatter")
+          parts = normalized.split("---", 2)
+          frontmatter = parts[1]
+          if "name: frame-timing-skill" not in frontmatter:
+              raise SystemExit("unexpected skill name")
+          if "description: Use when" not in frontmatter:
+              raise SystemExit("skill description must start with 'Use when'")
+          PY
 
       - name: Installed CLI smoke
-        shell: pwsh
+        shell: bash
         run: |
-          $source = (Resolve-Path .).Path
-          $hostDir = Join-Path $env:RUNNER_TEMP "frame-timing-host"
-          New-Item -ItemType Directory -Force -Path $hostDir | Out-Null
-          Set-Location $hostDir
-          python -m pip install $source
+          set -euo pipefail
+          source="$(pwd)"
+          host_dir="$RUNNER_TEMP/frame-timing-host"
+          mkdir -p "$host_dir"
+          cd "$host_dir"
+          python -m pip install "$source"
+          frame-timing-demo --output_dir output/demo_frames/sample --count 12
+          frame-timing output/demo_frames/sample --artifact_root output/ci_demo --limit_first_n 12
+          frame-timing-health --artifact_root output/ci_demo
+          frame-timing-tool capabilities
+          frame-timing-benchmark --help
           frame-timing-ui --smoke-test
-          frame-timing-demo --output_dir output\demo_frames\sample --count 12
-          frame-timing output\demo_frames\sample --artifact_root output\ci_demo --limit_first_n 12
-          frame-timing-health --artifact_root output\ci_demo
