@@ -53,6 +53,7 @@ def discover_frame_directories(
             issues.append(DiscoveryIssue(root_path, "invalid_root_not_directory"))
         else:
             _discover_from_root(root_path, frame_dirs, issues)
+    _apply_preferred_child_precedence(frame_dirs, issues)
 
     return DiscoveryResult(
         frame_dirs=tuple(sorted(frame_dirs, key=_sort_key)),
@@ -63,7 +64,6 @@ def discover_frame_directories(
 def _discover_from_root(root: Path, frame_dirs: set[Path], issues: list[DiscoveryIssue]) -> None:
     candidates = _root_candidates(root)
     explicit_paths = set(frame_dirs)
-    accepted_candidates: list[Path] = []
 
     for candidate in candidates:
         if candidate in explicit_paths:
@@ -72,17 +72,20 @@ def _discover_from_root(root: Path, frame_dirs: set[Path], issues: list[Discover
         if ignored_code is not None:
             issues.append(DiscoveryIssue(candidate, ignored_code))
         else:
-            accepted_candidates.append(candidate)
+            frame_dirs.add(candidate)
 
-    preferred = {path for path in accepted_candidates if path.name.casefold() == _CLEAN_FRAMES_NAME}
-    for candidate in accepted_candidates:
-        if candidate.name.casefold() != _CLEAN_FRAMES_NAME and any(
-            preferred_path != candidate and preferred_path.is_relative_to(candidate)
-            for preferred_path in preferred
-        ):
-            issues.append(DiscoveryIssue(candidate, "superseded_by_clean_frames"))
-            continue
-        frame_dirs.add(candidate)
+
+def _apply_preferred_child_precedence(frame_dirs: set[Path], issues: list[DiscoveryIssue]) -> None:
+    preferred = {path for path in frame_dirs if path.name.casefold() == _CLEAN_FRAMES_NAME}
+    superseded = {
+        candidate
+        for candidate in frame_dirs
+        if candidate.name.casefold() != _CLEAN_FRAMES_NAME
+        and any(preferred_path != candidate and preferred_path.is_relative_to(candidate) for preferred_path in preferred)
+    }
+    for candidate in superseded:
+        frame_dirs.remove(candidate)
+        issues.append(DiscoveryIssue(candidate, "superseded_by_clean_frames"))
 
 
 def _root_candidates(root: Path) -> list[Path]:

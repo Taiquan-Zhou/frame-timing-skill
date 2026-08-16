@@ -57,6 +57,16 @@ def test_discovery_suppresses_parent_when_preferred_child_is_selected(tmp_path):
     assert any(issue.path == parent.resolve() and issue.code == "superseded_by_clean_frames" for issue in result.issues)
 
 
+def test_discovery_suppresses_explicit_parent_when_preferred_child_is_selected(tmp_path):
+    parent = make_frames(tmp_path / "video_a")
+    preferred = make_frames(tmp_path / "video_a" / "clean_frames")
+
+    result = discover_frame_directories(explicit=[parent], root=tmp_path)
+
+    assert result.frame_dirs == (preferred.resolve(),)
+    assert any(issue.path == parent.resolve() and issue.code == "superseded_by_clean_frames" for issue in result.issues)
+
+
 def test_discovery_reports_invalid_explicit_paths(tmp_path):
     missing = tmp_path / "missing"
     file_path = tmp_path / "not-a-directory.txt"
