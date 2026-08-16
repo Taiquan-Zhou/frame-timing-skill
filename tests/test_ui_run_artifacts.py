@@ -1,6 +1,7 @@
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from frame_timing_agent.ui.run_artifacts import (
     bind_strategy_snapshot,
@@ -107,6 +108,70 @@ class UiRunArtifactsTest(unittest.TestCase):
 
             self.assertEqual(loaded, frozen)
             self.assertEqual(loaded[0].path.read_bytes(), b"thumbnail")
+
+    def test_failed_thumbnail_refresh_preserves_previous_snapshot(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            analysis = root / "run" / "analysis"
+            original_source = root / "frame_000010.jpg"
+            original_source.write_bytes(b"original thumbnail")
+            original = persist_thumbnails(
+                analysis,
+                (ThumbnailView(10, original_source, "keep"),),
+            )
+
+            replacement_source = root / "frame_000020.jpg"
+            replacement_source.write_bytes(b"replacement thumbnail")
+            missing_source = root / "frame_000030.jpg"
+            with self.assertRaises(FileNotFoundError):
+                persist_thumbnails(
+                    analysis,
+                    (
+                        ThumbnailView(20, replacement_source, "keep"),
+                        ThumbnailView(30, missing_source, "drop"),
+                    ),
+                )
+
+            loaded = load_persisted_thumbnails(analysis)
+            self.assertEqual(loaded, original)
+            self.assertEqual(loaded[0].path.read_bytes(), b"original thumbnail")
+            self.assertEqual(
+                [path.name for path in analysis.iterdir() if ".staging-" in path.name],
+                [],
+            )
+
+    def test_failed_thumbnail_manifest_write_restores_previous_snapshot(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            analysis = root / "run" / "analysis"
+            original_source = root / "frame_000010.jpg"
+            original_source.write_bytes(b"original thumbnail")
+            original = persist_thumbnails(
+                analysis,
+                (ThumbnailView(10, original_source, "keep"),),
+            )
+
+            replacement_source = root / "frame_000020.jpg"
+            replacement_source.write_bytes(b"replacement thumbnail")
+            with (
+                patch(
+                    "frame_timing_agent.ui.run_artifacts._write_json_atomic",
+                    side_effect=OSError("disk full"),
+                ),
+                self.assertRaisesRegex(OSError, "disk full"),
+            ):
+                persist_thumbnails(
+                    analysis,
+                    (ThumbnailView(20, replacement_source, "keep"),),
+                )
+
+            loaded = load_persisted_thumbnails(analysis)
+            self.assertEqual(loaded, original)
+            self.assertEqual(loaded[0].path.read_bytes(), b"original thumbnail")
+            self.assertEqual(
+                [path.name for path in analysis.iterdir() if ".staging-" in path.name or ".backup-" in path.name],
+                [],
+            )
 
 
 if __name__ == "__main__":
