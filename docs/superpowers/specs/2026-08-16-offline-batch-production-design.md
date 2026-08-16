@@ -1,670 +1,548 @@
-# Offline Batch Production Design
+# Skill-First Offline Batch Design
 
 Date: 2026-08-16
-Status: Approved design, pending implementation plan
+Status: Revised after complexity review, pending user approval
 
-## 1. Purpose
+## 1. Design Position
 
-Extend Frame Timing Skill from a single-directory analysis tool into a CPU-only,
-offline batch production workflow while preserving the current algorithms,
-single-directory CLI, desktop UI, and Agent-safe lifecycle.
+Frame Timing Skill remains a local Skill with deterministic CLI tools. The
+desktop UI is a human-facing adapter for the same capabilities, not the start of
+a separate production platform.
 
-The first release targets Windows machines without a discrete GPU. A typical
-input directory contains 700 to 1,000 cleaned image frames. The system must
-handle multiple independent frame directories, isolate failures, persist
-progress, require explicit human decisions for quality risks, and make every
-export auditable.
+The batch feature adds one practical capability: process several cleaned frame
+directories in one recoverable session, review obvious risks, and explicitly
+export selected results. It must reuse the existing analysis, report, audit, and
+artifact-health code.
 
-The project should demonstrate capabilities relevant to AI application roles:
+Target workload:
 
-- deterministic tool contracts;
-- resumable task orchestration;
-- explainable quality gates;
-- human-in-the-loop decisions;
-- safe artifact handling;
-- Agent-facing structured interfaces and evals.
+- Windows;
+- CPU-only;
+- local/offline execution;
+- usually 700 to 1,000 frames per directory;
+- one directory processed at a time;
+- tens of directories per manually started batch, not distributed big data.
 
-This is not a distributed big-data platform. It is a local, auditable batch
-pipeline for moderate CPU workloads.
+## 2. Complexity Review
 
-## 2. Goals
+The first design was broader than the project needs. This revision removes the
+following unnecessary work:
 
-The first batch production release shall:
+- no separate `batch/` package with six domain files;
+- no separate `quality/` package with four policy/report files;
+- no three-axis item state machine for execution, review, and export;
+- no immutable-manifest plus mutable-state protocol;
+- no derived-batch concept;
+- no attempt ledger or request-id idempotency subsystem;
+- no persistent `pausing` or `interrupted` status;
+- no speculative two-worker scheduler;
+- no new standalone Agent Eval framework;
+- no UI navigation rail for only two modes;
+- no broad rewrite from the legacy batch pipeline to the newer service
+  lifecycle in this feature.
 
-1. Accept one frame directory, several explicitly selected frame directories,
-   or a root directory containing multiple frame directories.
-2. Discover valid inputs deterministically and deduplicate canonical paths.
-3. Analyze every accepted directory independently on CPU.
-4. Continue processing other items when one item fails.
-5. Persist batch and item state so an interrupted batch can be reopened.
-6. Require the user to click Continue before an interrupted batch resumes.
-7. Separate execution failures from quality review warnings.
-8. Allow a reviewer to approve or retain the review status with an audit note.
-9. Analyze the full batch before any bulk export.
-10. Export only passed or explicitly approved items after user confirmation.
-11. Expose the same batch service through desktop UI and structured CLI
-    adapters without placing business logic in either adapter.
-12. Keep source frame directories read-only and preserve existing
-    single-directory behavior.
+These removals do not weaken the user-visible requirements. They avoid building
+infrastructure for cloud, multi-user, or distributed scenarios that are outside
+the project.
 
-## 3. Non-Goals
+## 3. Existing Capabilities to Reuse
+
+The repository already provides:
+
+- `run_batch_timing_agent`;
+- per-directory failure isolation;
+- JSON and CSV batch summaries;
+- batch human-review and review-dashboard artifacts;
+- batch artifact-health verification;
+- preview and write modes;
+- single-run UI history and atomic history writes;
+- source snapshot checks and transactional UI export;
+- progress callbacks;
+- `frame-timing-batch`, `frame-timing-health`, `frame-timing-tool`, and
+  `frame-timing-ui` entry points.
+
+The new implementation extends these capabilities. It must not create a second
+report format, a second analysis algorithm, or a second strategy planner.
+
+To persist after each item without duplicating the current batch implementation,
+`batch_timing_agent.py` may expose its existing one-item execution and report
+publication steps as internal helpers. The public `run_batch_timing_agent`
+signature and behavior remain unchanged and call those same helpers.
+
+One existing architectural issue affects the work: source snapshot validation
+and the safe export transaction currently live under `ui/`. Batch Skill commands
+must not depend on PySide6, so the pure-Python analysis/export transaction will
+be extracted into one small core workflow and the existing UI worker will
+delegate to it. Its behavior will not be changed.
+
+## 4. Goals
+
+The first release shall:
+
+1. Accept multiple explicitly selected frame directories.
+2. Accept one root directory and discover frame directories below it.
+3. Deduplicate and deterministically order discovered paths.
+4. Analyze each item independently with the existing CPU pipeline.
+5. Save progress after every item.
+6. Show unfinished batches after restart without automatically resuming them.
+7. Resume only after the user or Agent explicitly requests it.
+8. Skip items that already completed successfully.
+9. Distinguish execution failure from a small set of explainable quality risks.
+10. Require explicit approval for quality-risk items before export.
+11. Export only after the full analysis pass and an explicit confirmation.
+12. Preserve the source directories and all existing single-directory behavior.
+
+## 5. Non-Goals
 
 The first release will not include:
 
-- GPU acceleration or a cosmetic CPU/GPU switch;
-- raw video upload, decoding, or frame extraction;
-- cloud execution, remote queues, or user accounts;
-- a database or distributed scheduler;
-- automatic export immediately after analysis;
-- forced cancellation of a directory while its analysis is running;
-- learned quality models or universal image-quality scores;
-- editing individual frame decisions in the batch UI;
-- automatic retry loops without an explicit user or Agent action;
-- unrelated refactors of the existing analysis and strategy algorithms.
+- GPU acceleration or a CPU/GPU selector;
+- raw video decoding or frame extraction;
+- cloud services, database, accounts, permissions, or remote queues;
+- parallel directory processing;
+- forced cancellation during one directory analysis;
+- learned quality models;
+- per-frame manual editing;
+- configurable quality-rule editors;
+- automatic retry or automatic export;
+- general workflow-engine abstractions;
+- replacement of `auto_timing_agent` or core algorithms;
+- unrelated UI redesign outside the batch workspace.
 
-Future GPU support is acceptable only after a learned model or measurable
-compute bottleneck exists and CPU/CUDA benchmark results justify an optional
-runtime such as ONNX Runtime CPU/CUDA.
+## 6. Minimal Architecture
 
-## 4. Existing System Compatibility
-
-The existing lifecycle remains authoritative:
+Only three small core responsibilities are added:
 
 ```text
-analyze -> plan -> validate -> apply -> verify
+batch_discovery.py  -> find and normalize input directories
+batch_session.py    -> persist progress and coordinate existing batch operations
+batch_quality.py    -> summarize two existing risk signals
+run_workflow.py      -> existing source snapshot and safe analysis/export transaction
 ```
 
-The existing `run_batch_timing_agent` behavior, JSON/CSV summaries, artifact
-health checks, human review artifacts, and console scripts remain compatible.
-The current `batch_timing_agent.py` becomes a compatibility adapter over the new
-batch service rather than continuing to accumulate orchestration logic.
-
-The following entry points must continue to work:
-
-- `frame-timing-tool`;
-- `frame-timing-batch`;
-- `frame-timing-health`;
-- `frame-timing-ui`.
-
-Existing analysis contracts and policy calculations are reused. The batch and
-quality layers coordinate those modules; they do not duplicate or reinterpret
-the core algorithm inside UI code.
-
-## 5. Architecture
-
-The implementation is divided into four boundaries:
+The existing modules remain authoritative:
 
 ```text
-Desktop UI / Agent CLI
-        |
-        v
-Batch application service
-        |
-        +---- Batch state and artifact store
-        |
-        +---- Quality evaluator
-        |
-        v
-Existing analyze / plan / validate / apply / verify services
+batch_timing_agent.py     -> item execution and batch reports
+batch_artifact_health.py  -> artifact verification
+auto_timing_agent.py      -> existing analysis pipeline
+ui/worker.py              -> Qt task adapter only
 ```
 
-### 5.1 Batch Domain
+The exact helper names may change during the implementation plan, but the
+following boundaries are required:
 
-Proposed package:
+- no Qt imports in discovery, session, quality, or export core logic;
+- no batch business decisions in widgets;
+- no quality calculations duplicated in UI code;
+- existing public CLI behavior remains compatible.
 
-```text
-scripts/frame_timing_agent/batch/
-  __init__.py
-  models.py
-  discovery.py
-  manifest.py
-  state_store.py
-  runner.py
-  service.py
-```
+### 6.1 Targeted Workflow Extraction
 
-- `models.py` defines typed batch, item, attempt, status, and review contracts.
-- `discovery.py` discovers and canonicalizes frame directories.
-- `manifest.py` creates and validates immutable batch manifests.
-- `state_store.py` owns locking and atomic mutable-state persistence.
-- `runner.py` executes one item at a time and reports progress through callbacks.
-- `service.py` exposes the application operations used by UI and CLI.
+The source-snapshot validation, analysis-time input change check,
+staging-directory apply, output verification, and atomic replacement currently
+implemented under `ui/` will be moved behind pure-Python functions. The current
+single-directory UI and the new batch session will call those functions. UI-only
+thumbnail persistence remains under `ui/`.
 
-The modules may be combined during implementation if the resulting files remain
-small and cohesive. The boundary between domain logic and adapters is mandatory;
-the exact file count is not.
+This is the only planned cross-cutting refactor. It is required so the Skill can
+export safely without importing PySide6. It must be covered by the current UI
+export tests before batch code uses it.
 
-### 5.2 Quality Domain
+## 7. Input Discovery
 
-Proposed package:
+Batch mode supports:
 
-```text
-scripts/frame_timing_agent/quality/
-  __init__.py
-  contracts.py
-  evaluator.py
-  thresholds.py
-  report.py
-```
-
-- `contracts.py` defines structured gate results and decisions.
-- `evaluator.py` evaluates existing analysis and strategy artifacts.
-- `thresholds.py` owns versioned CPU quality policy configuration.
-- `report.py` writes machine-readable and human-readable summaries.
-
-Quality evaluation consumes existing artifacts. It does not alter selected
-sources or claim to independently prove reconstruction quality.
-
-### 5.3 Desktop UI
-
-The desktop UI remains a PySide6 adapter under
-`scripts/frame_timing_agent/ui/`. Batch-specific views are separated from the
-existing single-directory workspace:
-
-```text
-ui/
-  shell.py
-  navigation.py
-  single_workspace.py
-  batch_workspace.py
-  quality_inspector.py
-  theme.py
-```
-
-These names are design guidance, not a requirement to rewrite working widgets.
-Existing UI modules should be extracted only when needed to support the new
-shell without changing current behavior.
-
-### 5.4 Agent Interface
-
-The Agent interface is a thin JSON CLI adapter over the batch application
-service. It must return deterministic schemas, stable error codes, explicit
-state transitions, and artifact paths. It must never infer approval or export
-permission from natural language inside the core service.
-
-## 6. Input Discovery
-
-The UI and CLI support three equivalent input modes:
-
-1. One explicitly selected frame directory.
-2. Multiple explicitly added frame directories, including repeat selection and
-   drag-and-drop in the desktop UI.
-3. One batch root scanned recursively.
-
-Discovery rules:
-
-- A directory named `clean_frames` containing supported images is preferred.
-- A direct child directory containing supported images is accepted when it is
-  not itself an ignored or generated directory.
-- Recursive discovery of named `clean_frames` directories is supported.
-- Hidden directories, output directories, artifact roots, caches, and generated
-  frame directories are ignored.
-- Canonical absolute paths are used for deduplication.
-- If a preferred `clean_frames` directory is found beneath a candidate parent,
-  the parent is not also added as a duplicate frame source.
-- Results are sorted deterministically by normalized path.
-- Discovery reports accepted, duplicate, ignored, and invalid candidates with
-  machine-readable reasons.
-
-Input discovery does not copy or mutate source images.
-
-## 7. State Model
-
-Analysis, quality, and export are represented separately so the UI never treats
-"analysis completed" as "safe and already exported."
-
-### 7.1 Item State
-
-Execution status:
-
-- `pending`: accepted but not started;
-- `running`: currently being analyzed;
-- `passed`: analysis and hard checks completed;
-- `review_required`: analysis completed but quality risks require a decision;
-- `failed`: a hard error prevents completion or export;
-- `interrupted`: the process ended while this item was running.
-
-Review status:
-
-- `not_required`;
-- `pending`;
-- `approved`;
-- `retained_for_review`.
-
-Export status:
-
-- `not_requested`;
-- `eligible`;
-- `exporting`;
-- `exported`;
-- `export_failed`.
-
-An item is export-eligible only when all hard checks pass and either no review is
-required or the current quality result has an explicit approval record.
-
-### 7.2 Batch State
-
-- `ready`: created and not started;
-- `running`: processing items;
-- `pausing`: the current item may finish, but no new item will start;
-- `paused`: stopped at an item boundary;
-- `completed`: all items reached terminal analysis states with no unresolved
-  issues;
-- `completed_with_issues`: all items reached terminal analysis states and at
-  least one item failed or still requires review.
-
-Pause is cooperative and occurs between directories. The first release does not
-kill OpenCV work in progress. Closing the application while an item is running
-causes that item to become `interrupted` on the next open.
-
-### 7.3 Resume and Retry
-
-- Reopening the application lists unfinished batches.
-- No unfinished batch resumes automatically.
-- The user must select a batch and click Continue.
-- On Continue, `interrupted` items become new pending attempts.
-- Successfully completed items are not analyzed again.
-- Retry is explicit and records a new attempt while retaining previous errors.
-- Reopening or retrying never erases review decisions or prior audit records.
-
-## 8. Processing Flow
-
-### 8.1 Create Batch
-
-1. Discover and validate candidate frame directories.
-2. Build an immutable manifest with batch ID, canonical inputs, FPS, config
-   revision, creation time, and input identity data.
-3. Create initial item state records.
-4. Persist the manifest and state before starting work.
-
-Adding input directories after creation produces a new batch or a derived batch;
-the original manifest is never edited in place.
-
-### 8.2 Analyze Batch
-
-1. Acquire the batch writer lock.
-2. Select the next `pending` item in manifest order.
-3. Mark it `running` and persist immediately.
-4. Invoke existing analysis and strategy services.
-5. Validate produced artifacts and run the quality evaluator.
-6. Persist the item result and summary immediately.
-7. Continue to the next item even when the current item fails.
-8. Stop after the current item when pause was requested.
-9. Produce batch JSON, CSV, and Markdown summaries when all work stops.
-
-The first release defaults to one worker. A two-worker option may be considered
-only after benchmark and state-store tests show a useful throughput gain without
-excessive CPU, memory, or disk pressure.
-
-### 8.3 Review Batch
-
-After analysis, the reviewer sees all failed and `review_required` items in one
-queue. For each quality warning, the UI shows the measured value, policy
-threshold, affected frames or intervals, and explanation.
-
-The reviewer may:
-
-- approve the current quality result for export;
-- retain `review_required` without approval;
-- add or update an audit note.
-
-Approval is tied to the input digest, analysis artifact digest, quality policy
-revision, and quality result digest. Re-analysis or input changes invalidate the
-approval.
-
-### 8.4 Export Batch
-
-1. The user clicks Export all passed.
-2. The UI shows the eligible, unresolved, and failed counts.
-3. The user confirms the export operation.
-4. Each eligible item is revalidated against its source and approved artifacts.
-5. Existing apply and verify services write to a staging output directory.
-6. Verified output replaces or becomes the final `output_frames` directory.
-7. Export status and verification evidence are persisted per item.
-
-The system never exports failed, unresolved, stale, or unverified items. One
-export failure does not invalidate exports that already completed successfully.
-
-## 9. Quality Gates
-
-Quality gates are explainable rules over existing artifacts. They are divided
-into hard blockers and review warnings.
-
-### 9.1 Hard Blockers
-
-Examples include:
-
-- source directory missing or empty;
-- unreadable frame files;
-- inconsistent frame dimensions where the existing analyzer cannot proceed;
-- invalid or duplicate source indices;
-- invalid FPS;
-- output path overlapping the source directory;
-- source digest changed after analysis;
-- required artifact missing, invalid, or digest-mismatched;
-- apply or output verification failure.
-
-A hard blocker sets the item to `failed` and prevents export.
-
-### 9.2 Review Warnings
-
-Technical image warnings may include:
-
-- high blur candidate ratio;
-- excessive underexposure or overexposure;
-- low contrast distribution;
-- high near-duplicate ratio;
-- insufficient usable-frame count.
-
-Reconstruction coverage warnings may include:
-
-- low motion-confidence coverage;
-- long static intervals;
-- excessive extreme-motion coverage;
-- many `review_required` intervals;
-- suspicious retention ratio;
-- excessive source-index or time gap;
-- insufficient active-motion or protected-endpoint coverage.
-
-Thresholds must combine interpretable measurements rather than a single
-universal sharpness cutoff. Depending on the metric, evaluation may use:
-
-- absolute values;
-- within-directory percentiles;
-- affected-frame ratios;
-- longest continuous affected interval.
-
-Each gate returns a structured result:
-
-```json
-{
-  "code": "quality.blur_ratio_high",
-  "severity": "warning",
-  "value": 0.31,
-  "threshold": 0.25,
-  "affected_frames": [12, 13, 14],
-  "decision": "review_required",
-  "message": "Blur candidates exceed the configured frame ratio."
-}
-```
-
-Codes and fields are stable machine contracts. Human messages may be localized
-without changing decisions.
-
-## 10. Persistence and Artifact Layout
-
-Each batch uses an isolated artifact root:
-
-```text
-output/frame_timing_batches/<batch_id>/
-  batch_manifest.json
-  batch_state.json
-  batch_report.json
-  batch_report.csv
-  batch_report.md
-  logs/
-  items/<safe-name-hash>/
-    analysis/
-    quality.json
-    review.json
-    output_frames/
-```
+1. Repeated folder selection or drag-and-drop of explicit frame directories.
+2. Recursive discovery below one selected root.
 
 Rules:
 
-- `batch_manifest.json` is immutable after creation.
-- `batch_state.json` is mutable and written atomically through temporary file,
-  flush, and replace semantics.
-- Only one process may hold the writer lock for a batch.
-- Every state transition is persisted before the next item starts.
-- Item directories use a readable safe name plus a short canonical-path hash to
-  avoid collisions.
-- Source identity and artifact digests bind analysis, review, and export.
-- Output is staged and verified before becoming final.
-- Logs may contain paths, counters, durations, codes, and exceptions, but never
-  image bytes or secrets.
-- Source images remain read-only and byte-identical.
+- Explicitly selected directories are accepted when they contain supported
+  frame images.
+- Recursive discovery prefers directories named `clean_frames`.
+- Direct child directories containing supported images are also accepted.
+- Hidden, cache, artifact, `output`, and `output_frames` directories are ignored.
+- Canonical absolute paths are used for deduplication.
+- A parent candidate is not added when its preferred child `clean_frames` is
+  already selected.
+- Results are sorted by normalized path.
+- Invalid and ignored candidates return short reason codes for UI and CLI.
 
-If atomic replacement is unavailable because of filesystem or permission
-constraints, the operation fails with an explicit persistence error instead of
-falling back to a partial write.
+Discovery only reads directory metadata. It does not copy or decode all images.
+The existing frame loader remains responsible for strict input validation.
 
-## 11. Application Service Contract
+## 8. Batch Session
 
-The non-Qt, non-LLM service exposes operations equivalent to:
+Each batch stores one atomic state document inside the existing batch artifact
+root:
 
 ```text
-discover(request) -> DiscoveryResult
-create_batch(request) -> BatchSnapshot
-run_batch(batch_id, progress_callback) -> BatchSnapshot
-inspect_batch(batch_id) -> BatchSnapshot
-resume_batch(batch_id, progress_callback) -> BatchSnapshot
-retry_items(batch_id, item_ids) -> BatchSnapshot
-record_review(batch_id, item_id, decision, note) -> ItemSnapshot
-export_items(batch_id, item_ids, progress_callback) -> ExportSummary
+<artifact_root>/
+  analysis/
+    batch_state.json
+    batch_summary.json
+    batch_summary.csv
+    human_review.md
+    review_dashboard.md
+    maintenance_report.json
+    maintenance_report.md
+  <existing-item-name>/
+    analysis/
+    output_frames/        # only after explicit export
 ```
 
-Callbacks are optional typed events and contain no Qt objects. Cancellation is a
-cooperative request to pause at the next item boundary.
+This preserves the current artifact layout. There is no new `items/` hierarchy,
+duplicate report set, or separate manifest file.
 
-All mutating calls validate allowed state transitions. Invalid transitions
-return stable error codes and leave persisted state unchanged.
+`batch_state.json` contains:
 
-## 12. Agent CLI and Skill Contract
+- schema version;
+- batch ID and creation/update times;
+- FPS and existing analysis options;
+- ordered item path, safe item name, and optional source snapshot identity after
+  analysis;
+- item status, progress, last error, retry count, risk summary, approval note,
+  and output path when exported;
+- batch status and pause request.
 
-The structured CLI will provide operations equivalent to:
+State writes use the same temporary-file and replace approach already used by UI
+history. A small standard-library lock file prevents two processes from running
+the same batch concurrently. Multi-user locking and distributed leases are out
+of scope.
+
+### 8.1 Statuses
+
+Batch status has four values:
+
+- `ready`;
+- `running`;
+- `paused`;
+- `finished`.
+
+Item status has five values:
+
+- `pending`;
+- `running`;
+- `completed`;
+- `review_required`;
+- `failed`.
+
+Export is not another state machine. An item is exported when a verified
+`output_frames` path and execution audit exist. Aggregate counts such as
+"finished with issues" are derived from item statuses rather than persisted as
+additional statuses.
+
+### 8.2 Pause, Restart, and Retry
+
+- Pause means finish the current directory and do not start the next one.
+- The pause request may be persisted as a boolean; `pausing` is not a status.
+- On application restart, a persisted `running` item is reset to `pending` and
+  its retry count is incremented.
+- The UI lists the unfinished batch and waits for Continue.
+- Continue processes only `pending` items.
+- A failed item is retried only after an explicit Retry action.
+- Successful and review-required analyses are not repeated.
+- The first release retains only retry count and last error, not a full attempt
+  history.
+
+## 9. Processing Flow
+
+### 9.1 Create
+
+1. Discover or accept explicit directories.
+2. Validate that at least one unique candidate exists.
+3. Allocate the existing batch artifact root and safe item names.
+4. Atomically write `batch_state.json` with all items pending.
+
+Creation does not hash every frame. Source snapshots are captured immediately
+before and after each item's actual analysis by the extracted workflow, avoiding
+an extra full read of the entire batch.
+
+The item list is fixed after Start. To add directories, the user creates another
+batch. There is no derived-batch model.
+
+### 9.2 Analyze
+
+1. Mark the next item running and persist state.
+2. Run the extracted analysis workflow in preview mode (`write=False`), including
+   the existing before/after source snapshot check.
+3. Publish the existing per-item artifacts.
+4. Evaluate the minimal risk summary.
+5. Mark the item completed, review-required, or failed and persist state.
+6. Refresh the existing batch summary and review artifacts.
+7. Continue after an item failure.
+8. Stop at the next item boundary when pause is requested.
+
+The coordinator runs one directory at a time. No worker-count option is exposed.
+
+### 9.3 Review
+
+After all analysis items stop, the UI highlights failed and review-required
+items. A reviewer can:
+
+- approve a review-required item for export;
+- leave it unresolved;
+- add a short note.
+
+Approval is valid only while the saved source snapshot and strategy identity
+still match. Existing snapshot verification runs again before export. No new
+general approval-policy engine is introduced.
+
+### 9.4 Export
+
+1. After the batch reaches `finished`, the user clicks Export eligible results.
+2. The UI shows eligible, unresolved, and failed counts.
+3. The user confirms.
+4. The extracted core export helper verifies the source snapshot, uses a staging
+   directory, applies the existing strategy, audits the output, and replaces the
+   final output only after verification.
+5. State and existing batch reports are refreshed after each item.
+
+Eligible means `completed`, or `review_required` with explicit approval. Failed,
+unresolved, changed-source, and verification-failed items are skipped and
+reported. Export never starts automatically after analysis.
+
+## 10. Minimal Quality Review
+
+The first release does not attempt to score reconstruction quality. It exposes
+only risk signals already computed by the current pipeline:
+
+1. `bad_quality_candidate` ratio from `frame_metrics.csv`.
+2. Presence and extent of `low_motion_review` segments from `segments.json`.
+
+Default review rules:
+
+- mark review-required when bad-quality candidates are at least 10% of analyzed
+  frames;
+- mark review-required when one or more `low_motion_review` segments exist.
+
+The 10% default is a transparent product threshold, not a claim of universal
+image-quality validity. It will be a named constant with focused tests. Changing
+it in the first release requires code/config review, not an end-user rule editor.
+
+Each warning contains:
+
+- stable code;
+- measured value;
+- threshold when applicable;
+- affected frame count or source range;
+- short explanation.
+
+Input errors and artifact-health failures remain hard failures. Other metrics
+such as exposure percentiles, duplicate detection, retention risk, or learned
+quality models are deferred until real batch results show they are needed.
+
+## 11. Skill and CLI Surface
+
+The existing `frame-timing-batch` command remains compatible. The Agent-safe
+surface adds only the actions needed by the Skill:
 
 ```text
-frame-timing-tool batch discover
 frame-timing-tool batch create
 frame-timing-tool batch run
 frame-timing-tool batch status
-frame-timing-tool batch resume
-frame-timing-tool batch retry
-frame-timing-tool batch review
+frame-timing-tool batch approve
 frame-timing-tool batch export
 ```
 
-Requirements:
+`create` accepts explicit directories or a discovery root. `run` starts or
+explicitly continues an existing batch; it accepts selected failed item IDs when
+an explicit retry is requested. A separate discovery command, resume alias,
+review-policy command, and request-id subsystem are not required in the first
+release.
 
-- JSON input and output schemas are versioned.
-- Successful responses contain IDs, current states, artifact paths, and next
-  allowed actions.
-- Failures contain stable error codes, a human message, and retryability.
-- Destructive or irreversible actions require explicit arguments.
-- `review approve` and `export` are distinct operations.
-- The Agent cannot silently bypass a quality warning or verification failure.
-- Repeating a read operation is idempotent; repeating a mutating request with
-  the same request ID must not create duplicate attempts or exports.
+Responses reuse the existing JSON envelope:
 
-The Skill documentation teaches an Agent to inspect state, present unresolved
-quality findings, request human approval when required, and export only after an
-explicit instruction.
+```text
+schema_version, status, run_id, artifacts, result, error
+```
 
-## 13. Desktop UI Design
+The result includes batch/item statuses, risk summaries, progress counts, and
+allowed next actions. Stable error codes distinguish invalid input, busy batch,
+analysis failure, stale source, unsafe export, and artifact-health failure.
 
-The main window has two equal-level modes:
+The Skill instructions remain short:
+
+1. create or inspect the batch;
+2. run or explicitly resume it;
+3. report failures and review warnings;
+4. request human approval where needed;
+5. export only after explicit instruction;
+6. report artifact paths and final counts.
+
+Agent behavior is tested through normal pytest CLI contract tests. No separate
+eval service or framework is added.
+
+## 12. Desktop UI
+
+The current window gains a same-level mode switch:
 
 - Single Directory;
 - Batch Processing.
 
-The batch mode uses a compact task-workspace layout inspired by modern developer
-tools, without copying product branding:
+The existing single-directory workspace remains unchanged. Batch mode uses a
+compact two-column task workspace:
 
 ```text
-Narrow navigation | Batch/task list | Main analysis workspace | Quality inspector
+Batch item list | Selected item detail and actions
 ```
 
-Visual rules:
+There is no navigation rail, separate settings page, or multi-page dashboard in
+the first release.
 
-- light neutral background;
-- one-pixel separators instead of stacked decorative cards;
-- 4 to 6 pixel radius for framed controls;
-- low-saturation surfaces;
-- blue reserved for selection and primary actions;
-- green, amber, and red used only for state;
-- compact typography and stable row heights;
-- icons from the existing UI icon system where available;
-- no marketing hero, oversized headings, decorative gradients, or nested cards.
+### 12.1 Batch List
 
-### 13.1 Batch List
+The list shows:
 
-The task list shows batch progress, item name, state, warning count, export state,
-duration, and retry availability. It supports status filters and selects one item
-without opening a separate modal workflow.
+- directory name;
+- pending/running/completed/review/failed status;
+- item progress;
+- warning count;
+- exported indicator.
 
-### 13.2 Main Workspace
+The header shows overall completed count and the current item. Status filtering,
+sorting controls, and bulk row editing are deferred.
 
-Selecting an item reuses the existing single-directory analysis presentation:
-time-series chart, representative frames, strategy summary, and artifacts. A
-Back to batch action returns to the aggregate view without losing current batch
-state.
+### 12.2 Selected Item
 
-### 13.3 Quality Inspector
+The detail area reuses existing result components where practical:
 
-The right inspector lists hard errors and quality warnings with measured values,
-thresholds, affected ranges, and audit history. It contains explicit Approve and
-Keep for review actions plus a note field. Approval is disabled for hard errors
-or stale results.
+- time-series chart;
+- representative frames;
+- strategy summary;
+- output/artifact paths.
 
-### 13.4 Batch Actions
+For a review-required item it also shows the two supported risk explanations,
+an approval action, and an optional note. It does not provide per-frame strategy
+editing.
 
-The persistent command area includes:
+### 12.3 Actions
+
+Batch mode exposes only:
 
 - Add directories;
-- Discover from root;
-- Start analysis;
+- Discover root;
+- Start;
 - Pause after current item;
 - Continue;
-- Retry selected failures;
-- Export all passed;
+- Retry selected failure;
+- Export eligible results;
 - Open batch artifacts.
 
-Buttons are enabled from state, not appearance. Export all passed always opens a
-confirmation summary and never starts automatically when analysis finishes.
+Actions are enabled from persisted state. Closing and reopening the application
+must display an unfinished batch but must not start it.
 
-## 14. Error Handling
+The visual style follows the already selected compact developer-tool direction:
+light neutral surfaces, one-pixel separators, small radii, restrained blue
+emphasis, and status colors only for state. This feature does not trigger another
+full redesign of the existing single-directory UI.
 
-- An item error is recorded and processing continues with the next item.
-- Disk-full, permission, lock, invalid-input, source-changed, and artifact-health
-  failures use distinct error codes.
-- A process restart converts persisted `running` items to `interrupted` during
-  recovery inspection.
-- An unfinished batch is displayed on startup but remains idle until Continue.
-- Retry records attempt number, start/end time, error, and outcome.
-- Quality warnings are not represented as exceptions or execution failures.
-- Verification failures prevent final export and retain staging diagnostics.
-- UI errors show a concise message and a link to the relevant batch artifact or
-  log; they do not expose raw tracebacks by default.
+## 13. Error Handling
 
-## 15. Testing Strategy
+- One item failure does not stop later items.
+- Errors are stored as safe code plus concise message.
+- A running item found after restart becomes pending for explicit resume.
+- A busy lock returns a clear error instead of starting a second runner.
+- Source changes invalidate approval and block export.
+- Export verification failure leaves the previous valid output untouched.
+- UI shows the batch artifact location for diagnosis and does not display raw
+  tracebacks by default.
 
-### 15.1 Unit Tests
+## 14. File Scope
 
-- discovery acceptance, ignore rules, precedence, sorting, and deduplication;
-- legal and illegal state transitions;
-- export eligibility rules;
-- quality gate boundary values and affected intervals;
-- manifest immutability and digest binding;
-- atomic state writes and lock behavior;
-- review invalidation after source or artifact changes;
-- JSON schema serialization and stable error codes.
+Expected new files are limited to approximately:
 
-### 15.2 Integration Tests
+```text
+scripts/frame_timing_agent/batch_discovery.py
+scripts/frame_timing_agent/batch_session.py
+scripts/frame_timing_agent/batch_quality.py
+scripts/frame_timing_agent/run_workflow.py
+scripts/frame_timing_agent/ui/batch_workspace.py
+```
 
-- temporary image directories covering single, explicit-multiple, and recursive
-  discovery modes;
-- a mixed batch where one item fails and later items still complete;
-- pause after current item and explicit resume;
-- simulated crash recovery from `running` to `interrupted`;
-- retry without repeating successful items;
-- staged apply and verify with source-byte comparison;
-- explicit approval followed by export;
-- stale approval rejected after input change;
-- existing `frame-timing-batch` compatibility behavior.
+Batch UI background work reuses the existing generic `ui.worker.create_task`
+adapter and its single-thread pool. A batch-specific Qt worker is unnecessary.
 
-### 15.3 UI Tests
+Expected modified files include:
 
-- Qt offscreen startup for both modes;
-- unfinished-batch prompt without automatic resume;
-- list selection and inspector binding;
-- state-driven button enablement;
-- review and export confirmation flows;
-- no business decision reconstructed in UI tests.
+```text
+scripts/frame_timing_agent/batch_timing_agent.py
+scripts/frame_timing_agent/tool_cli.py
+scripts/frame_timing_agent/ui/main_window.py
+scripts/frame_timing_agent/ui/run_artifacts.py
+scripts/frame_timing_agent/ui/worker.py
+README.md
+SKILL.md
+```
 
-### 15.4 Agent Evals
+The implementation plan must justify any additional production module. Tests do
+not count against this limit. Large rewrites of existing modules are rejected.
 
-Eval scenarios verify that an Agent:
+## 15. Testing
 
-- discovers and creates a batch from valid requests;
-- reports partial failures without claiming total success;
-- does not resume, approve, retry, or export without the required instruction;
-- surfaces quality warnings and asks for human decisions;
-- resumes interrupted work without reprocessing passed items;
-- rejects stale artifacts and explains the next allowed action;
-- produces parseable schema-compliant outputs.
+Focused tests cover:
+
+- explicit and recursive discovery, ignores, ordering, and deduplication;
+- atomic state persistence and busy-lock rejection;
+- one failure not stopping later items;
+- pause at an item boundary;
+- restart recovery and explicit continue;
+- successful items not being repeated;
+- the two quality-warning rules and threshold boundaries;
+- approval invalidation after source change;
+- explicit export and staging verification;
+- existing batch CLI compatibility;
+- Agent-safe JSON command contracts;
+- Qt offscreen batch-mode smoke and state-driven actions;
+- source frame bytes remaining unchanged.
+
+The full existing suite must remain green. Agent scenarios are ordinary tests,
+not a new testing framework.
 
 ## 16. Delivery Order
 
-Implementation is split into five reviewable increments:
+Implementation is divided into three increments:
 
-1. Batch domain core: discovery, manifest, persisted state, runner, resume, retry.
-2. Quality gates: structured rules, reports, review decisions, export eligibility.
-3. Agent-safe interface: JSON CLI operations, compatibility adapter, schemas.
-4. Desktop UI shell: mode switch, task list, main workspace, quality inspector,
-   explicit batch actions.
-5. Skill and evals: Agent workflow documentation and deterministic scenarios.
+1. **Batch session core:** extract the pure-Python analysis workflow, then add
+   discovery, state, sequential run, pause/resume, and compatibility tests.
+2. **Review and export:** two quality signals, approval, extracted safe export,
+   and Agent-safe commands.
+3. **Batch UI and documentation:** mode switch, list/detail workspace, unfinished
+   batch reopening, README screenshot, and concise Skill instructions.
 
-Each increment must preserve the baseline test suite and add focused tests before
-the next increment begins.
+Each increment is independently reviewable and keeps existing behavior working.
 
 ## 17. Acceptance Criteria
 
-The release is accepted when all of the following are demonstrated on a CPU-only
-Windows machine:
+The release is accepted when:
 
-1. Single, explicit-multiple, and recursive-root inputs produce deterministic,
-   deduplicated item lists.
-2. In a 16-item batch, one invalid item fails without stopping the other 15.
-3. Closing during analysis leaves a recoverable unfinished batch.
-4. Reopening shows that batch and waits for an explicit Continue action.
-5. Continue does not repeat successfully completed items.
-6. Quality risks become `review_required` with measurements and explanations.
-7. Export never starts automatically and requires user confirmation.
-8. Only passed or explicitly approved, freshly validated items are exported.
-9. Every export can be traced to input identity, analysis artifacts, quality
-   results, review decision, and output verification.
-10. Existing single-directory CLI, Skill flow, and desktop UI remain functional.
+1. Explicit multiple directories and recursive root discovery produce the same
+   deterministic item model.
+2. One invalid item does not stop the rest of a local batch.
+3. Progress is saved after every item.
+4. Closing and reopening shows unfinished work without automatically resuming.
+5. Explicit Continue skips successful items.
+6. Only the two documented existing-signal rules cause quality review.
+7. Export requires explicit confirmation and skips unresolved or failed items.
+8. Source changes or verification failures block export without replacing a
+   previous valid output.
+9. The Skill receives structured status, risks, next actions, and artifact paths.
+10. Existing single-directory UI and all current CLI entry points remain usable.
 
-## 18. Risks and Controls
+## 18. Deferred Work
 
-- **Overclaiming reconstruction quality:** label rules as risk indicators, retain
-  human review, and avoid a universal quality score.
-- **UI and service divergence:** make the typed batch service the only source of
-  state and allowed actions.
-- **Corrupt resume state:** use a single writer lock, atomic replacement, and
-  recovery tests with fault injection.
-- **CPU resource saturation:** default to one worker and benchmark before adding
-  concurrency.
-- **Artifact collisions:** isolate each item by safe name plus path hash.
-- **Stale approval:** bind approval to source, analysis, policy, and quality
-  digests.
-- **Scope growth:** defer GPU, video decoding, database, cloud execution, and
-  per-frame editing.
+The following work requires evidence from real batch use before design begins:
 
-## 19. Documentation Outcome
+- more quality rules;
+- learned quality models;
+- GPU acceleration;
+- parallel item workers;
+- database-backed history;
+- per-frame manual strategy editing;
+- batch comparison dashboards;
+- cloud or remote execution.
 
-When implementation is complete, README updates should describe:
-
-- the CPU-only offline batch use case;
-- supported input modes;
-- the review and explicit export workflow;
-- resume behavior;
-- CLI and desktop UI launch commands;
-- artifact layout and safety guarantees;
-- an actual batch UI screenshot;
-- a concise Agent Skill example and eval summary.
-
-The public positioning should be accurate: "CPU-only offline batch and
-Agent-safe frame quality analysis pipeline," not a generic large-scale video
-platform.
+The public description remains accurate and modest: a CPU-only offline Frame
+Timing Skill with a desktop UI, recoverable batch sessions, explainable risk
+flags, and verified export.
