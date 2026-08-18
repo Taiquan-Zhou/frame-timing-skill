@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
+from typing import Any, Callable, TypeAlias, cast
 import csv
 import hashlib
 import io
@@ -19,6 +19,7 @@ from frame_timing_agent.strategy_execution_audit import audit_strategy_execution
 SNAPSHOT_VERSION = 1
 INPUT_SNAPSHOT_NAME = "input_snapshot.json"
 ProgressCallback = Callable[[int, str], None]
+JsonDict: TypeAlias = dict[str, Any]
 
 
 @dataclass(frozen=True)
@@ -33,10 +34,10 @@ def capture_input_snapshot(
     frame_dir: Path | str,
     fps: float,
     limit_first_n: int | None,
-) -> dict:
+) -> JsonDict:
     resolved_frame_dir = Path(frame_dir).expanduser().resolve()
     records = load_frame_records(resolved_frame_dir, fps=fps, limit_first_n=limit_first_n)
-    frames = []
+    frames: list[JsonDict] = []
     for record in records:
         path = record.path.expanduser().resolve()
         frames.append(
@@ -58,19 +59,19 @@ def capture_input_snapshot(
     }
 
 
-def write_input_snapshot(analysis_dir: Path | str, snapshot: dict) -> Path:
+def write_input_snapshot(analysis_dir: Path | str, snapshot: JsonDict) -> Path:
     path = Path(analysis_dir) / INPUT_SNAPSHOT_NAME
     _write_json_atomic(path, snapshot)
     return path
 
 
-def bind_strategy_snapshot(snapshot: dict, strategy_path: Path | str) -> dict:
+def bind_strategy_snapshot(snapshot: JsonDict, strategy_path: Path | str) -> JsonDict:
     bound = dict(snapshot)
     bound["strategy_sha256"] = _file_sha256(Path(strategy_path))
     return bound
 
 
-def load_bound_strategy(analysis_dir: Path | str) -> dict:
+def load_bound_strategy(analysis_dir: Path | str) -> JsonDict:
     analysis_dir = Path(analysis_dir)
     snapshot = _read_snapshot(analysis_dir)
     expected_hash = snapshot.get("strategy_sha256")
@@ -84,9 +85,12 @@ def load_bound_strategy(analysis_dir: Path | str) -> dict:
     if hashlib.sha256(payload).hexdigest() != expected_hash:
         raise ValueError("analysis strategy changed since analysis; run analysis again before exporting")
     try:
-        return json.loads(payload.decode("utf-8"))
+        strategy = json.loads(payload.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise ValueError(f"analysis strategy is invalid: {strategy_path}: {exc}") from exc
+    if not isinstance(strategy, dict):
+        raise ValueError(f"analysis strategy is invalid: {strategy_path}: expected a JSON object")
+    return cast(JsonDict, strategy)
 
 
 def verify_input_snapshot(
@@ -137,6 +141,7 @@ def analyze_run(
     settings: RunSettings,
     progress_callback: ProgressCallback | None = None,
 ) -> TimingAgentResult:
+    _validate_run_path_safety(settings)
     before = capture_input_snapshot(settings.frame_dir, settings.fps, settings.limit_first_n)
     result = run_timing_agent(
         frames=settings.frame_dir,
@@ -158,6 +163,7 @@ def export_run(
     settings: RunSettings,
     progress_callback: ProgressCallback | None = None,
 ) -> TimingAgentResult:
+    _validate_run_path_safety(settings)
     analysis_dir = settings.artifact_dir / "analysis"
     _report(progress_callback, 2, "正在校验分析快照")
     verify_input_snapshot(analysis_dir, settings.frame_dir, settings.fps, settings.limit_first_n)
@@ -178,7 +184,8 @@ def export_run(
         verify_output_snapshot(analysis_dir, staging_dir)
         audit = audit_strategy_execution(records, strategy, staging_dir, fps=settings.fps)
         if audit.get("status") != "ok":
-            raise ValueError("output verification failed")
+            raise ValueError(f"output verification failed: {'; '.join(audit.get('errors', []))}")
+        _validate_run_path_safety(settings)
         replace_verified_output(staging_dir, output_dir, analysis_dir, audit)
     finally:
         shutil.rmtree(staging_dir, ignore_errors=True)
@@ -191,7 +198,29 @@ def export_run(
     )
 
 
-def replace_verified_output(staging_dir: Path, output_dir: Path, analysis_dir: Path, audit: dict) -> None:
+def _validate_run_path_safety(settings: RunSettings) -> None:
+    frame_dir = settings.frame_dir.expanduser().resolve()
+    artifact_dir = settings.artifact_dir.expanduser().resolve()
+    if (
+        frame_dir == artifact_dir
+        or frame_dir.is_relative_to(artifact_dir)
+        or artifact_dir.is_relative_to(frame_dir)
+    ):
+        raise ValueError("artifact directory must not overlap the input frame directory")
+    for child_name in ("analysis", "output_frames"):
+        write_path = settings.artifact_dir / child_name
+        resolved_write_path = write_path.expanduser().resolve()
+        if not resolved_write_path.is_relative_to(artifact_dir):
+            raise ValueError("artifact write path must stay inside the artifact directory")
+        if (
+            resolved_write_path == frame_dir
+            or resolved_write_path.is_relative_to(frame_dir)
+            or frame_dir.is_relative_to(resolved_write_path)
+        ):
+            raise ValueError("artifact write path must not overlap the input frame directory")
+
+
+def replace_verified_output(staging_dir: Path, output_dir: Path, analysis_dir: Path, audit: JsonDict) -> None:
     audit_staging_dir = analysis_dir.parent / f".execution_audit.export-{uuid.uuid4().hex}"
     try:
         write_execution_audit(audit, audit_staging_dir)
@@ -217,13 +246,29 @@ def _replace_output_directory(
         if commit_metadata is not None:
             commit_metadata()
     except Exception:
-        if output_dir.exists():
-            shutil.rmtree(output_dir)
-        if backup_dir.exists() and not output_dir.exists():
-            backup_dir.rename(output_dir)
+        _restore_output_backup(output_dir, backup_dir)
         raise
     if backup_dir.exists():
         shutil.rmtree(backup_dir, ignore_errors=True)
+
+
+def _restore_output_backup(output_dir: Path, backup_dir: Path) -> None:
+    failed_dir = output_dir.with_name(f".{output_dir.name}.failed-{uuid.uuid4().hex}")
+    had_previous_output = backup_dir.exists()
+    moved_failed_output = False
+    if output_dir.exists():
+        output_dir.rename(failed_dir)
+        moved_failed_output = True
+    try:
+        if backup_dir.exists():
+            backup_dir.rename(output_dir)
+    except Exception:
+        if moved_failed_output and failed_dir.exists() and not output_dir.exists():
+            failed_dir.rename(output_dir)
+        raise
+    finally:
+        if moved_failed_output and (not had_previous_output or output_dir.exists()):
+            shutil.rmtree(failed_dir, ignore_errors=True)
 
 
 def _replace_execution_audit(staging_dir: Path, analysis_dir: Path) -> None:
@@ -238,15 +283,28 @@ def _replace_execution_audit(staging_dir: Path, analysis_dir: Path) -> None:
         for name in names:
             (staging_dir / name).rename(analysis_dir / name)
     except Exception:
+        failed_dir = analysis_dir / f".execution_audit.failed-{uuid.uuid4().hex}"
+        failed_dir.mkdir()
+        recovery_error: Exception | None = None
         for name in names:
             target = analysis_dir / name
             backup = backup_dir / name
             if target.exists():
-                target.unlink()
+                try:
+                    target.rename(failed_dir / name)
+                except Exception as error:
+                    recovery_error = recovery_error or error
             if backup.exists():
-                backup.rename(target)
+                try:
+                    backup.rename(target)
+                except Exception as error:
+                    recovery_error = recovery_error or error
+        if recovery_error is not None:
+            raise recovery_error
+        shutil.rmtree(failed_dir, ignore_errors=True)
+        shutil.rmtree(backup_dir, ignore_errors=True)
         raise
-    finally:
+    else:
         shutil.rmtree(backup_dir, ignore_errors=True)
 
 
@@ -271,7 +329,7 @@ def _map_progress(
     return report
 
 
-def _write_json_atomic(path: Path, payload: dict) -> None:
+def _write_json_atomic(path: Path, payload: JsonDict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
     try:
@@ -281,7 +339,7 @@ def _write_json_atomic(path: Path, payload: dict) -> None:
         temporary.unlink(missing_ok=True)
 
 
-def _read_snapshot(analysis_dir: Path) -> dict:
+def _read_snapshot(analysis_dir: Path) -> JsonDict:
     path = analysis_dir / INPUT_SNAPSHOT_NAME
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
@@ -291,7 +349,7 @@ def _read_snapshot(analysis_dir: Path) -> dict:
         raise ValueError(f"analysis input snapshot is invalid: {path}: {exc}") from exc
     if not isinstance(payload, dict):
         raise ValueError(f"analysis input snapshot is invalid: {path}")
-    return payload
+    return cast(JsonDict, payload)
 
 
 def _file_sha256(path: Path) -> str:

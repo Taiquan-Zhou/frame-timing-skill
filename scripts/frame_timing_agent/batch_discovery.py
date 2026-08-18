@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import stat
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
@@ -40,10 +41,16 @@ def discover_frame_directories(
             issues.append(DiscoveryIssue(path, "invalid_missing"))
         elif not path.is_dir():
             issues.append(DiscoveryIssue(path, "invalid_not_directory"))
-        elif not _contains_supported_frames(path):
-            issues.append(DiscoveryIssue(path, "invalid_no_frames"))
         else:
-            frame_dirs.add(path)
+            try:
+                has_frames = _contains_supported_frames(path)
+            except OSError:
+                issues.append(DiscoveryIssue(path, "invalid_unreadable"))
+            else:
+                if has_frames:
+                    frame_dirs.add(path)
+                else:
+                    issues.append(DiscoveryIssue(path, "invalid_no_frames"))
 
     if root is not None:
         root_path = _canonical_path(root)
@@ -62,7 +69,7 @@ def discover_frame_directories(
 
 
 def _discover_from_root(root: Path, frame_dirs: set[Path], issues: list[DiscoveryIssue]) -> None:
-    candidates = _root_candidates(root)
+    candidates = _root_candidates(root, issues)
     explicit_paths = set(frame_dirs)
 
     for candidate in candidates:
@@ -81,34 +88,64 @@ def _apply_preferred_child_precedence(frame_dirs: set[Path], issues: list[Discov
         candidate
         for candidate in frame_dirs
         if candidate.name.casefold() != _CLEAN_FRAMES_NAME
-        and any(preferred_path != candidate and preferred_path.is_relative_to(candidate) for preferred_path in preferred)
+        and any(preferred_path.parent == candidate for preferred_path in preferred)
     }
     for candidate in superseded:
         frame_dirs.remove(candidate)
         issues.append(DiscoveryIssue(candidate, "superseded_by_clean_frames"))
 
 
-def _root_candidates(root: Path) -> list[Path]:
+def _root_candidates(root: Path, issues: list[DiscoveryIssue]) -> list[Path]:
     candidates: set[Path] = set()
-    if _contains_supported_frames(root):
-        candidates.add(root)
 
-    for path in root.rglob("*"):
-        if not path.is_dir() or not _contains_supported_frames(path):
+    def record_walk_error(error: OSError) -> None:
+        if error.filename:
+            issues.append(DiscoveryIssue(Path(error.filename).absolute(), "unreadable_directory"))
+
+    for current_raw, directory_names, _file_names in os.walk(root, topdown=True, onerror=record_walk_error):
+        current = Path(current_raw)
+        retained_names: list[str] = []
+        for directory_name in directory_names:
+            child = current / directory_name
+            ignored_code = _ignored_code(child.relative_to(root).parts)
+            if ignored_code is not None:
+                issues.append(DiscoveryIssue(child, ignored_code))
+            elif _is_directory_link(child):
+                issues.append(DiscoveryIssue(child, "ignored_link"))
+            else:
+                retained_names.append(directory_name)
+        directory_names[:] = retained_names
+
+        if current == root:
             continue
-        if path.name.casefold() == _CLEAN_FRAMES_NAME or path.parent == root:
-            candidates.add(_canonical_path(path))
+        if current.name.casefold() == _CLEAN_FRAMES_NAME or current.parent == root:
+            try:
+                has_frames = _contains_supported_frames(current)
+            except OSError:
+                issues.append(DiscoveryIssue(_canonical_path(current), "unreadable_directory"))
+            else:
+                if has_frames:
+                    candidates.add(_canonical_path(current))
     return sorted(candidates, key=_sort_key)
 
 
-def _contains_supported_frames(path: Path) -> bool:
+def _is_directory_link(path: Path) -> bool:
+    if path.is_symlink():
+        return True
     try:
-        return any(
-            entry.is_file() and entry.suffix.casefold() in SUPPORTED_EXTENSIONS
-            for entry in path.iterdir()
-        )
+        attributes = path.lstat().st_file_attributes
+    except AttributeError:
+        return False
     except OSError:
         return False
+    return bool(attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT)
+
+
+def _contains_supported_frames(path: Path) -> bool:
+    return any(
+        entry.is_file() and entry.suffix.casefold() in SUPPORTED_EXTENSIONS
+        for entry in path.iterdir()
+    )
 
 
 def _ignored_code(parts: tuple[str, ...]) -> str | None:
