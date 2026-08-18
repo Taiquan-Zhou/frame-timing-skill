@@ -105,21 +105,37 @@ def run_batch_timing_agent(
         except Exception as exc:  # Keep batch processing independent across directories.
             results.append(_failure_result(item, item_artifact_dir, exc))
 
+    return publish_batch_timing_reports(artifact_root, results, preview_only=not write)
+
+
+def publish_batch_timing_reports(
+    artifact_root: Path | str,
+    results: Sequence[BatchTimingItemResult],
+    *,
+    preview_only: bool | None = None,
+) -> BatchTimingResult:
+    artifact_root = Path(artifact_root)
+    analysis_dir = artifact_root / "analysis"
+    analysis_dir.mkdir(parents=True, exist_ok=True)
     summary_json_path = analysis_dir / "batch_summary.json"
     summary_csv_path = analysis_dir / "batch_summary.csv"
     human_review_path = analysis_dir / "human_review.md"
     review_dashboard_path = analysis_dir / "review_dashboard.md"
     _write_summary_json(summary_json_path, artifact_root, results)
     _write_summary_csv(summary_csv_path, artifact_root, results)
-    _write_batch_human_review(human_review_path, artifact_root, results, preview_only=not write)
+    _write_batch_human_review(
+        human_review_path,
+        artifact_root,
+        results,
+        preview_only=all(item.output_dir is None for item in results) if preview_only is None else preview_only,
+    )
     _write_review_dashboard(review_dashboard_path, artifact_root, results)
     from frame_timing_agent.batch_artifact_health import run_batch_artifact_health_check
 
     run_batch_artifact_health_check(artifact_root)
-
     return BatchTimingResult(
         artifact_root=artifact_root,
-        items=results,
+        items=list(results),
         summary_json_path=summary_json_path,
         summary_csv_path=summary_csv_path,
         human_review_path=human_review_path,
@@ -235,24 +251,27 @@ def _success_result(
 
 
 def _failure_result(item: BatchTimingItem, item_artifact_dir: Path, exc: Exception) -> BatchTimingItemResult:
-    error = _public_error(exc, item.frames)
+    error = _public_error(exc, item.frames, item_artifact_dir)
     item_analysis_dir = item_artifact_dir / "analysis"
-    item_analysis_dir.mkdir(parents=True, exist_ok=True)
     human_review_path = item_analysis_dir / "human_review.md"
-    human_review_path.write_text(
-        "\n".join(
-            [
-                f"# 阶段 8 子任务失败：{item.name}",
-                "",
-                "## 结论",
-                "- 该帧目录没有成功生成策略产物。",
-                f"- 输入目录名：`{item.frames.name}`",
-                f"- 失败原因：`{error}`",
-                "",
-            ]
-        ),
-        encoding="utf-8",
-    )
+    try:
+        item_analysis_dir.mkdir(parents=True, exist_ok=True)
+        human_review_path.write_text(
+            "\n".join(
+                [
+                    f"# 阶段 8 子任务失败：{item.name}",
+                    "",
+                    "## 结论",
+                    "- 该帧目录没有成功生成策略产物。",
+                    f"- 输入目录名：`{item.frames.name}`",
+                    f"- 失败原因：`{error}`",
+                    "",
+                ]
+            ),
+            encoding="utf-8",
+        )
+    except OSError:
+        pass
     return BatchTimingItemResult(
         name=item.name,
         frame_dir=item.frames,
@@ -267,8 +286,15 @@ def _failure_result(item: BatchTimingItem, item_artifact_dir: Path, exc: Excepti
     )
 
 
-def _public_error(exc: Exception, frame_dir: Path) -> str:
-    message = str(exc).replace(str(frame_dir), "<input_frame_dir>")
+def _public_error(exc: Exception, frame_dir: Path, artifact_dir: Path | None = None) -> str:
+    message = str(exc)
+    private_paths = [(frame_dir, "<input_frame_dir>")]
+    if artifact_dir is not None:
+        private_paths.append((artifact_dir, "<artifact_dir>"))
+    for path, replacement in sorted(private_paths, key=lambda item: len(str(item[0])), reverse=True):
+        variants = {str(path), str(path).replace("\\", "/"), str(path).replace("/", "\\")}
+        for variant in sorted(variants, key=len, reverse=True):
+            message = re.sub(re.escape(variant), replacement, message, flags=re.IGNORECASE)
     return f"{type(exc).__name__}: {message}"
 
 
@@ -283,7 +309,9 @@ def _item_to_dict(item: BatchTimingItemResult, artifact_root: Path) -> dict:
         "estimated_output_count": item.estimated_output_count,
         "strategy_path": _artifact_relative_path(artifact_root, item.strategy_path),
         "output_dir": _artifact_relative_path(artifact_root, item.output_dir),
-        "human_review_path": _artifact_relative_path(artifact_root, item.human_review_path),
+        "human_review_path": _artifact_relative_path(artifact_root, item.human_review_path)
+        if _has_current_human_review(item)
+        else "",
         "error": item.error,
     }
 
@@ -334,6 +362,18 @@ def _artifact_relative_path(artifact_root: Path, path: Path | None) -> str:
         return path.name
 
 
+def _has_current_human_review(item: BatchTimingItemResult) -> bool:
+    if not item.human_review_path.is_file():
+        return False
+    if item.status == "ok":
+        return True
+    try:
+        content = item.human_review_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeError):
+        return False
+    return f"- 失败原因：`{item.error}`" in content
+
+
 def _write_batch_human_review(
     path: Path,
     artifact_root: Path,
@@ -360,6 +400,12 @@ def _write_batch_human_review(
         "|---|---|---:|---:|---|---|",
     ]
     for item in results:
+        review_path = (
+            _artifact_relative_path(artifact_root, item.human_review_path)
+            if _has_current_human_review(item)
+            else ""
+        )
+        review_label = f"`{review_path}`" if review_path else "无"
         lines.append(
             "| "
             f"{item.name} | "
@@ -367,7 +413,7 @@ def _write_batch_human_review(
             f"{item.analyzed_count} | "
             f"{item.estimated_output_count} | "
             f"`{item.frame_dir.name}` | "
-            f"`{_artifact_relative_path(artifact_root, item.human_review_path)}` |"
+            f"{review_label} |"
         )
 
     failed = [item for item in results if item.status != "ok"]
@@ -407,13 +453,18 @@ def _write_review_dashboard(path: Path, artifact_root: Path, results: Sequence[B
     ]
     for item in results:
         visual_index = item.artifact_dir / "analysis" / "visual_review" / "index.md"
+        human_review_link = (
+            _markdown_link(path, item.human_review_path, "human_review.md")
+            if _has_current_human_review(item)
+            else "无"
+        )
         lines.append(
             "| "
             f"{item.name} | "
             f"{item.status} | "
             f"{item.analyzed_count} | "
             f"{item.estimated_output_count} | "
-            f"{_markdown_link(path, item.human_review_path, 'human_review.md')} | "
+            f"{human_review_link} | "
             f"{_markdown_link(path, visual_index, 'visual_review/index.md') if visual_index.exists() else '无'} |"
         )
 

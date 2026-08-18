@@ -6,6 +6,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import cv2
 import numpy as np
@@ -37,6 +38,143 @@ def _make_frames(frame_dir: Path, count: int, offset: int = 0) -> None:
 
 
 class BatchTimingAgentTest(unittest.TestCase):
+    def test_legacy_runner_delegates_only_report_publication(self):
+        with _tempdir() as tmp:
+            root = Path(tmp)
+            frames_a = root / "frames_a"
+            frames_b = root / "frames_b"
+            artifact_root = root / "output" / "compatibility"
+            _make_frames(frames_a, 2)
+            _make_frames(frames_b, 2, offset=10)
+            timing_result = legacy_batch_timing.TimingAgentResult(
+                analyzed_count=2,
+                estimated_output_count=1,
+                artifact_dir=artifact_root / "unused",
+                strategy_path=artifact_root / "unused" / "analysis" / "strategy.json",
+                output_dir=None,
+            )
+            sentinel = object()
+
+            with (
+                patch.object(legacy_batch_timing, "run_timing_agent", return_value=timing_result) as run,
+                patch.object(
+                    legacy_batch_timing,
+                    "publish_batch_timing_reports",
+                    return_value=sentinel,
+                ) as publish,
+            ):
+                result = run_batch_timing_agent(
+                    [
+                        BatchTimingItem(name="first", frames=frames_a),
+                        BatchTimingItem(name="second", frames=frames_b),
+                    ],
+                    artifact_root=artifact_root,
+                    limit_first_n=2,
+                    write=False,
+                )
+
+            self.assertIs(result, sentinel)
+            self.assertEqual(run.call_count, 2)
+            published_root, published_results = publish.call_args.args
+            self.assertEqual(published_root, artifact_root)
+            self.assertEqual([item.name for item in published_results], ["first", "second"])
+            self.assertTrue(all(item.status == "ok" for item in published_results))
+
+    def test_legacy_write_mode_is_preserved_when_every_item_fails(self):
+        with _tempdir() as tmp:
+            root = Path(tmp)
+            frames = root / "frames"
+            artifact_root = root / "output" / "write_failure"
+            _make_frames(frames, 2)
+
+            with (
+                patch.object(legacy_batch_timing, "run_timing_agent", side_effect=RuntimeError("failed")),
+                patch.object(legacy_batch_timing, "_write_batch_human_review") as write_review,
+                patch.object(legacy_batch_timing, "run_batch_artifact_health_check", create=True),
+            ):
+                run_batch_timing_agent(
+                    [BatchTimingItem(name="failed", frames=frames)],
+                    artifact_root=artifact_root,
+                    limit_first_n=2,
+                    write=True,
+                )
+
+            self.assertFalse(write_review.call_args.kwargs["preview_only"])
+
+    def test_public_error_redacts_input_and_artifact_paths_case_insensitively(self):
+        frame_dir = Path(r"D:\Customer\SecretProject\clean_frames")
+        artifact_dir = Path(r"D:\Customer\SecretProject\output\batch\item")
+        error = RuntimeError(
+            r"source d:\customer\secretproject\clean_frames\frame.jpg; "
+            r"target D:\CUSTOMER\SECRETPROJECT\OUTPUT\BATCH\ITEM\analysis"
+        )
+
+        message = legacy_batch_timing._public_error(error, frame_dir, artifact_dir)
+
+        self.assertNotIn("secretproject", message.lower())
+        self.assertIn("<input_frame_dir>", message)
+        self.assertIn("<artifact_dir>", message)
+
+    def test_missing_failure_review_is_not_published_as_a_dead_link(self):
+        with _tempdir() as tmp:
+            root = Path(tmp)
+            frames = root / "frames"
+            artifact_root = root / "output" / "missing_failure_review"
+            artifact_dir = artifact_root / "failed"
+            frames.mkdir()
+            real_write_text = Path.write_text
+
+            def guarded_write_text(path, data, *args, **kwargs):
+                if path == artifact_dir / "analysis" / "human_review.md":
+                    raise PermissionError("review is read-only")
+                return real_write_text(path, data, *args, **kwargs)
+
+            with patch.object(Path, "write_text", guarded_write_text):
+                failed = legacy_batch_timing._failure_result(
+                    BatchTimingItem(name="failed", frames=frames),
+                    artifact_dir,
+                    RuntimeError("analysis failed"),
+                )
+                result = legacy_batch_timing.publish_batch_timing_reports(artifact_root, [failed])
+
+            summary = json.loads(result.summary_json_path.read_text(encoding="utf-8"))
+            self.assertEqual(summary["items"][0]["human_review_path"], "")
+            dashboard = result.review_dashboard_path.read_text(encoding="utf-8")
+            self.assertNotIn("failed/analysis/human_review.md", dashboard)
+            self.assertIn("无", dashboard)
+
+    def test_failed_retry_does_not_publish_stale_review_when_rewrite_fails(self):
+        with _tempdir() as tmp:
+            root = Path(tmp)
+            frames = root / "frames"
+            artifact_root = root / "output" / "stale_failure_review"
+            artifact_dir = artifact_root / "failed"
+            review_path = artifact_dir / "analysis" / "human_review.md"
+            frames.mkdir()
+            review_path.parent.mkdir(parents=True)
+            review_path.write_text("OLD FAILURE REPORT", encoding="utf-8")
+            real_write_text = Path.write_text
+
+            def guarded_write_text(path, data, *args, **kwargs):
+                if path == review_path:
+                    raise PermissionError("review is read-only")
+                return real_write_text(path, data, *args, **kwargs)
+
+            with patch.object(Path, "write_text", guarded_write_text):
+                failed = legacy_batch_timing._failure_result(
+                    BatchTimingItem(name="failed", frames=frames),
+                    artifact_dir,
+                    RuntimeError("new failure"),
+                )
+                result = legacy_batch_timing.publish_batch_timing_reports(artifact_root, [failed])
+
+            summary = json.loads(result.summary_json_path.read_text(encoding="utf-8"))
+            self.assertEqual(summary["items"][0]["human_review_path"], "")
+            self.assertNotIn(
+                "failed/analysis/human_review.md",
+                result.review_dashboard_path.read_text(encoding="utf-8"),
+            )
+
     def test_legacy_entry_keeps_override_signature_without_agent_contracts(self):
         self.assertIn("override_config_path", inspect.signature(run_batch_timing_agent).parameters)
         self.assertFalse(hasattr(legacy_batch_timing, "PolicyName"))

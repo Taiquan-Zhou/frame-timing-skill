@@ -11,9 +11,16 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
-from typing import BinaryIO, Iterator
+from typing import BinaryIO, Callable, Iterator, Sequence
 
 from frame_timing_agent.batch_discovery import DiscoveryResult
+from frame_timing_agent.batch_timing_agent import (
+    BatchTimingItem,
+    BatchTimingItemResult,
+    _failure_result,
+    publish_batch_timing_reports,
+)
+from frame_timing_agent.run_workflow import RunSettings, analyze_run
 
 
 SCHEMA_VERSION = 1
@@ -179,6 +186,151 @@ def recover_batch(state_path: Path | str) -> BatchState:
         if changed:
             save_batch(state)
         return state
+
+
+def run_batch(
+    state_path: Path | str,
+    progress_callback: Callable[[int, str], None] | None = None,
+    should_pause: Callable[[], bool] | None = None,
+    retry_items: Sequence[str] = (),
+) -> BatchState:
+    """Run pending items sequentially, persisting each state transition."""
+    path = Path(state_path).resolve()
+    with _run_lock(path):
+        state = load_batch(path)
+        retries = _validate_retry_items(state, retry_items)
+        for item in state.items:
+            if item.safe_name in retries:
+                item.status = BatchItemStatus.PENDING
+                item.progress = 0.0
+        state.status = BatchStatus.RUNNING
+        state.pause_requested = False
+        save_batch(state)
+        total = len(state.items)
+        terminal_count = sum(
+            item.status not in {BatchItemStatus.PENDING, BatchItemStatus.RUNNING}
+            and item.safe_name not in retries
+            for item in state.items
+        )
+
+        for item in state.items:
+            is_retry = item.safe_name in retries
+            if item.status is not BatchItemStatus.PENDING:
+                continue
+            if should_pause is not None and should_pause():
+                state.status = BatchStatus.PAUSED
+                state.pause_requested = True
+                save_batch(state)
+                break
+
+            if is_retry or item.last_error is not None:
+                item.retry_count += 1
+                item.warnings = ()
+                item.approved = False
+                item.note = None
+                item.analyzed_count = None
+                item.output_count = None
+                item.output_path = None
+            item.status = BatchItemStatus.RUNNING
+            item.progress = 0.0
+            item.last_error = None
+            save_batch(state)
+            settings = RunSettings(
+                frame_dir=item.frame_dir,
+                artifact_dir=state.artifact_root / item.safe_name,
+                fps=state.fps,
+                limit_first_n=state.limit_first_n,
+            )
+
+            def report_item_progress(percent: int, message: str) -> None:
+                bounded = max(0, min(100, int(percent)))
+                item.progress = bounded / 100.0
+                overall = round((terminal_count + item.progress) * 100 / total)
+                _report_progress(progress_callback, overall, message)
+
+            try:
+                result = analyze_run(settings, progress_callback=report_item_progress)
+                item.status = BatchItemStatus.COMPLETED
+                item.progress = 1.0
+                item.analyzed_count = result.analyzed_count
+                item.output_count = result.estimated_output_count
+                item.output_path = result.output_dir
+            except Exception as error:
+                failed = _failure_result(
+                    BatchTimingItem(name=item.safe_name, frames=item.frame_dir),
+                    settings.artifact_dir,
+                    error,
+                )
+                item.status = BatchItemStatus.FAILED
+                item.progress = 1.0
+                item.last_error = failed.error
+                item.analyzed_count = 0
+                item.output_count = 0
+                item.output_path = None
+
+            terminal_count += 1
+            save_batch(state)
+            publish_batch_timing_reports(state.artifact_root, _reported_results(state))
+            _report_progress(progress_callback, round(terminal_count * 100 / total), item.safe_name)
+        else:
+            state.status = BatchStatus.FINISHED
+            state.pause_requested = False
+            save_batch(state)
+
+        if state.status is BatchStatus.RUNNING:
+            state.status = BatchStatus.FINISHED
+            state.pause_requested = False
+            save_batch(state)
+        if state.status is BatchStatus.FINISHED:
+            _report_progress(progress_callback, 100, "batch finished")
+        return state
+
+
+def _validate_retry_items(state: BatchState, retry_items: Sequence[str]) -> set[str]:
+    requested = set(retry_items)
+    known = {item.safe_name: item for item in state.items}
+    unknown = requested.difference(known)
+    if unknown:
+        raise BatchStateError(f"unknown retry item: {sorted(unknown)[0]}")
+    for name in requested:
+        if known[name].status is not BatchItemStatus.FAILED:
+            raise BatchStateError(f"retry item is not failed: {name}")
+    return requested
+
+
+def _reported_results(state: BatchState) -> list[BatchTimingItemResult]:
+    results: list[BatchTimingItemResult] = []
+    for item in state.items:
+        if item.status in {BatchItemStatus.PENDING, BatchItemStatus.RUNNING}:
+            continue
+        artifact_dir = state.artifact_root / item.safe_name
+        results.append(
+            BatchTimingItemResult(
+                name=item.safe_name,
+                frame_dir=item.frame_dir,
+                artifact_dir=artifact_dir,
+                analyzed_count=item.analyzed_count or 0,
+                estimated_output_count=item.output_count or 0,
+                strategy_path=(artifact_dir / "analysis" / "strategy.json")
+                if item.status in {BatchItemStatus.COMPLETED, BatchItemStatus.REVIEW_REQUIRED}
+                else None,
+                output_dir=item.output_path,
+                human_review_path=artifact_dir / "analysis" / "human_review.md",
+                status="ok"
+                if item.status in {BatchItemStatus.COMPLETED, BatchItemStatus.REVIEW_REQUIRED}
+                else "failed",
+                error=item.last_error or "",
+            )
+        )
+    return results
+
+
+def _report_progress(callback: Callable[[int, str], None] | None, percent: int, message: str) -> None:
+    if callback is not None:
+        try:
+            callback(max(0, min(100, percent)), message)
+        except Exception:
+            pass
 
 
 def _state_to_json(state: BatchState) -> dict[str, object]:
