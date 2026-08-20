@@ -14,13 +14,14 @@ from pathlib import Path
 from typing import BinaryIO, Callable, Iterator, Sequence
 
 from frame_timing_agent.batch_discovery import DiscoveryResult
+from frame_timing_agent.batch_quality import evaluate_quality
 from frame_timing_agent.batch_timing_agent import (
     BatchTimingItem,
     BatchTimingItemResult,
     _failure_result,
     publish_batch_timing_reports,
 )
-from frame_timing_agent.run_workflow import RunSettings, analyze_run
+from frame_timing_agent.run_workflow import RunSettings, analyze_run, verify_input_snapshot
 
 
 SCHEMA_VERSION = 1
@@ -188,6 +189,31 @@ def recover_batch(state_path: Path | str) -> BatchState:
         return state
 
 
+def approve_item(state_path: Path | str, item_name: str, note: str) -> BatchState:
+    """Approve one review-required item after revalidating its analysis snapshot."""
+    path = Path(state_path).resolve()
+    with _run_lock(path):
+        state = load_batch(path)
+        item = next((candidate for candidate in state.items if candidate.safe_name == item_name), None)
+        if item is None:
+            raise BatchStateError(f"unknown batch item: {item_name}")
+        if item.status is not BatchItemStatus.REVIEW_REQUIRED:
+            raise BatchStateError(f"batch item is not review_required: {item_name}")
+        if not isinstance(note, str):
+            raise BatchStateError("approval note must be a string")
+
+        verify_input_snapshot(
+            state.artifact_root / item.safe_name / "analysis",
+            item.frame_dir,
+            state.fps,
+            state.limit_first_n,
+        )
+        item.approved = True
+        item.note = note.strip() or None
+        save_batch(state)
+        return state
+
+
 def run_batch(
     state_path: Path | str,
     progress_callback: Callable[[int, str], None] | None = None,
@@ -225,12 +251,12 @@ def run_batch(
 
             if is_retry or item.last_error is not None:
                 item.retry_count += 1
-                item.warnings = ()
-                item.approved = False
-                item.note = None
-                item.analyzed_count = None
-                item.output_count = None
-                item.output_path = None
+            item.warnings = ()
+            item.approved = False
+            item.note = None
+            item.analyzed_count = None
+            item.output_count = None
+            item.output_path = None
             item.status = BatchItemStatus.RUNNING
             item.progress = 0.0
             item.last_error = None
@@ -250,7 +276,11 @@ def run_batch(
 
             try:
                 result = analyze_run(settings, progress_callback=report_item_progress)
-                item.status = BatchItemStatus.COMPLETED
+                warnings = evaluate_quality(result.artifact_dir / "analysis")
+                item.warnings = tuple(warning.code for warning in warnings)
+                item.status = (
+                    BatchItemStatus.REVIEW_REQUIRED if warnings else BatchItemStatus.COMPLETED
+                )
                 item.progress = 1.0
                 item.analyzed_count = result.analyzed_count
                 item.output_count = result.estimated_output_count

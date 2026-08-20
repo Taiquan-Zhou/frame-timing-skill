@@ -1,3 +1,4 @@
+import csv
 from pathlib import Path
 
 import pytest
@@ -5,6 +6,7 @@ import pytest
 from frame_timing_agent.auto_timing_agent import TimingAgentResult
 from frame_timing_agent.batch_discovery import DiscoveryResult
 from frame_timing_agent.batch_session import (
+    BatchBusyError,
     BatchItemStatus,
     BatchStateError,
     BatchStatus,
@@ -31,14 +33,70 @@ def make_batch(tmp_path: Path, count: int = 2) -> Path:
     return state.state_path
 
 
-def fake_result(settings) -> TimingAgentResult:
+def fake_result(settings, progress_callback=None) -> TimingAgentResult:
     analysis_dir = settings.artifact_dir / "analysis"
     analysis_dir.mkdir(parents=True, exist_ok=True)
     strategy_path = analysis_dir / "strategy.json"
     strategy_path.write_text("{}", encoding="utf-8")
     human_review = analysis_dir / "human_review.md"
     human_review.write_text("review", encoding="utf-8")
+    with (analysis_dir / "frame_metrics.csv").open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(
+            handle,
+            fieldnames=[
+                "source_index",
+                "output_index",
+                "timestamp_sec",
+                "sharpness",
+                "brightness",
+                "contrast",
+                "motion_score",
+                "similarity_score",
+                "bad_quality_candidate",
+            ],
+        )
+        writer.writeheader()
+        for index in range(10):
+            writer.writerow(
+                {
+                    "source_index": index,
+                    "output_index": index,
+                    "timestamp_sec": index / 24,
+                    "sharpness": 100,
+                    "brightness": 120,
+                    "contrast": 20,
+                    "motion_score": 0.01,
+                    "similarity_score": 0.99,
+                    "bad_quality_candidate": "0",
+                }
+            )
+    (analysis_dir / "segments.json").write_text("[]", encoding="utf-8")
     return TimingAgentResult(10, 8, settings.artifact_dir, strategy_path, None)
+
+
+def fake_review_result(settings, progress_callback=None) -> TimingAgentResult:
+    result = fake_result(settings)
+    metrics_path = settings.artifact_dir / "analysis" / "frame_metrics.csv"
+    rows = metrics_path.read_text(encoding="utf-8").splitlines()
+    columns = rows[1].split(",")
+    columns[-1] = "1"
+    rows[1] = ",".join(columns)
+    metrics_path.write_text("\n".join(rows) + "\n", encoding="utf-8")
+    return result
+
+
+def make_review_batch(tmp_path: Path) -> tuple[Path, str]:
+    state_path = make_batch(tmp_path, count=1)
+    state = load_batch(state_path)
+    item = state.items[0]
+    state.status = BatchStatus.FINISHED
+    item.status = BatchItemStatus.REVIEW_REQUIRED
+    item.progress = 1.0
+    item.warnings = ("quality.bad_candidate_ratio",)
+    item.analyzed_count = 10
+    item.output_count = 8
+    save_batch(state)
+    return state_path, item.safe_name
 
 
 def test_run_saves_running_and_terminal_state_after_each_item(tmp_path, monkeypatch):
@@ -69,6 +127,62 @@ def test_run_saves_running_and_terminal_state_after_each_item(tmp_path, monkeypa
     assert len(publish_calls) == 2
     assert [len(results) for results in publish_calls] == [1, 2]
     assert load_batch(state_path) == result
+
+
+def test_quality_warning_marks_item_for_review(tmp_path, monkeypatch):
+    state_path = make_batch(tmp_path, count=1)
+    monkeypatch.setattr(batch_session, "analyze_run", fake_review_result)
+    monkeypatch.setattr(batch_session, "publish_batch_timing_reports", lambda artifact_root, results: None)
+
+    result = run_batch(state_path)
+
+    assert result.items[0].status is BatchItemStatus.REVIEW_REQUIRED
+    assert result.items[0].warnings == ("quality.bad_candidate_ratio",)
+    assert result.items[0].approved is False
+    assert result.items[0].note is None
+
+
+def test_invalid_quality_artifact_fails_only_current_item(tmp_path, monkeypatch):
+    state_path = make_batch(tmp_path, count=2)
+    calls = 0
+
+    def analyze(settings, progress_callback=None):
+        nonlocal calls
+        calls += 1
+        result = fake_result(settings)
+        if calls == 1:
+            (settings.artifact_dir / "analysis" / "segments.json").write_text("{}", encoding="utf-8")
+        return result
+
+    monkeypatch.setattr(batch_session, "analyze_run", analyze)
+    monkeypatch.setattr(batch_session, "publish_batch_timing_reports", lambda artifact_root, results: None)
+
+    result = run_batch(state_path)
+
+    assert calls == 2
+    assert result.items[0].status is BatchItemStatus.FAILED
+    assert "segments must be a JSON array" in (result.items[0].last_error or "")
+    assert result.items[1].status is BatchItemStatus.COMPLETED
+
+
+def test_reanalysis_resets_previous_approval_and_warnings(tmp_path, monkeypatch):
+    state_path = make_batch(tmp_path, count=1)
+    state = load_batch(state_path)
+    item = state.items[0]
+    item.status = BatchItemStatus.PENDING
+    item.warnings = ("quality.low_motion_review",)
+    item.approved = True
+    item.note = "old approval"
+    save_batch(state)
+    monkeypatch.setattr(batch_session, "analyze_run", fake_result)
+    monkeypatch.setattr(batch_session, "publish_batch_timing_reports", lambda artifact_root, results: None)
+
+    result = run_batch(state_path)
+
+    assert result.items[0].status is BatchItemStatus.COMPLETED
+    assert result.items[0].warnings == ()
+    assert result.items[0].approved is False
+    assert result.items[0].note is None
 
 
 def test_run_maps_item_progress_to_overall_progress(tmp_path, monkeypatch):
@@ -301,3 +415,98 @@ def test_retry_rejects_unknown_or_nonfailed_items_without_mutation(tmp_path):
     with pytest.raises(BatchStateError, match="unknown retry item"):
         run_batch(state_path, retry_items=("missing",))
     assert state_path.read_bytes() == before
+
+
+def test_approve_item_verifies_snapshot_and_strips_note(tmp_path, monkeypatch):
+    state_path, item_name = make_review_batch(tmp_path)
+    calls = []
+
+    def verify(analysis_dir, frame_dir, fps, limit_first_n):
+        calls.append((analysis_dir, frame_dir, fps, limit_first_n))
+        return True
+
+    monkeypatch.setattr(batch_session, "verify_input_snapshot", verify)
+
+    result = batch_session.approve_item(state_path, item_name, "  visually checked  ")
+
+    item = result.items[0]
+    assert item.approved is True
+    assert item.note == "visually checked"
+    assert calls == [
+        (
+            result.artifact_root / item_name / "analysis",
+            item.frame_dir,
+            result.fps,
+            result.limit_first_n,
+        )
+    ]
+    assert load_batch(state_path) == result
+
+
+def test_approve_item_allows_an_empty_optional_note(tmp_path, monkeypatch):
+    state_path, item_name = make_review_batch(tmp_path)
+    monkeypatch.setattr(batch_session, "verify_input_snapshot", lambda *args: True)
+
+    result = batch_session.approve_item(state_path, item_name, "   ")
+
+    assert result.items[0].approved is True
+    assert result.items[0].note is None
+
+
+@pytest.mark.parametrize(
+    "status",
+    [
+        BatchItemStatus.PENDING,
+        BatchItemStatus.COMPLETED,
+        BatchItemStatus.FAILED,
+    ],
+)
+def test_approve_item_rejects_non_review_status_without_mutation(tmp_path, monkeypatch, status):
+    state_path, item_name = make_review_batch(tmp_path)
+    state = load_batch(state_path)
+    state.items[0].status = status
+    if status is BatchItemStatus.PENDING:
+        state.status = BatchStatus.PAUSED
+    save_batch(state)
+    before = state_path.read_bytes()
+    monkeypatch.setattr(batch_session, "verify_input_snapshot", lambda *args: pytest.fail("must not verify"))
+
+    with pytest.raises(BatchStateError, match="review_required"):
+        batch_session.approve_item(state_path, item_name, "checked")
+
+    assert state_path.read_bytes() == before
+
+
+def test_approve_item_rejects_unknown_item_without_mutation(tmp_path, monkeypatch):
+    state_path, _ = make_review_batch(tmp_path)
+    before = state_path.read_bytes()
+    monkeypatch.setattr(batch_session, "verify_input_snapshot", lambda *args: pytest.fail("must not verify"))
+
+    with pytest.raises(BatchStateError, match="unknown batch item"):
+        batch_session.approve_item(state_path, "missing", "checked")
+
+    assert state_path.read_bytes() == before
+
+
+def test_approve_item_keeps_state_unchanged_when_snapshot_is_stale(tmp_path, monkeypatch):
+    state_path, item_name = make_review_batch(tmp_path)
+    before = state_path.read_bytes()
+
+    def reject(*args):
+        raise ValueError("input frames changed since analysis")
+
+    monkeypatch.setattr(batch_session, "verify_input_snapshot", reject)
+
+    with pytest.raises(ValueError, match="changed since analysis"):
+        batch_session.approve_item(state_path, item_name, "checked")
+
+    assert state_path.read_bytes() == before
+
+
+def test_approve_item_respects_batch_run_lock(tmp_path, monkeypatch):
+    state_path, item_name = make_review_batch(tmp_path)
+    monkeypatch.setattr(batch_session, "verify_input_snapshot", lambda *args: True)
+
+    with batch_session._run_lock(state_path):
+        with pytest.raises(BatchBusyError, match="already running"):
+            batch_session.approve_item(state_path, item_name, "checked")
