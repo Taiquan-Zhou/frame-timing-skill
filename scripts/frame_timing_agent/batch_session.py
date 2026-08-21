@@ -21,7 +21,7 @@ from frame_timing_agent.batch_timing_agent import (
     _failure_result,
     publish_batch_timing_reports,
 )
-from frame_timing_agent.run_workflow import RunSettings, analyze_run, verify_input_snapshot
+from frame_timing_agent.run_workflow import RunSettings, analyze_run, export_run, verify_input_snapshot
 
 
 SCHEMA_VERSION = 1
@@ -68,6 +68,13 @@ class BatchItemState:
     analyzed_count: int | None = None
     output_count: int | None = None
     output_path: Path | None = None
+
+
+@dataclass(frozen=True)
+class BatchExportSummary:
+    exported: tuple[str, ...]
+    skipped: tuple[str, ...]
+    failed: tuple[str, ...]
 
 
 @dataclass
@@ -212,6 +219,62 @@ def approve_item(state_path: Path | str, item_name: str, note: str) -> BatchStat
         item.note = note.strip() or None
         save_batch(state)
         return state
+
+
+def export_batch(
+    state_path: Path | str,
+    progress_callback: Callable[[int, str], None] | None = None,
+) -> BatchExportSummary:
+    """Explicitly export eligible finished batch items without rerunning analysis."""
+    path = Path(state_path).resolve()
+    with _run_lock(path):
+        state = load_batch(path)
+        if state.status is not BatchStatus.FINISHED:
+            raise BatchStateError("batch must be finished before exporting")
+
+        exported: list[str] = []
+        skipped: list[str] = []
+        failed: list[str] = []
+        eligible_items = [item for item in state.items if _is_export_eligible(item)]
+        total = len(eligible_items)
+        completed = 0
+
+        for item in state.items:
+            if not _is_export_eligible(item):
+                skipped.append(item.safe_name)
+                continue
+
+            settings = RunSettings(
+                frame_dir=item.frame_dir,
+                artifact_dir=state.artifact_root / item.safe_name,
+                fps=state.fps,
+                limit_first_n=state.limit_first_n,
+            )
+
+            def report_item_progress(percent: int, message: str) -> None:
+                bounded = max(0, min(100, int(percent)))
+                _report_progress(progress_callback, round((completed + bounded / 100) * 100 / total), message)
+
+            try:
+                result = export_run(settings, progress_callback=report_item_progress)
+            except Exception:
+                failed.append(item.safe_name)
+            else:
+                item.output_count = result.estimated_output_count
+                item.output_path = result.output_dir
+                exported.append(item.safe_name)
+            completed += 1
+            save_batch(state)
+            _report_progress(progress_callback, round(completed * 100 / total), item.safe_name)
+
+        publish_batch_timing_reports(state.artifact_root, _reported_results(state))
+        return BatchExportSummary(tuple(exported), tuple(skipped), tuple(failed))
+
+
+def _is_export_eligible(item: BatchItemState) -> bool:
+    return item.status is BatchItemStatus.COMPLETED or (
+        item.status is BatchItemStatus.REVIEW_REQUIRED and item.approved
+    )
 
 
 def run_batch(

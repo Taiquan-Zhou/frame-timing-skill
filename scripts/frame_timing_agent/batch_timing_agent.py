@@ -382,13 +382,14 @@ def _write_batch_human_review(
 ) -> None:
     success_count = sum(1 for item in results if item.status == "ok")
     failure_count = len(results) - success_count
+    written_count = sum(1 for item in results if item.output_dir is not None)
     lines = [
         "# 阶段 6：批处理配置化与路径安全",
         "",
         "## 1. 本阶段结论",
         "- 本阶段只做本地帧节奏策略批处理，不上传云端、不训练、不修改图片内容。",
         "- 阶段 8 审查入口：`review_dashboard.md`。",
-        f"- 当前模式：{'预览模式，未写出 output_frames' if preview_only else '执行模式，已为成功项写出 output_frames'}。",
+        f"- 当前模式：{'预览模式，未写出 output_frames' if preview_only else f'执行模式，已为 {written_count} 个项写出 output_frames'}。",
         f"- 批处理项数量：{len(results)}",
         f"- 成功：{success_count}",
         f"- 失败：{failure_count}",
