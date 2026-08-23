@@ -165,6 +165,7 @@ def test_batch_create_accepts_explicit_frames_and_reports_safe_ready_status(
             "progress": 0,
             "retry_count": 0,
             "risks": [],
+            "risk_details": [],
             "approved": False,
             "exported": False,
             "analyzed_count": None,
@@ -213,6 +214,77 @@ def test_batch_item_response_does_not_claim_missing_export_artifacts(tmp_path: P
     (analysis_dir / "execution_audit.json").write_text('{"status":"ok"}', encoding="utf-8")
 
     assert _batch_item_response(item)["exported"] is True
+
+
+def test_batch_item_response_exposes_structured_risk_details(tmp_path: Path) -> None:
+    from frame_timing_agent.batch_session import BatchItemState
+    from frame_timing_agent.tool_cli import _batch_item_response
+
+    detail = {
+        "code": "quality.low_motion_review",
+        "value": 2,
+        "threshold": None,
+        "affected_count": 9,
+        "ranges": [[2, 4], [20, 25]],
+        "message": "检测到需要人工确认的低运动区间。",
+    }
+    item = BatchItemState(
+        frame_dir=tmp_path / "frames",
+        safe_name="frames",
+        warnings=("quality.low_motion_review",),
+        risk_details=(detail,),
+    )
+
+    assert _batch_item_response(item)["risk_details"] == [detail]
+
+
+def test_batch_health_snapshot_marks_only_the_tampered_item_unexported(tmp_path: Path, monkeypatch) -> None:
+    from frame_timing_agent.batch_session import BatchItemState, BatchState
+    from frame_timing_agent.batch_artifact_health import BatchArtifactHealthResult
+    from frame_timing_agent.tool_cli import _batch_health_snapshot
+
+    artifact_root = (tmp_path / "output" / "batch").resolve()
+    items = []
+    for name in ("good", "bad"):
+        output_path = artifact_root / name / "output_frames"
+        output_path.mkdir(parents=True)
+        analysis_dir = output_path.parent / "analysis"
+        analysis_dir.mkdir()
+        (analysis_dir / "execution_audit.json").write_text("{}", encoding="utf-8")
+        items.append(
+            BatchItemState(
+                frame_dir=(tmp_path / name / "frames").resolve(),
+                safe_name=name,
+                status=BatchItemStatus.COMPLETED,
+                output_path=output_path,
+            )
+        )
+    state = BatchState(
+        batch_id="batch",
+        created_at="2026-01-01T00:00:00+00:00",
+        updated_at="2026-01-01T00:00:00+00:00",
+        fps=30.0,
+        limit_first_n=None,
+        artifact_root=artifact_root,
+        items=items,
+        status=BatchStatus.FINISHED,
+    )
+    monkeypatch.setattr(
+        tool_cli,
+        "inspect_batch_artifact_health",
+        lambda root: BatchArtifactHealthResult(root, "failed", ["bad: digest mismatch"], [], 2, 0, 0, root / "a", root / "b"),
+    )
+
+    def verify(analysis_dir, output_dir):
+        if output_dir.parent.name == "bad":
+            raise ValueError("digest mismatch")
+
+    monkeypatch.setattr(tool_cli, "verify_output_snapshot", verify)
+
+    health_failed, exported = _batch_health_snapshot(state)
+
+    assert health_failed is True
+    assert exported == {"good": True, "bad": False}
 
 
 def test_batch_status_exposes_explicit_retry_action_for_failed_items(
@@ -421,6 +493,44 @@ def test_batch_export_reports_ordinary_export_failure_as_unsafe_export(
 
     assert exit_code == 4
     assert payload["error"] == {"code": "unsafe_export", "message": "one or more batch items could not be exported"}
+    assert str(tmp_path) not in stdout
+    assert stderr == ""
+
+
+def test_batch_status_rechecks_exported_files_instead_of_trusting_cached_health(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    frame_dir = tmp_path / "frames"
+    state_path = tmp_path / "output" / "batch" / "analysis" / "batch_state.json"
+    _write_frames(frame_dir)
+    assert _invoke(
+        capsys,
+        ["batch", "create", "--frames", str(frame_dir), "--state", str(state_path)],
+    )[0] == 0
+    assert _invoke(capsys, ["batch", "run", "--state", str(state_path)])[0] == 0
+    state = load_batch(state_path)
+    if state.items[0].status is BatchItemStatus.REVIEW_REQUIRED:
+        assert _invoke(
+            capsys,
+            ["batch", "approve", "--state", str(state_path), "--item", state.items[0].safe_name],
+        )[0] == 0
+    assert _invoke(capsys, ["batch", "export", "--state", str(state_path)])[0] == 0
+
+    state = load_batch(state_path)
+    assert state.items[0].output_path is not None
+    output_frame = next(state.items[0].output_path.glob("*.png"))
+    output_frame.write_bytes(b"tampered after the cached health report")
+
+    exit_code, payload, stdout, stderr = _invoke(capsys, ["batch", "status", "--state", str(state_path)])
+
+    assert exit_code == 5
+    assert payload["error"] == {
+        "code": "artifact_health_failed",
+        "message": "batch artifact health check failed",
+    }
+    assert payload["result"]["items"][0]["exported"] is False
+    assert payload["result"]["next_actions"] == ["export"]
     assert str(tmp_path) not in stdout
     assert stderr == ""
 

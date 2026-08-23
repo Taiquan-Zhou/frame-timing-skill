@@ -69,6 +69,55 @@ class BatchWorkspaceTest(unittest.TestCase):
         finally:
             window.close()
 
+    def test_batch_workspace_is_bounded_and_scrollable_at_minimum_window_size(self):
+        from PySide6.QtCore import QPoint
+        from PySide6.QtWidgets import QFrame, QScrollArea
+
+        from frame_timing_agent.ui.main_window import MainWindow
+
+        window = MainWindow()
+        try:
+            window.resize(1100, 700)
+            window.select_batch_mode()
+            window.show()
+            self.app.processEvents()
+
+            workspace = window.batch_workspace
+            toolbar = workspace.findChild(QFrame, "batchToolbar")
+            self.assertIsNotNone(toolbar)
+            for button in (
+                workspace.add_button,
+                workspace.discover_button,
+                workspace.start_button,
+                workspace.pause_button,
+                workspace.continue_button,
+                workspace.retry_button,
+                workspace.export_button,
+                workspace.open_batch_button,
+            ):
+                button_rect = button.geometry()
+                self.assertGreaterEqual(button_rect.left(), toolbar.contentsRect().left())
+                self.assertLessEqual(button_rect.right(), toolbar.contentsRect().right())
+
+            detail_scroll = workspace.findChild(QScrollArea)
+            self.assertIsNotNone(detail_scroll)
+            self.assertTrue(detail_scroll.widgetResizable())
+            self.assertGreater(detail_scroll.verticalScrollBar().maximum(), 0)
+            detail_scroll.verticalScrollBar().setValue(detail_scroll.verticalScrollBar().maximum())
+            self.app.processEvents()
+            self.assertEqual(
+                detail_scroll.verticalScrollBar().value(),
+                detail_scroll.verticalScrollBar().maximum(),
+            )
+            output_top = workspace.output_path.mapTo(detail_scroll.viewport(), QPoint(0, 0)).y()
+            self.assertGreaterEqual(output_top, 0)
+            self.assertLessEqual(
+                output_top + workspace.output_path.height(),
+                detail_scroll.viewport().height(),
+            )
+        finally:
+            window.close()
+
     def test_unfinished_batch_is_loaded_but_not_started(self):
         from PySide6.QtCore import QSettings
 

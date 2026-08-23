@@ -2,6 +2,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import cv2
@@ -259,3 +260,208 @@ def test_audit_rollback_preserves_backups_when_restore_fails(tmp_path, monkeypat
     assert len(failed) == 1
     assert (backups[0] / "execution_audit.json").read_text(encoding="utf-8").startswith("old-")
     assert (failed[0] / "execution_audit.json").read_text(encoding="utf-8").startswith("new-")
+
+
+@pytest.mark.parametrize("interrupt_type", [KeyboardInterrupt, SystemExit])
+def test_verified_output_rolls_back_output_and_audit_on_base_exception(tmp_path, monkeypatch, interrupt_type):
+    analysis_dir = tmp_path / "analysis"
+    analysis_dir.mkdir()
+    output_dir = tmp_path / "output_frames"
+    output_dir.mkdir()
+    (output_dir / "old.txt").write_text("old-output", encoding="utf-8")
+    for name in ("execution_audit.json", "execution_audit.md"):
+        (analysis_dir / name).write_text(f"old-{name}", encoding="utf-8")
+    staging_dir = tmp_path / ".output_frames.staging"
+    staging_dir.mkdir()
+    (staging_dir / "new.txt").write_text("new-output", encoding="utf-8")
+    original_rename = Path.rename
+    interrupted = False
+
+    def interrupt_during_audit_commit(path: Path, target: Path):
+        nonlocal interrupted
+        if (
+            not interrupted
+            and path.name == "execution_audit.md"
+            and path.parent.name.startswith(".execution_audit.")
+        ):
+            interrupted = True
+            raise interrupt_type()
+        return original_rename(path, target)
+
+    monkeypatch.setattr(Path, "rename", interrupt_during_audit_commit)
+
+    with pytest.raises(interrupt_type):
+        run_workflow.replace_verified_output(
+            staging_dir,
+            output_dir,
+            analysis_dir,
+            {"status": "ok", "errors": [], "warnings": [], "operation_results": []},
+        )
+
+    assert (output_dir / "old.txt").read_text(encoding="utf-8") == "old-output"
+    assert not (output_dir / "new.txt").exists()
+    for name in ("execution_audit.json", "execution_audit.md"):
+        assert (analysis_dir / name).read_text(encoding="utf-8") == f"old-{name}"
+    assert not (tmp_path / run_workflow.EXPORT_TRANSACTION_NAME).exists()
+    assert not (tmp_path / run_workflow.OUTPUT_TRANSACTION_BACKUP_NAME).exists()
+
+
+def test_pending_verified_output_transaction_recovers_after_process_exit(tmp_path):
+    artifact_dir = tmp_path / "run"
+    analysis_dir = artifact_dir / "analysis"
+    analysis_dir.mkdir(parents=True)
+    output_dir = artifact_dir / "output_frames"
+    output_dir.mkdir()
+    (output_dir / "old.txt").write_text("old-output", encoding="utf-8")
+    for name in ("execution_audit.json", "execution_audit.md"):
+        (analysis_dir / name).write_text(f"old-{name}", encoding="utf-8")
+    staging_dir = artifact_dir / ".output_frames.staging"
+    staging_dir.mkdir()
+    (staging_dir / "new.txt").write_text("new-output", encoding="utf-8")
+
+    script = f"""
+import os
+from pathlib import Path
+from frame_timing_agent import run_workflow
+
+artifact_dir = Path({str(artifact_dir)!r})
+analysis_dir = artifact_dir / "analysis"
+output_dir = artifact_dir / "output_frames"
+staging_dir = artifact_dir / ".output_frames.staging"
+original_rename = Path.rename
+
+def exit_after_new_output_is_installed(path, target):
+    result = original_rename(path, target)
+    if path == staging_dir and target == output_dir:
+        os._exit(91)
+    return result
+
+Path.rename = exit_after_new_output_is_installed
+run_workflow.replace_verified_output(
+    staging_dir,
+    output_dir,
+    analysis_dir,
+    {{"status": "ok", "errors": [], "warnings": [], "operation_results": []}},
+)
+"""
+    repository_root = Path(__file__).parents[1]
+    environment = os.environ.copy()
+    environment["PYTHONPATH"] = os.pathsep.join(
+        [str(repository_root / "scripts"), environment.get("PYTHONPATH", "")]
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=repository_root,
+        env=environment,
+    )
+
+    assert result.returncode == 91
+    assert (output_dir / "new.txt").is_file()
+
+    run_workflow.recover_pending_export(artifact_dir)
+
+    assert (output_dir / "old.txt").read_text(encoding="utf-8") == "old-output"
+    assert not (output_dir / "new.txt").exists()
+    for name in ("execution_audit.json", "execution_audit.md"):
+        assert (analysis_dir / name).read_text(encoding="utf-8") == f"old-{name}"
+    assert not (artifact_dir / run_workflow.EXPORT_TRANSACTION_NAME).exists()
+    assert not (artifact_dir / run_workflow.OUTPUT_TRANSACTION_BACKUP_NAME).exists()
+    assert not (analysis_dir / run_workflow.AUDIT_TRANSACTION_BACKUP_NAME).exists()
+
+
+def test_export_lock_rejects_concurrent_export_for_same_artifact(tmp_path):
+    artifact_dir = tmp_path / "run"
+    artifact_dir.mkdir()
+
+    with run_workflow._export_lock(artifact_dir):
+        with pytest.raises(run_workflow.ExportBusyError, match="already running"):
+            with run_workflow._export_lock(artifact_dir):
+                pytest.fail("concurrent export lock must not be acquired")
+
+
+def test_verified_output_cleans_partial_audit_staging_when_preparation_fails(tmp_path, monkeypatch):
+    analysis_dir = tmp_path / "analysis"
+    analysis_dir.mkdir()
+    output_dir = tmp_path / "output_frames"
+    output_dir.mkdir()
+    (output_dir / "old.txt").write_text("old-output", encoding="utf-8")
+    staging_dir = tmp_path / ".output_frames.staging"
+    staging_dir.mkdir()
+    (staging_dir / "new.txt").write_text("new-output", encoding="utf-8")
+
+    def fail_after_partial_audit_write(audit, target_dir):
+        target_dir.mkdir()
+        (target_dir / "execution_audit.json").write_text("partial", encoding="utf-8")
+        raise OSError("audit preparation failed")
+
+    monkeypatch.setattr(run_workflow, "write_execution_audit", fail_after_partial_audit_write)
+
+    with pytest.raises(OSError, match="audit preparation failed"):
+        run_workflow.replace_verified_output(staging_dir, output_dir, analysis_dir, {})
+
+    assert (output_dir / "old.txt").read_text(encoding="utf-8") == "old-output"
+    assert not (tmp_path / run_workflow.AUDIT_TRANSACTION_STAGING_NAME).exists()
+    assert not (tmp_path / run_workflow.EXPORT_TRANSACTION_NAME).exists()
+
+
+def test_prepared_transaction_recovers_partial_audit_commit(tmp_path):
+    artifact_dir = tmp_path / "run"
+    analysis_dir = artifact_dir / "analysis"
+    analysis_dir.mkdir(parents=True)
+    output_dir = artifact_dir / "output_frames"
+    output_dir.mkdir()
+    (output_dir / "new.txt").write_text("new-output", encoding="utf-8")
+    output_backup = artifact_dir / run_workflow.OUTPUT_TRANSACTION_BACKUP_NAME
+    output_backup.mkdir()
+    (output_backup / "old.txt").write_text("old-output", encoding="utf-8")
+    audit_backup = analysis_dir / run_workflow.AUDIT_TRANSACTION_BACKUP_NAME
+    audit_backup.mkdir()
+    (audit_backup / "execution_audit.json").write_text("old-json", encoding="utf-8")
+    (audit_backup / "execution_audit.md").write_text("old-md", encoding="utf-8")
+    (analysis_dir / "execution_audit.json").write_text("new-json", encoding="utf-8")
+    transaction = {
+        "version": 1,
+        "phase": "prepared",
+        "had_output": True,
+        "had_audits": {"execution_audit.json": True, "execution_audit.md": True},
+    }
+    (artifact_dir / run_workflow.EXPORT_TRANSACTION_NAME).write_text(json.dumps(transaction), encoding="utf-8")
+
+    run_workflow.recover_pending_export(artifact_dir)
+
+    assert (output_dir / "old.txt").read_text(encoding="utf-8") == "old-output"
+    assert (analysis_dir / "execution_audit.json").read_text(encoding="utf-8") == "old-json"
+    assert (analysis_dir / "execution_audit.md").read_text(encoding="utf-8") == "old-md"
+    assert not (artifact_dir / run_workflow.EXPORT_TRANSACTION_NAME).exists()
+
+
+def test_committed_transaction_keeps_new_files_and_cleans_backups(tmp_path):
+    artifact_dir = tmp_path / "run"
+    analysis_dir = artifact_dir / "analysis"
+    analysis_dir.mkdir(parents=True)
+    output_dir = artifact_dir / "output_frames"
+    output_dir.mkdir()
+    (output_dir / "new.txt").write_text("new-output", encoding="utf-8")
+    output_backup = artifact_dir / run_workflow.OUTPUT_TRANSACTION_BACKUP_NAME
+    output_backup.mkdir()
+    (output_backup / "old.txt").write_text("old-output", encoding="utf-8")
+    audit_backup = analysis_dir / run_workflow.AUDIT_TRANSACTION_BACKUP_NAME
+    audit_backup.mkdir()
+    (audit_backup / "execution_audit.json").write_text("old-json", encoding="utf-8")
+    (analysis_dir / "execution_audit.json").write_text("new-json", encoding="utf-8")
+    (analysis_dir / "execution_audit.md").write_text("new-md", encoding="utf-8")
+    transaction = {
+        "version": 1,
+        "phase": "committed",
+        "had_output": True,
+        "had_audits": {"execution_audit.json": True, "execution_audit.md": True},
+    }
+    (artifact_dir / run_workflow.EXPORT_TRANSACTION_NAME).write_text(json.dumps(transaction), encoding="utf-8")
+
+    run_workflow.recover_pending_export(artifact_dir)
+
+    assert (output_dir / "new.txt").read_text(encoding="utf-8") == "new-output"
+    assert (analysis_dir / "execution_audit.json").read_text(encoding="utf-8") == "new-json"
+    assert not output_backup.exists()
+    assert not audit_backup.exists()
+    assert not (artifact_dir / run_workflow.EXPORT_TRANSACTION_NAME).exists()

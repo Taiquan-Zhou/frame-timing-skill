@@ -112,8 +112,16 @@ class BatchTimingAgentTest(unittest.TestCase):
         message = legacy_batch_timing._public_error(error, frame_dir, artifact_dir)
 
         self.assertNotIn("secretproject", message.lower())
-        self.assertIn("<input_frame_dir>", message)
-        self.assertIn("<artifact_dir>", message)
+        self.assertEqual(message, "analysis_failed: frame analysis did not complete")
+
+    def test_public_error_does_not_expose_unrelated_paths_or_credentials(self):
+        message = legacy_batch_timing._public_error(
+            RuntimeError(r"failed at E:\private\customer.csv with token sk-secret-value"),
+            Path(r"D:\frames"),
+            Path(r"D:\output\item"),
+        )
+
+        self.assertEqual(message, "analysis_failed: frame analysis did not complete")
 
     def test_missing_failure_review_is_not_published_as_a_dead_link(self):
         with _tempdir() as tmp:
@@ -272,7 +280,7 @@ class BatchTimingAgentTest(unittest.TestCase):
             self.assertEqual(result.success_count, 1)
             self.assertEqual(result.failure_count, 1)
             self.assertEqual(result.items[1].status, "failed")
-            self.assertIn("frame directory does not exist", result.items[1].error)
+            self.assertEqual(result.items[1].error, "analysis_failed: frame analysis did not complete")
             failure_review = artifact_root / "missing_item" / "analysis" / "human_review.md"
             self.assertTrue(failure_review.exists())
             failure_text = failure_review.read_text(encoding="utf-8")

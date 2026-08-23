@@ -90,6 +90,73 @@ def test_state_json_round_trip_preserves_typed_values(tmp_path):
     assert loaded.items[0].frame_dir == first.resolve()
 
 
+def test_save_batch_rejects_stale_loaded_revision(tmp_path):
+    frame_dir = tmp_path / "source" / "frames"
+    frame_dir.mkdir(parents=True)
+    created = create_batch(
+        make_discovery(frame_dir),
+        artifact_root=tmp_path / "batch-artifacts",
+        fps=24.0,
+    )
+    first_writer = load_batch(created.state_path)
+    stale_writer = load_batch(created.state_path)
+
+    first_writer.items[0].progress = 0.25
+    save_batch(first_writer)
+    stale_writer.items[0].progress = 0.75
+
+    with pytest.raises(BatchStateError, match="revision is stale"):
+        save_batch(stale_writer)
+
+    assert load_batch(created.state_path).items[0].progress == 0.25
+
+
+def test_save_batch_respects_active_batch_lock(tmp_path):
+    frame_dir = tmp_path / "source" / "frames"
+    frame_dir.mkdir(parents=True)
+    state = create_batch(
+        make_discovery(frame_dir),
+        artifact_root=tmp_path / "batch-artifacts",
+        fps=24.0,
+    )
+
+    with batch_session._run_lock(state.state_path):
+        with pytest.raises(BatchBusyError):
+            save_batch(state)
+
+
+def test_save_batch_rejects_running_item_outside_running_batch(tmp_path):
+    frame_dir = tmp_path / "source" / "frames"
+    frame_dir.mkdir(parents=True)
+    state = create_batch(
+        make_discovery(frame_dir),
+        artifact_root=tmp_path / "batch-artifacts",
+        fps=24.0,
+    )
+    state.items[0].status = BatchItemStatus.RUNNING
+
+    with pytest.raises(BatchStateError, match="running item requires a running batch"):
+        save_batch(state)
+
+
+def test_save_batch_keeps_committed_revision_when_directory_sync_fails(tmp_path, monkeypatch):
+    frame_dir = tmp_path / "source" / "frames"
+    frame_dir.mkdir(parents=True)
+    state = create_batch(
+        make_discovery(frame_dir),
+        artifact_root=tmp_path / "batch-artifacts",
+        fps=24.0,
+    )
+    previous_revision = state.revision
+    monkeypatch.setattr(batch_session, "_sync_directory", lambda path: (_ for _ in ()).throw(OSError("sync failed")))
+
+    with pytest.raises(OSError, match="sync failed"):
+        save_batch(state)
+
+    assert state.revision == previous_revision + 1
+    assert load_batch(state.state_path).revision == state.revision
+
+
 def test_create_batch_uses_unique_safe_names_for_same_leaf_directory(tmp_path):
     first = tmp_path / "source-a" / "frames"
     second = tmp_path / "source-b" / "frames"

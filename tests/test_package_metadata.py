@@ -1,6 +1,9 @@
 import tomllib
 import unittest
+from contextlib import redirect_stderr
+from io import StringIO
 from pathlib import Path
+from unittest.mock import patch
 
 
 PRIVATE_REFERENCE_PATTERNS = (
@@ -12,6 +15,24 @@ PRIVATE_REFERENCE_PATTERNS = (
 
 
 class PackageMetadataTest(unittest.TestCase):
+    def test_ui_entrypoint_recommends_installing_wheel_ui_extra(self):
+        from frame_timing_agent.ui.app import main
+
+        original_import = __import__
+
+        def import_without_pyside(name, *args, **kwargs):
+            if name.startswith("PySide6"):
+                raise ModuleNotFoundError("No module named 'PySide6'")
+            return original_import(name, *args, **kwargs)
+
+        stderr = StringIO()
+        with patch("builtins.__import__", side_effect=import_without_pyside), redirect_stderr(stderr):
+            result = main([])
+
+        self.assertEqual(result, 2)
+        self.assertIn('python -m pip install "frame-timing-skill[ui]"', stderr.getvalue())
+        self.assertNotIn('pip install -e ".[ui]"', stderr.getvalue())
+
     def test_pyproject_declares_build_backend_and_config_package_data(self):
         data = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
 

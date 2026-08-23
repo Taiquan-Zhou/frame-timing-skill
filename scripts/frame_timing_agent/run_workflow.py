@@ -1,13 +1,17 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, TypeAlias, cast
+from typing import Any, BinaryIO, Callable, Iterator, TypeAlias, cast
 import csv
+import errno
 import hashlib
 import io
 import json
+import os
 import shutil
+import stat
 import uuid
 
 from frame_timing_agent.apply_frame_strategy import apply_strategy
@@ -18,12 +22,22 @@ from frame_timing_agent.strategy_execution_audit import audit_strategy_execution
 
 SNAPSHOT_VERSION = 1
 INPUT_SNAPSHOT_NAME = "input_snapshot.json"
+EXPORT_TRANSACTION_NAME = ".output_frames.transaction.json"
+OUTPUT_TRANSACTION_BACKUP_NAME = ".output_frames.transaction-backup"
+AUDIT_TRANSACTION_STAGING_NAME = ".execution_audit.transaction-staging"
+AUDIT_TRANSACTION_BACKUP_NAME = ".execution_audit.transaction-backup"
+EXECUTION_AUDIT_NAMES = ("execution_audit.json", "execution_audit.md")
+EXPORT_LOCK_NAME = ".output_frames.export.lock"
 ProgressCallback = Callable[[int, str], None]
 JsonDict: TypeAlias = dict[str, Any]
 
 
 class StaleSourceError(ValueError):
     """Raised when analysis-bound input or strategy data changes before export."""
+
+
+class ExportBusyError(RuntimeError):
+    """Raised when another process is already exporting the same run."""
 
 
 @dataclass(frozen=True)
@@ -197,7 +211,16 @@ def export_run(
     progress_callback: ProgressCallback | None = None,
 ) -> TimingAgentResult:
     _validate_run_path_safety(settings)
+    with _export_lock(settings.artifact_dir):
+        return _export_run_locked(settings, progress_callback)
+
+
+def _export_run_locked(
+    settings: RunSettings,
+    progress_callback: ProgressCallback | None,
+) -> TimingAgentResult:
     analysis_dir = settings.artifact_dir / "analysis"
+    recover_pending_export(settings.artifact_dir)
     _report(progress_callback, 2, "正在校验分析快照")
     verify_input_snapshot(analysis_dir, settings.frame_dir, settings.fps, settings.limit_first_n)
     strategy = load_bound_strategy(analysis_dir)
@@ -267,16 +290,190 @@ def _paths_overlap(left: Path, right: Path) -> bool:
 
 
 def replace_verified_output(staging_dir: Path, output_dir: Path, analysis_dir: Path, audit: JsonDict) -> None:
-    audit_staging_dir = analysis_dir.parent / f".execution_audit.export-{uuid.uuid4().hex}"
+    artifact_dir = analysis_dir.parent
+    recover_pending_export(artifact_dir)
+    marker_path = artifact_dir / EXPORT_TRANSACTION_NAME
+    output_backup_dir = artifact_dir / OUTPUT_TRANSACTION_BACKUP_NAME
+    audit_staging_dir = artifact_dir / AUDIT_TRANSACTION_STAGING_NAME
+    audit_backup_dir = analysis_dir / AUDIT_TRANSACTION_BACKUP_NAME
+    had_output = output_dir.exists()
+    had_audits = {name: (analysis_dir / name).exists() for name in EXECUTION_AUDIT_NAMES}
+
+    transaction = {
+        "version": 1,
+        "phase": "prepared",
+        "had_output": had_output,
+        "had_audits": had_audits,
+    }
     try:
+        _remove_path(audit_staging_dir)
         write_execution_audit(audit, audit_staging_dir)
-        _replace_output_directory(
-            staging_dir,
-            output_dir,
-            lambda: _replace_execution_audit(audit_staging_dir, analysis_dir),
-        )
+        _write_json_atomic(marker_path, transaction)
+        if had_output:
+            output_dir.rename(output_backup_dir)
+        audit_backup_dir.mkdir()
+        for name, existed in had_audits.items():
+            if existed:
+                (analysis_dir / name).rename(audit_backup_dir / name)
+        staging_dir.rename(output_dir)
+        for name in EXECUTION_AUDIT_NAMES:
+            (audit_staging_dir / name).rename(analysis_dir / name)
+        transaction["phase"] = "committed"
+        _write_json_atomic(marker_path, transaction)
+    except BaseException:
+        if marker_path.exists():
+            _recover_export_transaction(artifact_dir, transaction)
+        else:
+            _remove_path(audit_staging_dir)
+        raise
+    else:
+        _recover_export_transaction(artifact_dir, transaction)
+
+
+def recover_pending_export(artifact_dir: Path | str) -> None:
+    artifact_dir = Path(artifact_dir)
+    marker_path = artifact_dir / EXPORT_TRANSACTION_NAME
+    if not marker_path.exists():
+        return
+    try:
+        transaction = json.loads(marker_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"invalid pending export transaction: {marker_path}") from exc
+    if not isinstance(transaction, dict):
+        raise ValueError(f"invalid pending export transaction: {marker_path}")
+    _recover_export_transaction(artifact_dir, cast(JsonDict, transaction))
+
+
+def _recover_export_transaction(artifact_dir: Path, transaction: JsonDict) -> None:
+    marker_path = artifact_dir / EXPORT_TRANSACTION_NAME
+    output_dir = artifact_dir / "output_frames"
+    output_backup_dir = artifact_dir / OUTPUT_TRANSACTION_BACKUP_NAME
+    analysis_dir = artifact_dir / "analysis"
+    audit_staging_dir = artifact_dir / AUDIT_TRANSACTION_STAGING_NAME
+    audit_backup_dir = analysis_dir / AUDIT_TRANSACTION_BACKUP_NAME
+    version = transaction.get("version")
+    phase = transaction.get("phase")
+    had_output = transaction.get("had_output")
+    had_audits = transaction.get("had_audits")
+    if (
+        version != 1
+        or phase not in {"prepared", "committed"}
+        or not isinstance(had_output, bool)
+        or not isinstance(had_audits, dict)
+    ):
+        raise ValueError(f"invalid pending export transaction: {marker_path}")
+    if set(had_audits) != set(EXECUTION_AUDIT_NAMES) or not all(
+        isinstance(value, bool) for value in had_audits.values()
+    ):
+        raise ValueError(f"invalid pending export transaction: {marker_path}")
+
+    if phase == "prepared":
+        for name in EXECUTION_AUDIT_NAMES:
+            target = analysis_dir / name
+            backup = audit_backup_dir / name
+            if had_audits[name]:
+                if backup.exists():
+                    _remove_path(target)
+                    backup.rename(target)
+            else:
+                _remove_path(target)
+        if had_output:
+            if output_backup_dir.exists():
+                _remove_path(output_dir)
+                output_backup_dir.rename(output_dir)
+        else:
+            _remove_path(output_dir)
+
+    _remove_path(output_backup_dir)
+    _remove_path(audit_backup_dir)
+    _remove_path(audit_staging_dir)
+    marker_path.unlink(missing_ok=True)
+
+
+def _remove_path(path: Path) -> None:
+    if path.is_dir():
+        shutil.rmtree(path)
+    else:
+        path.unlink(missing_ok=True)
+
+
+@contextmanager
+def _export_lock(artifact_dir: Path) -> Iterator[None]:
+    lock_path = artifact_dir / EXPORT_LOCK_NAME
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    lock_file = _open_export_lock_file(lock_path)
+    try:
+        _acquire_export_lock(lock_file)
+    except BlockingIOError as error:
+        lock_file.close()
+        raise ExportBusyError("export is already running") from error
+    except BaseException:
+        lock_file.close()
+        raise
+    try:
+        yield
     finally:
-        shutil.rmtree(audit_staging_dir, ignore_errors=True)
+        try:
+            _release_export_lock(lock_file)
+        finally:
+            lock_file.close()
+
+
+def _open_export_lock_file(lock_path: Path) -> BinaryIO:
+    flags = os.O_RDWR | os.O_CREAT | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = os.open(lock_path, flags, 0o600)
+    except OSError as error:
+        raise ValueError("export lock file is unsafe") from error
+    try:
+        path_stat = lock_path.lstat()
+        file_stat = os.fstat(descriptor)
+        reparse_flag = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+        unsafe = (
+            not stat.S_ISREG(path_stat.st_mode)
+            or path_stat.st_nlink != 1
+            or (reparse_flag and getattr(path_stat, "st_file_attributes", 0) & reparse_flag)
+            or (path_stat.st_dev, path_stat.st_ino) != (file_stat.st_dev, file_stat.st_ino)
+        )
+        if unsafe:
+            raise ValueError("export lock file is unsafe")
+        return os.fdopen(descriptor, "r+b")
+    except BaseException:
+        os.close(descriptor)
+        raise
+
+
+def _acquire_export_lock(lock_file: BinaryIO) -> None:
+    lock_file.seek(0, os.SEEK_END)
+    if lock_file.tell() == 0:
+        lock_file.write(b"L")
+        lock_file.flush()
+    lock_file.seek(0)
+    if os.name == "nt":
+        import msvcrt
+
+        try:
+            msvcrt.locking(lock_file.fileno(), msvcrt.LK_NBLCK, 1)
+        except OSError as error:
+            if error.errno in {errno.EACCES, errno.EAGAIN, errno.EDEADLK}:
+                raise BlockingIOError from error
+            raise
+        return
+    import fcntl
+
+    fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)  # type: ignore[attr-defined]
+
+
+def _release_export_lock(lock_file: BinaryIO) -> None:
+    lock_file.seek(0)
+    if os.name == "nt":
+        import msvcrt
+
+        msvcrt.locking(lock_file.fileno(), msvcrt.LK_UNLCK, 1)
+        return
+    import fcntl
+
+    fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)  # type: ignore[attr-defined]
 
 
 def _replace_output_directory(
@@ -291,7 +488,7 @@ def _replace_output_directory(
         staging_dir.rename(output_dir)
         if commit_metadata is not None:
             commit_metadata()
-    except Exception:
+    except BaseException:
         _restore_output_backup(output_dir, backup_dir)
         raise
     if backup_dir.exists():
@@ -308,7 +505,7 @@ def _restore_output_backup(output_dir: Path, backup_dir: Path) -> None:
     try:
         if backup_dir.exists():
             backup_dir.rename(output_dir)
-    except Exception:
+    except BaseException:
         if moved_failed_output and failed_dir.exists() and not output_dir.exists():
             failed_dir.rename(output_dir)
         raise
@@ -318,7 +515,7 @@ def _restore_output_backup(output_dir: Path, backup_dir: Path) -> None:
 
 
 def _replace_execution_audit(staging_dir: Path, analysis_dir: Path) -> None:
-    names = ("execution_audit.json", "execution_audit.md")
+    names = EXECUTION_AUDIT_NAMES
     backup_dir = analysis_dir / f".execution_audit.backup-{uuid.uuid4().hex}"
     backup_dir.mkdir()
     try:
@@ -328,7 +525,7 @@ def _replace_execution_audit(staging_dir: Path, analysis_dir: Path) -> None:
                 target.rename(backup_dir / name)
         for name in names:
             (staging_dir / name).rename(analysis_dir / name)
-    except Exception:
+    except BaseException:
         failed_dir = analysis_dir / f".execution_audit.failed-{uuid.uuid4().hex}"
         failed_dir.mkdir()
         recovery_error: Exception | None = None

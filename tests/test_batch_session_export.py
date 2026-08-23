@@ -118,13 +118,13 @@ def test_export_persists_each_eligible_item_after_its_output_is_written(tmp_path
     state.items = state.items[:2]
     save_batch(state)
     persisted_output_sets = []
-    real_save = batch_session.save_batch
+    real_save = batch_session._save_batch_unlocked
 
     def record_save(current_state):
         real_save(current_state)
         persisted_output_sets.append(tuple(item.output_path for item in current_state.items))
 
-    monkeypatch.setattr(batch_session, "save_batch", record_save)
+    monkeypatch.setattr(batch_session, "_save_batch_unlocked", record_save)
     monkeypatch.setattr(batch_session, "export_run", fake_export)
     monkeypatch.setattr(batch_session, "publish_batch_timing_reports", lambda *args, **kwargs: None)
 

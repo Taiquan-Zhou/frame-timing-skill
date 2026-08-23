@@ -33,6 +33,13 @@ class BatchArtifactHealthResult:
 
 
 def run_batch_artifact_health_check(artifact_root: Path | str) -> BatchArtifactHealthResult:
+    result = inspect_batch_artifact_health(artifact_root)
+    _write_health_artifacts(result)
+    return result
+
+
+def inspect_batch_artifact_health(artifact_root: Path | str) -> BatchArtifactHealthResult:
+    """Validate batch artifacts without changing maintenance reports."""
     artifact_root = Path(artifact_root)
     analysis_dir = artifact_root / "analysis"
     report_path = analysis_dir / "maintenance_report.md"
@@ -73,7 +80,6 @@ def run_batch_artifact_health_check(artifact_root: Path | str) -> BatchArtifactH
         report_path=report_path,
         json_path=json_path,
     )
-    _write_health_artifacts(result)
     return result
 
 
@@ -100,14 +106,24 @@ def _load_json(path: Path, errors: list[str]) -> dict:
 def _check_summary_counts(summary: dict, items: list[dict], errors: list[str]) -> None:
     success_count = sum(1 for item in items if item.get("status") == "ok")
     failure_count = sum(1 for item in items if item.get("status") != "ok")
-    if int(summary.get("success_count", -1)) != success_count:
+    reported_success = _summary_count(summary, "success_count", errors)
+    reported_failure = _summary_count(summary, "failure_count", errors)
+    if reported_success is not None and reported_success != success_count:
         errors.append(
             f"batch_summary success_count mismatch: summary={summary.get('success_count')}, items={success_count}"
         )
-    if int(summary.get("failure_count", -1)) != failure_count:
+    if reported_failure is not None and reported_failure != failure_count:
         errors.append(
             f"batch_summary failure_count mismatch: summary={summary.get('failure_count')}, items={failure_count}"
         )
+
+
+def _summary_count(summary: dict, key: str, errors: list[str]) -> int | None:
+    value = summary.get(key)
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        errors.append(f"batch_summary {key} is invalid: {value!r}")
+        return None
+    return value
 
 
 def _check_unregistered_item_dirs(artifact_root: Path, items: list[dict], errors: list[str]) -> None:

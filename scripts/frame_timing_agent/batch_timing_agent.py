@@ -287,15 +287,8 @@ def _failure_result(item: BatchTimingItem, item_artifact_dir: Path, exc: Excepti
 
 
 def _public_error(exc: Exception, frame_dir: Path, artifact_dir: Path | None = None) -> str:
-    message = str(exc)
-    private_paths = [(frame_dir, "<input_frame_dir>")]
-    if artifact_dir is not None:
-        private_paths.append((artifact_dir, "<artifact_dir>"))
-    for path, replacement in sorted(private_paths, key=lambda item: len(str(item[0])), reverse=True):
-        variants = {str(path), str(path).replace("\\", "/"), str(path).replace("/", "\\")}
-        for variant in sorted(variants, key=len, reverse=True):
-            message = re.sub(re.escape(variant), replacement, message, flags=re.IGNORECASE)
-    return f"{type(exc).__name__}: {message}"
+    del exc, frame_dir, artifact_dir
+    return "analysis_failed: frame analysis did not complete"
 
 
 def _item_to_dict(item: BatchTimingItemResult, artifact_root: Path) -> dict:

@@ -9,7 +9,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from frame_timing_agent.batch_artifact_health import run_batch_artifact_health_check
+from frame_timing_agent.batch_artifact_health import inspect_batch_artifact_health, run_batch_artifact_health_check
 from frame_timing_agent.batch_timing_agent import BatchTimingItem, run_batch_timing_agent
 
 
@@ -35,6 +35,28 @@ def _make_frames(frame_dir: Path, count: int) -> None:
 
 
 class BatchArtifactHealthTest(unittest.TestCase):
+    def test_invalid_summary_count_is_reported_as_health_error(self):
+        from frame_timing_agent.batch_artifact_health import _check_summary_counts
+
+        errors = []
+        _check_summary_counts(
+            {"success_count": "not-a-number", "failure_count": 0},
+            [{"status": "ok"}],
+            errors,
+        )
+
+        self.assertTrue(any("success_count is invalid" in error for error in errors))
+
+    def test_read_only_inspection_does_not_publish_maintenance_files(self):
+        with _tempdir() as tmp:
+            artifact_root = Path(tmp) / "output" / "missing"
+
+            result = inspect_batch_artifact_health(artifact_root)
+
+            self.assertEqual(result.status, "failed")
+            self.assertFalse(result.report_path.exists())
+            self.assertFalse(result.json_path.exists())
+
     def test_valid_batch_artifact_writes_ok_maintenance_report(self):
         with _tempdir() as tmp:
             root = Path(tmp)

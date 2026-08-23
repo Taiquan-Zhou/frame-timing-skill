@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from contextlib import ExitStack
 from collections.abc import Sequence
 from pathlib import Path
 from typing import NoReturn
@@ -15,6 +16,7 @@ from frame_timing_agent.artifact_io import (
     read_validation_result,
 )
 from frame_timing_agent.batch_discovery import discover_frame_directories
+from frame_timing_agent.batch_artifact_health import inspect_batch_artifact_health
 from frame_timing_agent.batch_session import (
     BatchBusyError,
     BatchReportError,
@@ -43,6 +45,7 @@ from frame_timing_agent.artifact_layout import (
 from frame_timing_agent.configuration import parse_strategy_request
 from frame_timing_agent.contracts import SCHEMA_VERSION, ConfigurationError, PolicyName
 from frame_timing_agent.serialization import canonical_json_bytes
+from frame_timing_agent.run_workflow import ExportBusyError, _export_lock, verify_output_snapshot
 from frame_timing_agent.service import (
     analyze_frames,
     apply_validated_strategy,
@@ -305,7 +308,9 @@ def _dispatch_batch(args: argparse.Namespace) -> tuple[int, dict[str, object]]:
             }
             payload = _batch_response(state, export=export)
             payload["status"] = "failed"
-            payload["result"]["stale_items"] = list(exc.stale_items)
+            result = payload.get("result")
+            if isinstance(result, dict):
+                result["stale_items"] = list(exc.stale_items)
             payload["error"] = {"code": "stale_source", "message": "batch source changed since analysis"}
             return EXIT_EXECUTION_FAILED, payload
         state = load_batch(state_path)
@@ -338,12 +343,13 @@ def _batch_terminal_response(
     action: str,
     export: dict[str, list[str]] | None = None,
 ) -> tuple[int, dict[str, object]]:
-    payload = _batch_response(state, export=export)
+    health_failed, exported_by_name = _batch_health_snapshot(state)
+    payload = _batch_response(state, export=export, exported_by_name=exported_by_name)
     if action == "run" and any(item.status is BatchItemStatus.FAILED for item in state.items):
         payload["status"] = "failed"
         payload["error"] = {"code": "analysis_failed", "message": "one or more batch items failed analysis"}
         return EXIT_EXECUTION_FAILED, payload
-    if _batch_health_failed(state):
+    if health_failed:
         payload["status"] = "failed"
         payload["error"] = {"code": "artifact_health_failed", "message": "batch artifact health check failed"}
         return EXIT_HEALTH_FAILED, payload
@@ -351,14 +357,31 @@ def _batch_terminal_response(
 
 
 def _batch_health_failed(state: BatchState) -> bool:
+    return _batch_health_snapshot(state)[0]
+
+
+def _batch_health_snapshot(state: BatchState) -> tuple[bool, dict[str, bool]]:
+    exported = {item.safe_name: _batch_item_export_exists(item) for item in state.items}
+    output_items = [item for item in state.items if item.output_path is not None]
+    if output_items:
+        try:
+            with ExitStack() as locks:
+                for item in sorted(output_items, key=lambda candidate: candidate.safe_name.casefold()):
+                    assert item.output_path is not None
+                    locks.enter_context(_export_lock(item.output_path.parent))
+                health_failed = inspect_batch_artifact_health(state.artifact_root).status != "ok"
+                exported = {item.safe_name: _batch_item_export_is_valid(item) for item in state.items}
+                return health_failed, exported
+        except ExportBusyError:
+            return False, exported
     health_path = state.artifact_root / "analysis" / "maintenance_report.json"
     try:
         health = json.loads(health_path.read_text(encoding="utf-8"))
     except FileNotFoundError:
-        return state.status is BatchStatus.FINISHED
+        return state.status is BatchStatus.FINISHED, exported
     except (OSError, json.JSONDecodeError):
-        return True
-    return not isinstance(health, dict) or health.get("status") != "ok"
+        return True, exported
+    return not isinstance(health, dict) or health.get("status") != "ok", exported
 
 
 def _batch_response(
@@ -366,10 +389,17 @@ def _batch_response(
     *,
     discovery_issues: list[str] | None = None,
     export: dict[str, list[str]] | None = None,
+    exported_by_name: dict[str, bool] | None = None,
 ) -> dict[str, object]:
     result: dict[str, object] = {
         "batch": {"id": state.batch_id, "status": state.status.value},
-        "items": [_batch_item_response(item) for item in state.items],
+        "items": [
+            _batch_item_response(
+                item,
+                exported=None if exported_by_name is None else exported_by_name.get(item.safe_name, False),
+            )
+            for item in state.items
+        ],
         "risks": {
             "review_required_items": [
                 item.safe_name for item in state.items if item.status is BatchItemStatus.REVIEW_REQUIRED
@@ -384,7 +414,7 @@ def _batch_response(
             "total": len(state.items),
         },
         "retry_items": [item.safe_name for item in state.items if item.status is BatchItemStatus.FAILED],
-        "next_actions": _batch_next_actions(state),
+        "next_actions": _batch_next_actions(state, exported_by_name=exported_by_name),
     }
     if export is not None:
         result["export"] = export
@@ -401,18 +431,16 @@ def _batch_response(
     )
 
 
-def _batch_item_response(item: BatchItemState) -> dict[str, object]:
-    exported = (
-        item.output_path is not None
-        and item.output_path.is_dir()
-        and (item.output_path.parent / "analysis" / "execution_audit.json").is_file()
-    )
+def _batch_item_response(item: BatchItemState, *, exported: bool | None = None) -> dict[str, object]:
+    if exported is None:
+        exported = _batch_item_export_exists(item)
     return {
         "name": item.safe_name,
         "status": item.status.value,
         "progress": round(item.progress * 100),
         "retry_count": item.retry_count,
         "risks": list(item.warnings),
+        "risk_details": [dict(detail) for detail in item.risk_details],
         "approved": item.approved,
         "exported": exported,
         "analyzed_count": item.analyzed_count,
@@ -421,7 +449,11 @@ def _batch_item_response(item: BatchItemState) -> dict[str, object]:
     }
 
 
-def _batch_next_actions(state: BatchState) -> list[str]:
+def _batch_next_actions(
+    state: BatchState,
+    *,
+    exported_by_name: dict[str, bool] | None = None,
+) -> list[str]:
     actions: list[str] = []
     if (
         state.status in {BatchStatus.READY, BatchStatus.RUNNING, BatchStatus.PAUSED}
@@ -438,15 +470,38 @@ def _batch_next_actions(state: BatchState) -> list[str]:
             or (item.status is BatchItemStatus.REVIEW_REQUIRED and item.approved)
             for item in state.items
         )
-        and any(
-            item.output_path is None
-            for item in state.items
-            if item.status is BatchItemStatus.COMPLETED
-            or (item.status is BatchItemStatus.REVIEW_REQUIRED and item.approved)
+        and (
+            any(
+                not exported_by_name.get(item.safe_name, False)
+                if exported_by_name is not None
+                else item.output_path is None
+                for item in state.items
+                if item.status is BatchItemStatus.COMPLETED
+                or (item.status is BatchItemStatus.REVIEW_REQUIRED and item.approved)
+            )
         )
     ):
         actions.append("export")
     return actions
+
+
+def _batch_item_export_exists(item: BatchItemState) -> bool:
+    return (
+        item.output_path is not None
+        and item.output_path.is_dir()
+        and (item.output_path.parent / "analysis" / "execution_audit.json").is_file()
+    )
+
+
+def _batch_item_export_is_valid(item: BatchItemState) -> bool:
+    if not _batch_item_export_exists(item):
+        return False
+    assert item.output_path is not None
+    try:
+        verify_output_snapshot(item.output_path.parent / "analysis", item.output_path)
+    except (OSError, ValueError):
+        return False
+    return True
 
 
 def _shared_artifact_root(*paths: Path) -> Path:

@@ -59,6 +59,27 @@ class UiSmokeTest(unittest.TestCase):
         finally:
             window.close()
 
+    def test_batch_run_blocks_close_until_workspace_returns_idle(self):
+        from PySide6.QtGui import QCloseEvent
+
+        from frame_timing_agent.ui.main_window import MainWindow
+
+        window = MainWindow()
+        try:
+            window.batch_workspace._set_operation("analysis")
+            running_event = QCloseEvent()
+            with patch("frame_timing_agent.ui.main_window.QMessageBox.information"):
+                window.closeEvent(running_event)
+            self.assertFalse(running_event.isAccepted())
+
+            window.batch_workspace._set_operation("idle")
+            idle_event = QCloseEvent()
+            window.closeEvent(idle_event)
+            self.assertTrue(idle_event.isAccepted())
+        finally:
+            window.batch_workspace._set_operation("idle")
+            window.close()
+
     def test_single_directory_task_keeps_fps_disabled_while_busy(self):
         from frame_timing_agent.ui.main_window import MainWindow
 

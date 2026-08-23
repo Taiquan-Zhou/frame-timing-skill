@@ -102,13 +102,13 @@ def make_review_batch(tmp_path: Path) -> tuple[Path, str]:
 def test_run_saves_running_and_terminal_state_after_each_item(tmp_path, monkeypatch):
     state_path = make_batch(tmp_path)
     persisted = []
-    real_save = batch_session.save_batch
+    real_save = batch_session._save_batch_unlocked
 
     def recording_save(state):
         real_save(state)
         persisted.append((state.status, tuple(item.status for item in state.items)))
 
-    monkeypatch.setattr(batch_session, "save_batch", recording_save)
+    monkeypatch.setattr(batch_session, "_save_batch_unlocked", recording_save)
     monkeypatch.setattr(batch_session, "analyze_run", lambda settings, progress_callback=None: fake_result(settings))
     publish_calls = []
     monkeypatch.setattr(
@@ -138,6 +138,16 @@ def test_quality_warning_marks_item_for_review(tmp_path, monkeypatch):
 
     assert result.items[0].status is BatchItemStatus.REVIEW_REQUIRED
     assert result.items[0].warnings == ("quality.bad_candidate_ratio",)
+    assert result.items[0].risk_details == (
+        {
+            "code": "quality.bad_candidate_ratio",
+            "value": 0.1,
+            "threshold": 0.1,
+            "affected_count": 1,
+            "ranges": [],
+            "message": "低质量候选帧比例达到人工复核阈值。",
+        },
+    )
     assert result.items[0].approved is False
     assert result.items[0].note is None
 
@@ -161,7 +171,7 @@ def test_invalid_quality_artifact_fails_only_current_item(tmp_path, monkeypatch)
 
     assert calls == 2
     assert result.items[0].status is BatchItemStatus.FAILED
-    assert "segments must be a JSON array" in (result.items[0].last_error or "")
+    assert result.items[0].last_error == "analysis_failed: frame analysis did not complete"
     assert result.items[1].status is BatchItemStatus.COMPLETED
 
 
@@ -171,6 +181,16 @@ def test_reanalysis_resets_previous_approval_and_warnings(tmp_path, monkeypatch)
     item = state.items[0]
     item.status = BatchItemStatus.PENDING
     item.warnings = ("quality.low_motion_review",)
+    item.risk_details = (
+        {
+            "code": "quality.low_motion_review",
+            "value": 1,
+            "threshold": None,
+            "affected_count": 5,
+            "ranges": [[0, 4]],
+            "message": "review",
+        },
+    )
     item.approved = True
     item.note = "old approval"
     save_batch(state)
@@ -181,6 +201,7 @@ def test_reanalysis_resets_previous_approval_and_warnings(tmp_path, monkeypatch)
 
     assert result.items[0].status is BatchItemStatus.COMPLETED
     assert result.items[0].warnings == ()
+    assert result.items[0].risk_details == ()
     assert result.items[0].approved is False
     assert result.items[0].note is None
 
@@ -244,7 +265,7 @@ def test_run_continues_after_item_failure_and_redacts_source_path(tmp_path, monk
     assert result.status is BatchStatus.FINISHED
     assert result.items[0].status is BatchItemStatus.FAILED
     assert result.items[1].status is BatchItemStatus.COMPLETED
-    assert "<input_frame_dir>" in (result.items[0].last_error or "")
+    assert result.items[0].last_error == "analysis_failed: frame analysis did not complete"
     assert str(result.items[0].frame_dir) not in (result.items[0].last_error or "")
 
 

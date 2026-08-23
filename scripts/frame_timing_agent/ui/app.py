@@ -28,7 +28,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         from PySide6.QtCore import QSettings, QTimer
         from PySide6.QtWidgets import QMessageBox
     except ModuleNotFoundError:
-        print('PySide6 is required. Install it with: python -m pip install -e ".[ui]"', file=sys.stderr)
+        print(
+            'PySide6 is required. Install it with: python -m pip install "frame-timing-skill[ui]"',
+            file=sys.stderr,
+        )
         return 2
     except ImportError as exc:
         print(f"PySide6 could not start: {exc}", file=sys.stderr)

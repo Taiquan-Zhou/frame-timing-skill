@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import BinaryIO, Callable, Iterator, Sequence
 
 from frame_timing_agent.batch_discovery import DiscoveryResult
-from frame_timing_agent.batch_quality import evaluate_quality
+from frame_timing_agent.batch_quality import QualityWarning, evaluate_quality
 from frame_timing_agent.batch_timing_agent import (
     BatchTimingItem,
     BatchTimingItemResult,
@@ -74,6 +74,7 @@ class BatchItemState:
     last_error: str | None = None
     retry_count: int = 0
     warnings: tuple[str, ...] = ()
+    risk_details: tuple[dict[str, object], ...] = ()
     approved: bool = False
     note: str | None = None
     analyzed_count: int | None = None
@@ -105,6 +106,7 @@ class BatchState:
     fps: float
     limit_first_n: int | None
     artifact_root: Path
+    revision: int = 0
     items: list[BatchItemState] = field(default_factory=list)
     schema_version: int = SCHEMA_VERSION
     status: BatchStatus = BatchStatus.READY
@@ -156,7 +158,7 @@ def create_batch(
     with _run_lock(state.state_path):
         if state.state_path.exists():
             raise BatchStateError(f"batch state already exists: {state.state_path}")
-        save_batch(state)
+        _save_batch_unlocked(state)
     return state
 
 
@@ -175,12 +177,30 @@ def load_batch(state_path: Path | str) -> BatchState:
 
 
 def save_batch(state: BatchState) -> None:
-    """Durably replace the canonical state file without exposing partial JSON."""
+    """Lock and durably replace a state unless the loaded revision is stale."""
     _validate_state(state)
-    state.updated_at = _timestamp()
+    with _run_lock(state.state_path):
+        _save_batch_unlocked(state)
+
+
+def _save_batch_unlocked(state: BatchState) -> None:
+    """Persist a state while the caller owns the canonical batch lock."""
+    _validate_state(state)
     state_path = state.state_path
+    if state_path.exists():
+        persisted_revision = load_batch(state_path).revision
+        if persisted_revision != state.revision:
+            raise BatchStateError("batch state revision is stale")
+    elif state.revision != 0:
+        raise BatchStateError("batch state revision is stale")
+
+    previous_revision = state.revision
+    previous_updated_at = state.updated_at
+    state.revision += 1
+    state.updated_at = _timestamp()
     state_path.parent.mkdir(parents=True, exist_ok=True)
     temporary_path = state_path.with_name(f".{state_path.name}.{uuid.uuid4().hex}.tmp")
+    replaced = False
     try:
         with temporary_path.open("x", encoding="utf-8", newline="\n") as state_file:
             json.dump(_state_to_json(state), state_file, indent=2, sort_keys=True)
@@ -188,8 +208,12 @@ def save_batch(state: BatchState) -> None:
             state_file.flush()
             os.fsync(state_file.fileno())
         os.replace(temporary_path, state_path)
+        replaced = True
         _sync_directory(state_path.parent)
     except BaseException:
+        if not replaced:
+            state.revision = previous_revision
+            state.updated_at = previous_updated_at
         try:
             temporary_path.unlink(missing_ok=True)
         except OSError:
@@ -222,7 +246,7 @@ def recover_batch(state_path: Path | str) -> BatchState:
                 item.retry_count += 1
                 changed = True
         if changed:
-            save_batch(state)
+            _save_batch_unlocked(state)
         return state
 
 
@@ -248,7 +272,7 @@ def approve_item(state_path: Path | str, item_name: str, note: str) -> BatchStat
         )
         item.approved = True
         item.note = note.strip() or None
-        save_batch(state)
+        _save_batch_unlocked(state)
         return state
 
 
@@ -305,7 +329,7 @@ def export_batch(
                 item.output_path = result.output_dir
                 exported.append(item.safe_name)
             completed += 1
-            save_batch(state)
+            _save_batch_unlocked(state)
             _report_progress(progress_callback, round(completed * 100 / total), item.safe_name)
 
         _publish_reports(state)
@@ -341,7 +365,7 @@ def run_batch(
                 item.progress = 0.0
         state.status = BatchStatus.RUNNING
         state.pause_requested = False
-        save_batch(state)
+        _save_batch_unlocked(state)
         total = len(state.items)
         terminal_count = sum(
             item.status not in {BatchItemStatus.PENDING, BatchItemStatus.RUNNING} and item.safe_name not in retries
@@ -356,12 +380,13 @@ def run_batch(
             if should_pause is not None and should_pause():
                 state.status = BatchStatus.PAUSED
                 state.pause_requested = True
-                save_batch(state)
+                _save_batch_unlocked(state)
                 break
 
             if is_retry or item.last_error is not None:
                 item.retry_count += 1
             item.warnings = ()
+            item.risk_details = ()
             item.approved = False
             item.note = None
             item.analyzed_count = None
@@ -371,7 +396,7 @@ def run_batch(
             reports_current = False
             item.progress = 0.0
             item.last_error = None
-            save_batch(state)
+            _save_batch_unlocked(state)
             settings = RunSettings(
                 frame_dir=item.frame_dir,
                 artifact_dir=state.artifact_root / item.safe_name,
@@ -389,6 +414,7 @@ def run_batch(
                 result = analyze_run(settings, progress_callback=report_item_progress)
                 warnings = evaluate_quality(result.artifact_dir / "analysis")
                 item.warnings = tuple(warning.code for warning in warnings)
+                item.risk_details = tuple(_quality_warning_to_dict(warning) for warning in warnings)
                 item.status = BatchItemStatus.REVIEW_REQUIRED if warnings else BatchItemStatus.COMPLETED
                 item.progress = 1.0
                 item.analyzed_count = result.analyzed_count
@@ -408,7 +434,7 @@ def run_batch(
                 item.output_path = None
 
             terminal_count += 1
-            save_batch(state)
+            _save_batch_unlocked(state)
             _publish_reports(state)
             reports_current = True
             _report_progress(progress_callback, round(terminal_count * 100 / total), item.safe_name)
@@ -417,7 +443,7 @@ def run_batch(
                 _publish_reports(state)
             state.status = BatchStatus.FINISHED
             state.pause_requested = False
-            save_batch(state)
+            _save_batch_unlocked(state)
         if state.status is BatchStatus.FINISHED:
             _report_progress(progress_callback, 100, "batch finished")
         return state
@@ -486,12 +512,24 @@ def _report_progress(callback: Callable[[int, str], None] | None, percent: int, 
             pass
 
 
+def _quality_warning_to_dict(warning: QualityWarning) -> dict[str, object]:
+    return {
+        "code": warning.code,
+        "value": warning.value,
+        "threshold": warning.threshold,
+        "affected_count": warning.affected_count,
+        "ranges": [list(frame_range) for frame_range in warning.ranges],
+        "message": warning.message,
+    }
+
+
 def _state_to_json(state: BatchState) -> dict[str, object]:
     return {
         "schema_version": state.schema_version,
         "batch_id": state.batch_id,
         "created_at": state.created_at,
         "updated_at": state.updated_at,
+        "revision": state.revision,
         "fps": state.fps,
         "limit_first_n": state.limit_first_n,
         "artifact_root": str(state.artifact_root),
@@ -506,6 +544,7 @@ def _state_to_json(state: BatchState) -> dict[str, object]:
                 "last_error": item.last_error,
                 "retry_count": item.retry_count,
                 "warnings": list(item.warnings),
+                "risk_details": list(item.risk_details),
                 "approved": item.approved,
                 "note": item.note,
                 "analyzed_count": item.analyzed_count,
@@ -531,6 +570,7 @@ def _state_from_json(raw_state: object) -> BatchState:
             batch_id=_required_string(raw_state, "batch_id"),
             created_at=_required_string(raw_state, "created_at"),
             updated_at=_required_string(raw_state, "updated_at"),
+            revision=_optional_revision(raw_state),
             fps=_required_float(raw_state, "fps"),
             limit_first_n=_optional_positive_int(raw_state, "limit_first_n"),
             artifact_root=Path(_required_string(raw_state, "artifact_root")),
@@ -553,6 +593,9 @@ def _item_from_json(raw_item: object) -> BatchItemState:
     warnings = raw_item.get("warnings")
     if not isinstance(warnings, list) or not all(isinstance(warning, str) for warning in warnings):
         raise TypeError("warnings must be a list of strings")
+    risk_details = raw_item.get("risk_details", [])
+    if not isinstance(risk_details, list) or not all(isinstance(detail, dict) for detail in risk_details):
+        raise TypeError("risk_details must be a list of objects")
     return BatchItemState(
         frame_dir=Path(_required_string(raw_item, "frame_dir")),
         safe_name=_required_string(raw_item, "safe_name"),
@@ -561,6 +604,7 @@ def _item_from_json(raw_item: object) -> BatchItemState:
         last_error=_optional_string(raw_item, "last_error"),
         retry_count=_required_nonnegative_int(raw_item, "retry_count"),
         warnings=tuple(warnings),
+        risk_details=tuple(risk_details),
         approved=_required_bool(raw_item, "approved"),
         note=_optional_string(raw_item, "note"),
         analyzed_count=_optional_nonnegative_int(raw_item, "analyzed_count"),
@@ -572,6 +616,8 @@ def _item_from_json(raw_item: object) -> BatchItemState:
 def _validate_state(state: BatchState) -> None:
     if type(state.schema_version) is not int or state.schema_version != SCHEMA_VERSION:
         raise BatchStateError(f"unsupported schema version: {state.schema_version!r}")
+    if isinstance(state.revision, bool) or not isinstance(state.revision, int) or state.revision < 0:
+        raise BatchStateError("revision must be a non-negative integer")
     if not isinstance(state.batch_id, str) or not state.batch_id:
         raise BatchStateError("batch_id is required")
     _validate_timestamp(state.created_at, "created_at")
@@ -608,6 +654,10 @@ def _validate_state(state: BatchState) -> None:
         item.status in {BatchItemStatus.PENDING, BatchItemStatus.RUNNING} for item in state.items
     ):
         raise BatchStateError("finished batch cannot contain pending or running items")
+    if state.status is not BatchStatus.RUNNING and any(
+        item.status is BatchItemStatus.RUNNING for item in state.items
+    ):
+        raise BatchStateError("running item requires a running batch")
 
 
 def _validate_item(state: BatchState, item: BatchItemState) -> None:
@@ -641,6 +691,12 @@ def _validate_item(state: BatchState, item: BatchItemState) -> None:
         raise BatchStateError("item note must be a string or None")
     if not isinstance(item.warnings, tuple) or not all(isinstance(warning, str) for warning in item.warnings):
         raise BatchStateError("item warnings must be a tuple of strings")
+    if not isinstance(item.risk_details, tuple):
+        raise BatchStateError("item risk_details must be a tuple")
+    for detail in item.risk_details:
+        _validate_risk_detail(detail)
+    if item.risk_details and tuple(str(detail["code"]) for detail in item.risk_details) != item.warnings:
+        raise BatchStateError("item risk_details must match item warnings")
     _validate_canonical_path(item.frame_dir, "item frame_dir")
     if item.output_path is not None:
         if not isinstance(item.output_path, Path):
@@ -649,6 +705,39 @@ def _validate_item(state: BatchState, item: BatchItemState) -> None:
         expected_output_path = state.artifact_root / item.safe_name / "output_frames"
         if item.output_path != expected_output_path:
             raise BatchStateError("item output_path does not match its artifact directory")
+
+
+def _validate_risk_detail(detail: object) -> None:
+    if not isinstance(detail, dict):
+        raise BatchStateError("item risk detail must be an object")
+    required = {"code", "value", "threshold", "affected_count", "ranges", "message"}
+    if set(detail) != required:
+        raise BatchStateError("item risk detail fields are invalid")
+    if not isinstance(detail["code"], str) or not detail["code"]:
+        raise BatchStateError("item risk detail code is invalid")
+    if not isinstance(detail["message"], str) or not detail["message"]:
+        raise BatchStateError("item risk detail message is invalid")
+    for field_name in ("value", "threshold"):
+        value = detail[field_name]
+        if value is not None and (
+            isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value)
+        ):
+            raise BatchStateError(f"item risk detail {field_name} is invalid")
+    affected_count = detail["affected_count"]
+    if isinstance(affected_count, bool) or not isinstance(affected_count, int) or affected_count < 0:
+        raise BatchStateError("item risk detail affected_count is invalid")
+    ranges = detail["ranges"]
+    if not isinstance(ranges, list):
+        raise BatchStateError("item risk detail ranges must be a list")
+    for frame_range in ranges:
+        if (
+            not isinstance(frame_range, list)
+            or len(frame_range) != 2
+            or any(isinstance(value, bool) or not isinstance(value, int) for value in frame_range)
+            or frame_range[0] < 0
+            or frame_range[1] < frame_range[0]
+        ):
+            raise BatchStateError("item risk detail range is invalid")
 
 
 def _validate_state_path_location(state_path: Path) -> None:
@@ -736,6 +825,13 @@ def _required_string(data: dict[str, object], key: str) -> str:
     value = data[key]
     if not isinstance(value, str) or not value:
         raise TypeError(f"{key} must be a non-empty string")
+    return value
+
+
+def _optional_revision(data: dict[str, object]) -> int:
+    value = data.get("revision", 0)
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise TypeError("revision must be a non-negative integer")
     return value
 
 
