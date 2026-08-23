@@ -72,6 +72,16 @@ class PackageMetadataTest(unittest.TestCase):
         self.assertEqual(data["project"]["scripts"]["frame-timing-ui"], "frame_timing_agent.ui.app:main")
         self.assertIn("PySide6-Essentials>=6.6,<6.9", data["project"]["optional-dependencies"]["ui"])
 
+    def test_agent_safe_batch_commands_reuse_the_existing_tool_entrypoint(self):
+        data = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
+        scripts = data["project"]["scripts"]
+
+        self.assertEqual(
+            [name for name, target in scripts.items() if target == "frame_timing_agent.tool_cli:main"],
+            ["frame-timing-tool"],
+        )
+        self.assertNotIn("frame-timing-tool-batch", scripts)
+
     def test_console_entrypoints_use_python310_runtime_typing(self):
         for path in [
             Path("scripts") / "frame_timing_agent" / "tool_cli.py",

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from collections.abc import Sequence
 from pathlib import Path
@@ -12,6 +13,20 @@ from frame_timing_agent.artifact_io import (
     read_analysis_result,
     read_strategy_candidate,
     read_validation_result,
+)
+from frame_timing_agent.batch_discovery import discover_frame_directories
+from frame_timing_agent.batch_session import (
+    BatchBusyError,
+    BatchItemState,
+    BatchItemStatus,
+    BatchState,
+    BatchStateError,
+    BatchStatus,
+    approve_item,
+    create_batch,
+    export_batch,
+    load_batch,
+    run_batch,
 )
 from frame_timing_agent.artifact_layout import (
     ANALYSIS_ARTIFACT,
@@ -45,6 +60,10 @@ class CliInputError(ValueError):
     pass
 
 
+class _BatchStaleSourceError(ValueError):
+    pass
+
+
 class _ArgumentParser(argparse.ArgumentParser):
     def error(self, message: str) -> NoReturn:
         raise CliInputError(message)
@@ -60,6 +79,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _emit_error(EXIT_INPUT_ERROR, "input_error", "command arguments are invalid", exc)
     except ArtifactFormatError as exc:
         return _emit_error(EXIT_INPUT_ERROR, "invalid_artifact", "artifact JSON is invalid", exc)
+    except BatchBusyError as exc:
+        return _emit_error(EXIT_EXECUTION_FAILED, "busy_batch", "batch is busy", exc)
+    except BatchStateError as exc:
+        return _emit_error(EXIT_INPUT_ERROR, "invalid_input", "batch command input is invalid", exc)
+    except _BatchStaleSourceError as exc:
+        return _emit_error(EXIT_EXECUTION_FAILED, "stale_source", "batch source changed since analysis", exc)
     except (ConfigurationError, FileNotFoundError) as exc:
         return _emit_error(EXIT_INPUT_ERROR, "input_error", "command input is invalid", exc)
     except HealthPublicationError as exc:
@@ -102,6 +127,31 @@ def _parser() -> _ArgumentParser:
     verify = subparsers.add_parser("verify")
     verify.add_argument("--frames", required=True)
     verify.add_argument("--artifact-root", required=True)
+
+    batch = subparsers.add_parser("batch")
+    batch_actions = batch.add_subparsers(dest="batch_action", required=True)
+
+    batch_create = batch_actions.add_parser("create")
+    batch_create.add_argument("--frames", action="append", default=[])
+    batch_create.add_argument("--root")
+    batch_create.add_argument("--state", required=True)
+    batch_create.add_argument("--fps", type=float, default=30.0)
+    batch_create.add_argument("--limit-first-n", type=int)
+
+    batch_run = batch_actions.add_parser("run")
+    batch_run.add_argument("--state", required=True)
+    batch_run.add_argument("--retry-item", action="append", default=[])
+
+    batch_status = batch_actions.add_parser("status")
+    batch_status.add_argument("--state", required=True)
+
+    batch_approve = batch_actions.add_parser("approve")
+    batch_approve.add_argument("--state", required=True)
+    batch_approve.add_argument("--item", required=True)
+    batch_approve.add_argument("--note", default="")
+
+    batch_export = batch_actions.add_parser("export")
+    batch_export.add_argument("--state", required=True)
     return parser
 
 
@@ -197,7 +247,178 @@ def _dispatch(args: argparse.Namespace) -> tuple[int, dict[str, object]]:
             },
             health,
         )
+    if command == "batch":
+        return _dispatch_batch(args)
     raise CliInputError("unsupported command")
+
+
+def _dispatch_batch(args: argparse.Namespace) -> tuple[int, dict[str, object]]:
+    action = str(args.batch_action)
+    if action == "create":
+        if not args.frames and args.root is None:
+            raise CliInputError("batch create requires frames or a discovery root")
+        state_path = _batch_state_path(args.state)
+        discovery = discover_frame_directories(args.frames, args.root)
+        try:
+            state = create_batch(
+                discovery,
+                artifact_root=state_path.parent.parent,
+                fps=float(args.fps),
+                limit_first_n=args.limit_first_n,
+            )
+        except ValueError as exc:
+            raise BatchStateError("batch creation input is invalid") from exc
+        if state.state_path.resolve() != state_path:
+            raise CliInputError("batch state path is not canonical")
+        return EXIT_SUCCESS, _batch_response(state, discovery_issues=[issue.code for issue in discovery.issues])
+
+    state_path = _batch_state_path(args.state)
+    if action == "status":
+        return _batch_terminal_response(load_batch(state_path), action="status")
+    if action == "run":
+        state = run_batch(state_path, retry_items=tuple(args.retry_item))
+        return _batch_terminal_response(state, action="run")
+    if action == "approve":
+        try:
+            state = approve_item(state_path, str(args.item), str(args.note))
+        except BatchStateError:
+            raise
+        except ValueError as exc:
+            raise _BatchStaleSourceError() from exc
+        return EXIT_SUCCESS, _batch_response(state)
+    if action == "export":
+        summary = export_batch(state_path)
+        state = load_batch(state_path)
+        export = {
+            "exported": list(summary.exported),
+            "skipped": list(summary.skipped),
+            "failed": list(summary.failed),
+        }
+        payload = _batch_response(state, export=export)
+        if summary.failed:
+            payload["status"] = "failed"
+            payload["error"] = {"code": "unsafe_export", "message": "one or more batch items could not be exported"}
+            return EXIT_EXECUTION_FAILED, payload
+        return _batch_terminal_response(state, action="export", export=export)
+    raise CliInputError("unsupported batch action")
+
+
+def _batch_state_path(raw_path: str) -> Path:
+    state_path = Path(raw_path).resolve()
+    if state_path.name != "batch_state.json" or state_path.parent.name != "analysis":
+        raise CliInputError("batch state path is not canonical")
+    return state_path
+
+
+def _batch_terminal_response(
+    state: BatchState,
+    *,
+    action: str,
+    export: dict[str, list[str]] | None = None,
+) -> tuple[int, dict[str, object]]:
+    payload = _batch_response(state, export=export)
+    if action == "run" and any(item.status is BatchItemStatus.FAILED for item in state.items):
+        payload["status"] = "failed"
+        payload["error"] = {"code": "analysis_failed", "message": "one or more batch items failed analysis"}
+        return EXIT_EXECUTION_FAILED, payload
+    if _batch_health_failed(state):
+        payload["status"] = "failed"
+        payload["error"] = {"code": "artifact_health_failed", "message": "batch artifact health check failed"}
+        return EXIT_HEALTH_FAILED, payload
+    return EXIT_SUCCESS, payload
+
+
+def _batch_health_failed(state: BatchState) -> bool:
+    health_path = state.artifact_root / "analysis" / "maintenance_report.json"
+    try:
+        health = json.loads(health_path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return False
+    except (OSError, json.JSONDecodeError):
+        return True
+    return not isinstance(health, dict) or health.get("status") != "ok"
+
+
+def _batch_response(
+    state: BatchState,
+    *,
+    discovery_issues: list[str] | None = None,
+    export: dict[str, list[str]] | None = None,
+) -> dict[str, object]:
+    result: dict[str, object] = {
+        "batch": {"id": state.batch_id, "status": state.status.value},
+        "items": [_batch_item_response(item) for item in state.items],
+        "risks": {
+            "review_required_items": [
+                item.safe_name for item in state.items if item.status is BatchItemStatus.REVIEW_REQUIRED
+            ],
+            "warning_count": sum(len(item.warnings) for item in state.items),
+            "discovery_issues": discovery_issues or [],
+        },
+        "progress": {
+            "completed": sum(
+                item.status not in {BatchItemStatus.PENDING, BatchItemStatus.RUNNING} for item in state.items
+            ),
+            "total": len(state.items),
+        },
+        "retry_items": [item.safe_name for item in state.items if item.status is BatchItemStatus.FAILED],
+        "next_actions": _batch_next_actions(state),
+    }
+    if export is not None:
+        result["export"] = export
+    return _response(
+        "ok",
+        state.batch_id,
+        {
+            "batch_state": "analysis/batch_state.json",
+            "batch_summary": "analysis/batch_summary.json",
+            "human_review": "analysis/human_review.md",
+        },
+        result,
+    )
+
+
+def _batch_item_response(item: BatchItemState) -> dict[str, object]:
+    return {
+        "name": item.safe_name,
+        "status": item.status.value,
+        "progress": round(item.progress * 100),
+        "retry_count": item.retry_count,
+        "risks": list(item.warnings),
+        "approved": item.approved,
+        "exported": item.output_path is not None,
+        "analyzed_count": item.analyzed_count,
+        "output_count": item.output_count,
+        "error": item.last_error,
+    }
+
+
+def _batch_next_actions(state: BatchState) -> list[str]:
+    actions: list[str] = []
+    if (
+        state.status in {BatchStatus.READY, BatchStatus.PAUSED}
+        or any(item.status is BatchItemStatus.PENDING for item in state.items)
+        or any(item.status is BatchItemStatus.FAILED for item in state.items)
+    ):
+        actions.append("run")
+    if any(item.status is BatchItemStatus.REVIEW_REQUIRED and not item.approved for item in state.items):
+        actions.append("approve")
+    if (
+        not any(item.status is BatchItemStatus.REVIEW_REQUIRED and not item.approved for item in state.items)
+        and any(
+            item.status is BatchItemStatus.COMPLETED
+            or (item.status is BatchItemStatus.REVIEW_REQUIRED and item.approved)
+            for item in state.items
+        )
+        and any(
+            item.output_path is None
+            for item in state.items
+            if item.status is BatchItemStatus.COMPLETED
+            or (item.status is BatchItemStatus.REVIEW_REQUIRED and item.approved)
+        )
+    ):
+        actions.append("export")
+    return actions
 
 
 def _shared_artifact_root(*paths: Path) -> Path:
