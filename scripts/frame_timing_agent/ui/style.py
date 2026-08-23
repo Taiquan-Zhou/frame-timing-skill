@@ -87,6 +87,13 @@ def main_window_stylesheet() -> str:
         QFrame#summaryCard, QFrame#panel { background: #ffffff; border: 1px solid #e2e8f0; border-radius: 8px; }
         QFrame#thumbnail { background: #ffffff; border: 1px solid #e5eaf1; border-radius: 8px; }
         QFrame#metricSwitch { background: #ffffff; border: 1px solid #d8e1ec; border-radius: 7px; }
+        QFrame#modeSwitch { background: #ffffff; border: 1px solid #d8e1ec; border-radius: 7px; }
+        QFrame#batchToolbar { background: #ffffff; border: 1px solid #e2e8f0; border-radius: 8px; }
+        QSplitter#batchSplitter::handle { background: #e2e8f0; width: 1px; }
+        QListWidget#batchList { background: #ffffff; border: 1px solid #e2e8f0; border-radius: 7px; outline: none; padding: 4px; }
+        QListWidget#batchList::item { border-bottom: 1px solid #edf1f6; padding: 9px 8px; }
+        QListWidget#batchList::item:selected { background: #eaf2ff; color: #1d4ed8; }
+        QLabel#batchWarning { color: #b45309; }
         QLabel#brandIcon { background: #e9f2ff; border-radius: 8px; }
         QLabel#summaryIconBlue { background: #eaf2ff; border-radius: 23px; }
         QLabel#summaryIconPurple { background: #f1edff; border-radius: 23px; }
@@ -119,6 +126,9 @@ def main_window_stylesheet() -> str:
         QPushButton#segmentButton[last="true"] { border-right: none; }
         QPushButton#segmentButton:hover { background: #f8fafc; color: #1d4ed8; }
         QPushButton#segmentButton:checked { background: #eaf2ff; color: #1d4ed8; }
+        QPushButton#modeButton { background: transparent; color: #475569; border: none; border-right: 1px solid #d8e1ec; border-radius: 0; padding: 5px 18px; min-height: 24px; }
+        QPushButton#modeButton:hover { background: #f8fafc; color: #1d4ed8; }
+        QPushButton#modeButton:checked { background: #eaf2ff; color: #1d4ed8; }
         QProgressBar { background: #e8edf4; border: none; border-radius: 3px; max-height: 6px; }
         QProgressBar::chunk { background: #2563eb; border-radius: 3px; }
         QToolTip { background: #ffffff; color: #334155; border: 1px solid #d8e0ea; padding: 5px; }

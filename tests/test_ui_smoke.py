@@ -28,6 +28,50 @@ class UiSmokeTest(unittest.TestCase):
         finally:
             window.close()
 
+    def test_main_window_starts_in_single_directory_mode(self):
+        from frame_timing_agent.ui.main_window import MainWindow
+
+        window = MainWindow()
+        try:
+            self.assertTrue(window.single_mode_button.isChecked())
+            self.assertFalse(window.batch_mode_button.isChecked())
+            self.assertIs(window.workspace_stack.currentWidget(), window.single_workspace)
+        finally:
+            window.close()
+
+    def test_batch_run_disables_mode_switch_and_single_run_controls(self):
+        from frame_timing_agent.ui.main_window import MainWindow
+
+        window = MainWindow()
+        try:
+            window.select_batch_mode()
+            window.batch_workspace._set_operation("analysis")
+            self.assertFalse(window.single_mode_button.isEnabled())
+            self.assertFalse(window.batch_mode_button.isEnabled())
+            self.assertFalse(window.analyze_button.isEnabled())
+            self.assertFalse(window.fps_spin.isEnabled())
+
+            window.batch_workspace._set_operation("idle")
+            self.assertTrue(window.single_mode_button.isEnabled())
+            self.assertTrue(window.batch_mode_button.isEnabled())
+            self.assertFalse(window.analyze_button.isEnabled())
+            self.assertTrue(window.fps_spin.isEnabled())
+        finally:
+            window.close()
+
+    def test_single_directory_task_keeps_fps_disabled_while_busy(self):
+        from frame_timing_agent.ui.main_window import MainWindow
+
+        window = MainWindow()
+        try:
+            window._begin_task("正在分析")
+            self.assertFalse(window.fps_spin.isEnabled())
+            self.assertFalse(window.single_mode_button.isEnabled())
+            self.assertFalse(window.batch_mode_button.isEnabled())
+        finally:
+            window._finish_task("完成")
+            window.close()
+
     def test_background_task_delivers_success_and_failure(self):
         from PySide6.QtCore import QEventLoop, QThreadPool, QTimer
 

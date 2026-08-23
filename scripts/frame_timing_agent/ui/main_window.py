@@ -23,11 +23,13 @@ from PySide6.QtWidgets import (
     QPushButton,
     QSizePolicy,
     QSpinBox,
+    QStackedWidget,
     QStyle,
     QVBoxLayout,
     QWidget,
 )
 
+from frame_timing_agent.ui.batch_workspace import BatchWorkspace
 from frame_timing_agent.ui.history import RunHistoryStore, RunRecord
 from frame_timing_agent.ui.history_dialog import RunHistoryDialog
 from frame_timing_agent.ui.style import (
@@ -95,6 +97,56 @@ class MainWindow(QMainWindow):
         root.setContentsMargins(16, 14, 16, 16)
         root.setSpacing(14)
         root.addWidget(self._build_header())
+        root.addWidget(self._build_mode_switch())
+
+        self.workspace_stack = QStackedWidget()
+        self.workspace_stack.setObjectName("workspaceStack")
+        self.single_workspace = self._build_single_workspace()
+        self.batch_workspace = BatchWorkspace(
+            self._thread_pool,
+            self._settings,
+            fps_provider=lambda: float(self.fps_spin.value()),
+        )
+        self.batch_workspace.running_changed.connect(self._batch_running_changed)
+        self.workspace_stack.addWidget(self.single_workspace)
+        self.workspace_stack.addWidget(self.batch_workspace)
+        root.addWidget(self.workspace_stack, 1)
+        self.setCentralWidget(central)
+
+    def _build_mode_switch(self) -> QWidget:
+        container = QWidget()
+        layout = QHBoxLayout(container)
+        layout.setContentsMargins(0, 0, 0, 0)
+        switch = QFrame()
+        switch.setObjectName("modeSwitch")
+        switch_layout = QHBoxLayout(switch)
+        switch_layout.setContentsMargins(0, 0, 0, 0)
+        switch_layout.setSpacing(0)
+        self.single_mode_button = QPushButton("单目录")
+        self.batch_mode_button = QPushButton("批量处理")
+        self.single_mode_button.setObjectName("modeButton")
+        self.batch_mode_button.setObjectName("modeButton")
+        self.single_mode_button.setCheckable(True)
+        self.batch_mode_button.setCheckable(True)
+        self.single_mode_button.setChecked(True)
+        group = QButtonGroup(self)
+        group.setExclusive(True)
+        group.addButton(self.single_mode_button)
+        group.addButton(self.batch_mode_button)
+        self._mode_group = group
+        self.single_mode_button.clicked.connect(self.select_single_mode)
+        self.batch_mode_button.clicked.connect(self.select_batch_mode)
+        switch_layout.addWidget(self.single_mode_button)
+        switch_layout.addWidget(self.batch_mode_button)
+        layout.addWidget(switch)
+        layout.addStretch()
+        return container
+
+    def _build_single_workspace(self) -> QWidget:
+        workspace = QWidget()
+        root = QVBoxLayout(workspace)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(14)
         root.addLayout(self._build_summary())
 
         body = QHBoxLayout()
@@ -113,7 +165,35 @@ class MainWindow(QMainWindow):
         body.setStretch(0, 7)
         body.setStretch(1, 3)
         root.addLayout(body, 1)
-        self.setCentralWidget(central)
+        return workspace
+
+    def select_single_mode(self) -> None:
+        if self._busy or self.batch_workspace.is_running:
+            return
+        self.single_mode_button.setChecked(True)
+        self.workspace_stack.setCurrentWidget(self.single_workspace)
+        self._sync_mode_controls()
+
+    def select_batch_mode(self) -> None:
+        if self._busy:
+            return
+        self.batch_mode_button.setChecked(True)
+        self.workspace_stack.setCurrentWidget(self.batch_workspace)
+        self._sync_mode_controls()
+
+    def _batch_running_changed(self, running: bool) -> None:
+        self.single_mode_button.setEnabled(not running and not self._busy)
+        self.batch_mode_button.setEnabled(not running and not self._busy)
+        self._sync_mode_controls()
+
+    def _sync_mode_controls(self) -> None:
+        batch_mode = self.workspace_stack.currentWidget() is self.batch_workspace
+        batch_running = self.batch_workspace.is_running
+        single_enabled = not self._busy and not batch_mode and not batch_running
+        self.path_edit.setEnabled(single_enabled)
+        self.browse_button.setEnabled(single_enabled)
+        self.analyze_button.setEnabled(single_enabled)
+        self.fps_spin.setEnabled(not self._busy and not batch_running)
 
     def _build_header(self) -> QWidget:
         header = QFrame()
@@ -567,6 +647,9 @@ class MainWindow(QMainWindow):
         self.history_button.setEnabled(not busy and self._history_store is not None)
         self.open_artifact_button.setEnabled(not busy and self._artifact_available())
         self.open_output_button.setEnabled(not busy and self._output_available())
+        self.single_mode_button.setEnabled(not busy and not self.batch_workspace.is_running)
+        self.batch_mode_button.setEnabled(not busy and not self.batch_workspace.is_running)
+        self._sync_mode_controls()
 
     def _can_export(self) -> bool:
         return self._current_view is not None and not self._history_read_only and not self._export_completed
@@ -893,7 +976,7 @@ class MainWindow(QMainWindow):
         self._settings.sync()
 
     def closeEvent(self, event) -> None:
-        if self._busy:
+        if self._busy or self.batch_workspace.is_running:
             QMessageBox.information(self, "任务进行中", "请等待当前分析或导出任务完成后再关闭窗口。")
             event.ignore()
             return
