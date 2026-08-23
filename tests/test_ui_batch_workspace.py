@@ -93,6 +93,46 @@ class BatchWorkspaceTest(unittest.TestCase):
             finally:
                 window.close()
 
+    def test_finished_batch_restore_does_not_prompt_to_continue(self):
+        from PySide6.QtCore import QSettings, QThreadPool
+
+        from frame_timing_agent.batch_session import save_batch
+        from frame_timing_agent.ui.batch_workspace import BatchWorkspace
+
+        state = self.make_state(status="finished", item_status="completed")
+        state.items[0].progress = 1.0
+        save_batch(state)
+        settings = QSettings(str(self.root / "settings.ini"), QSettings.Format.IniFormat)
+        settings.setValue("last_batch_state_path", str(state.state_path))
+        settings.sync()
+
+        workspace = BatchWorkspace(QThreadPool(), settings=settings)
+        try:
+            self.assertEqual(workspace.status_label.text(), "已恢复上次分析完成批次")
+            self.assertFalse(workspace.continue_button.isEnabled())
+            self.assertTrue(workspace.export_button.isEnabled())
+            self.assertEqual(workspace.output_path.text(), "尚未导出")
+        finally:
+            workspace.close()
+
+    def test_failed_item_shows_public_error_and_failed_count(self):
+        from PySide6.QtCore import QThreadPool
+
+        from frame_timing_agent.ui.batch_workspace import BatchWorkspace
+
+        state = self.make_state(status="finished", item_status="failed")
+        state.items[0].progress = 1.0
+        state.items[0].last_error = "RuntimeError: decoder rejected <input_frame_dir>"
+        workspace = BatchWorkspace(QThreadPool())
+        try:
+            workspace.set_state(state)
+            workspace._run_succeeded(state)
+            self.assertIn("失败原因", workspace.warning_label.text())
+            self.assertIn("decoder rejected <input_frame_dir>", workspace.warning_label.text())
+            self.assertEqual(workspace.status_label.text(), "批次分析完成，1 项失败")
+        finally:
+            workspace.close()
+
     def test_rows_are_deterministic_and_actions_follow_selected_item_state(self):
         from dataclasses import replace
 
@@ -248,7 +288,11 @@ class BatchWorkspaceTest(unittest.TestCase):
                 workspace.set_state(state)
             self.assertEqual(workspace.strategy_label.text(), "策略：reconstruction_balanced")
             self.assertEqual(workspace.artifact_path.text(), str(state.artifact_root / state.items[0].safe_name))
+            self.assertEqual(workspace.artifact_path.cursorPosition(), 0)
+            self.assertEqual(workspace.artifact_path.toolTip(), workspace.artifact_path.text())
             self.assertEqual(workspace.output_path.text(), str(state.items[0].output_path))
+            self.assertEqual(workspace.output_path.cursorPosition(), 0)
+            self.assertEqual(workspace.output_path.toolTip(), workspace.output_path.text())
         finally:
             workspace.close()
 

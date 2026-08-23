@@ -93,6 +93,23 @@ def test_missing_source_is_reported_as_stale_after_analysis(tmp_path):
         )
 
 
+def test_v1_snapshot_without_additive_frame_metadata_remains_export_compatible(tmp_path):
+    settings = make_analyzed_settings(tmp_path)
+    snapshot_path = settings.artifact_dir / "analysis" / "input_snapshot.json"
+    snapshot = json.loads(snapshot_path.read_text(encoding="utf-8"))
+    for frame in snapshot["frames"]:
+        frame.pop("timestamp_sec")
+        frame.pop("is_duplicate")
+    snapshot_path.write_text(json.dumps(snapshot), encoding="utf-8")
+
+    assert run_workflow.verify_input_snapshot(
+        settings.artifact_dir / "analysis",
+        settings.frame_dir,
+        settings.fps,
+        settings.limit_first_n,
+    )
+
+
 def test_manifest_redirect_into_artifact_is_reported_as_stale_after_analysis(tmp_path):
     settings = make_analyzed_settings(tmp_path)
     source = settings.artifact_dir / "output_frames" / "frame_000000_src_000000.jpg"

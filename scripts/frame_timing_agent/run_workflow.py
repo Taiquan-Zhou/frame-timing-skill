@@ -113,7 +113,7 @@ def verify_input_snapshot(
         _validate_snapshot_source_paths(current, analysis_dir.parent)
     except (OSError, ValueError, KeyError) as exc:
         raise StaleSourceError("input frames changed since analysis; run analysis again before exporting") from exc
-    if current != expected:
+    if not _snapshots_match(expected, current):
         raise StaleSourceError("input frames changed since analysis; run analysis again before exporting")
     if strategy_sha256 is None:
         raise StaleSourceError("analysis snapshot is not bound to a strategy; run analysis again before exporting")
@@ -121,6 +121,27 @@ def verify_input_snapshot(
     if not strategy_path.is_file() or _file_sha256(strategy_path) != strategy_sha256:
         raise StaleSourceError("analysis strategy changed since analysis; run analysis again before exporting")
     return True
+
+
+def _snapshots_match(expected: JsonDict, current: JsonDict) -> bool:
+    normalized_current = dict(current)
+    expected_frames = expected.get("frames")
+    current_frames = current.get("frames")
+    if isinstance(expected_frames, list) and isinstance(current_frames, list):
+        normalized_frames: list[object] = []
+        for index, current_frame in enumerate(current_frames):
+            if not isinstance(current_frame, dict):
+                normalized_frames.append(current_frame)
+                continue
+            normalized_frame = dict(current_frame)
+            expected_frame = expected_frames[index] if index < len(expected_frames) else None
+            if isinstance(expected_frame, dict):
+                for additive_key in ("timestamp_sec", "is_duplicate"):
+                    if additive_key not in expected_frame:
+                        normalized_frame.pop(additive_key, None)
+            normalized_frames.append(normalized_frame)
+        normalized_current["frames"] = normalized_frames
+    return normalized_current == expected
 
 
 def verify_output_snapshot(analysis_dir: Path | str, output_dir: Path | str) -> None:

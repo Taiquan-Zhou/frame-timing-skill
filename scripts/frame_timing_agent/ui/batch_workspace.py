@@ -358,11 +358,20 @@ class BatchWorkspace(QWidget):
             "quality.bad_candidate_ratio": "低质量候选帧比例达到复核阈值",
             "quality.low_motion_review": "存在低运动待复核区间",
         }
-        self.warning_label.setText("\n".join(warning_names.get(code, code) for code in item.warnings))
+        notices = [warning_names.get(code, code) for code in item.warnings]
+        if item.last_error:
+            notices.append(f"失败原因：{item.last_error}")
+        self.warning_label.setText("\n".join(notices))
         self.note_edit.setText(item.note or "")
         self.strategy_label.setText("策略：reconstruction_balanced" if item.analyzed_count else "策略：--")
-        self.artifact_path.setText(str(self.current_state.artifact_root / item.safe_name))
-        self.output_path.setText(str(item.output_path) if item.output_path is not None else "尚未导出")
+        artifact_path = str(self.current_state.artifact_root / item.safe_name)
+        output_path = str(item.output_path) if item.output_path is not None else "尚未导出"
+        self.artifact_path.setText(artifact_path)
+        self.artifact_path.setCursorPosition(0)
+        self.artifact_path.setToolTip(artifact_path)
+        self.output_path.setText(output_path)
+        self.output_path.setCursorPosition(0)
+        self.output_path.setToolTip(output_path)
         analysis_dir = self.current_state.artifact_root / item.safe_name / "analysis"
         if item.analyzed_count and (analysis_dir / "strategy.json").is_file():
             try:
@@ -502,7 +511,11 @@ class BatchWorkspace(QWidget):
         self._active_task = None
         self._set_operation("idle")
         self.set_state(state)
-        self.status_label.setText("批次已暂停" if state.status is BatchStatus.PAUSED else "批次分析完成")
+        if state.status is BatchStatus.PAUSED:
+            self.status_label.setText("批次已暂停")
+            return
+        failed_count = sum(item.status is BatchItemStatus.FAILED for item in state.items)
+        self.status_label.setText(f"批次分析完成，{failed_count} 项失败" if failed_count else "批次分析完成")
 
     def _run_failed(self, message: str) -> None:
         self._active_task = None
@@ -593,7 +606,10 @@ class BatchWorkspace(QWidget):
             self.status_label.setText(f"上次批次无法恢复：{error}")
             return
         self.set_state(state)
-        self.status_label.setText("已恢复批次，等待用户继续")
+        if state.status is BatchStatus.FINISHED:
+            self.status_label.setText("已恢复上次分析完成批次")
+        else:
+            self.status_label.setText("已恢复批次，等待用户继续")
 
     def _persist_state_path(self) -> None:
         if self.settings is None or self.state_path is None:

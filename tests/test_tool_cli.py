@@ -425,6 +425,26 @@ def test_batch_export_reports_ordinary_export_failure_as_unsafe_export(
     assert stderr == ""
 
 
+def test_batch_report_publication_failure_is_an_execution_error(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state_path = tmp_path / "output" / "batch" / "analysis" / "batch_state.json"
+    monkeypatch.setattr(
+        tool_cli,
+        "run_batch",
+        lambda *args, **kwargs: (_ for _ in ()).throw(tool_cli.BatchReportError("report write failed")),
+    )
+
+    exit_code, payload, _, stderr = _invoke(capsys, ["batch", "run", "--state", str(state_path)])
+
+    assert exit_code == 4
+    assert payload["error"]["code"] == "report_failed"
+    assert "report write failed" not in json.dumps(payload)
+    assert str(tmp_path) not in stderr
+
+
 def test_batch_approval_reports_stale_source_without_paths(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     frame_dir = tmp_path / "frames"
     state_path = tmp_path / "output" / "batch" / "analysis" / "batch_state.json"

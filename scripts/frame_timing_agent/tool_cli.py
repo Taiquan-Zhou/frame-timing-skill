@@ -17,6 +17,7 @@ from frame_timing_agent.artifact_io import (
 from frame_timing_agent.batch_discovery import discover_frame_directories
 from frame_timing_agent.batch_session import (
     BatchBusyError,
+    BatchReportError,
     BatchExportStaleSourceError,
     BatchItemState,
     BatchItemStatus,
@@ -85,6 +86,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _emit_error(EXIT_INPUT_ERROR, "invalid_artifact", "artifact JSON is invalid", exc)
     except BatchBusyError as exc:
         return _emit_error(EXIT_EXECUTION_FAILED, "busy_batch", "batch is busy", exc)
+    except BatchReportError as exc:
+        return _emit_error(EXIT_EXECUTION_FAILED, "report_failed", "batch report publication failed", exc)
     except BatchStateError as exc:
         return _emit_error(EXIT_INPUT_ERROR, "invalid_input", "batch command input is invalid", exc)
     except _BatchStaleSourceError as exc:

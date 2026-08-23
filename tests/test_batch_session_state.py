@@ -9,13 +9,16 @@ import pytest
 
 from frame_timing_agent.batch_discovery import DiscoveryResult
 from frame_timing_agent.batch_session import (
+    approve_item,
     BatchBusyError,
     BatchItemStatus,
     BatchStateError,
     BatchStatus,
     create_batch,
+    export_batch,
     load_batch,
     recover_batch,
+    run_batch,
     save_batch,
 )
 from frame_timing_agent import batch_session
@@ -164,6 +167,69 @@ def test_create_batch_rejects_nonempty_artifact_root(tmp_path):
 
     with pytest.raises(BatchStateError, match="not empty"):
         create_batch(make_discovery(frame_dir), artifact_root=artifact_root, fps=24.0)
+
+
+def test_create_batch_allows_only_a_stale_canonical_lock_file(tmp_path):
+    frame_dir = tmp_path / "frames"
+    frame_dir.mkdir()
+    artifact_root = tmp_path / "batch-artifacts"
+    analysis_dir = artifact_root / "analysis"
+    analysis_dir.mkdir(parents=True)
+    (analysis_dir / "batch_state.json.run.lock").write_bytes(b"L")
+
+    state = create_batch(make_discovery(frame_dir), artifact_root=artifact_root, fps=24.0)
+
+    assert state.state_path.is_file()
+
+
+def test_create_batch_rejects_a_hard_linked_canonical_lock_file(tmp_path):
+    frame_dir = tmp_path / "frames"
+    frame_dir.mkdir()
+    artifact_root = tmp_path / "batch-artifacts"
+    analysis_dir = artifact_root / "analysis"
+    analysis_dir.mkdir(parents=True)
+    external_target = tmp_path / "outside.lock"
+    external_target.write_bytes(b"outside")
+    os.link(external_target, analysis_dir / "batch_state.json.run.lock")
+
+    with pytest.raises(BatchStateError, match="artifact root is not empty"):
+        create_batch(make_discovery(frame_dir), artifact_root=artifact_root, fps=24.0)
+
+    assert external_target.read_bytes() == b"outside"
+
+
+def test_batch_operation_rejects_lock_replaced_by_hard_link(tmp_path):
+    frame_dir = tmp_path / "frames"
+    frame_dir.mkdir()
+    state = create_batch(make_discovery(frame_dir), artifact_root=tmp_path / "batch-artifacts", fps=24.0)
+    lock_path = Path(f"{state.state_path}.run.lock")
+    lock_path.unlink()
+    external_target = tmp_path / "outside.lock"
+    external_target.write_bytes(b"outside")
+    os.link(external_target, lock_path)
+
+    with pytest.raises(BatchStateError, match="lock file is unsafe"):
+        run_batch(state.state_path)
+
+    assert external_target.read_bytes() == b"outside"
+
+
+@pytest.mark.parametrize(
+    "operation",
+    [
+        lambda path: run_batch(path),
+        lambda path: recover_batch(path),
+        lambda path: approve_item(path, "missing", "reviewed"),
+        lambda path: export_batch(path),
+    ],
+)
+def test_missing_state_operations_do_not_create_lock_artifacts(tmp_path, operation):
+    state_path = tmp_path / "output" / "batch" / "analysis" / "batch_state.json"
+
+    with pytest.raises(BatchStateError, match="cannot load batch state"):
+        operation(state_path)
+
+    assert not state_path.parent.parent.exists()
 
 
 def test_create_batch_rejects_analysis_link_outside_artifact_root(tmp_path):

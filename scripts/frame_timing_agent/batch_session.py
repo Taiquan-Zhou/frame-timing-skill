@@ -4,6 +4,7 @@ import json
 import math
 import os
 import re
+import stat
 import uuid
 import errno
 from contextlib import contextmanager
@@ -54,6 +55,10 @@ class BatchStateError(ValueError):
 
 class BatchBusyError(BatchStateError):
     """Raised when another live process owns a batch run lock."""
+
+
+class BatchReportError(RuntimeError):
+    """Raised when durable batch summary publication fails."""
 
 
 class _LockUnavailable(OSError):
@@ -132,7 +137,7 @@ def create_batch(
     existing_state_path = resolved_artifact_root / "analysis" / "batch_state.json"
     if existing_state_path.exists():
         raise BatchStateError(f"batch state already exists: {existing_state_path}")
-    if resolved_artifact_root.exists() and any(resolved_artifact_root.iterdir()):
+    if _artifact_root_has_non_lock_content(resolved_artifact_root, existing_state_path):
         raise BatchStateError(f"batch artifact root is not empty: {resolved_artifact_root}")
 
     now = _timestamp()
@@ -224,7 +229,8 @@ def recover_batch(state_path: Path | str) -> BatchState:
 def approve_item(state_path: Path | str, item_name: str, note: str) -> BatchState:
     """Approve one review-required item after revalidating its analysis snapshot."""
     path = Path(state_path).resolve()
-    with _run_lock(path):
+    canonical_path = load_batch(path).state_path.resolve()
+    with _run_lock(canonical_path):
         state = load_batch(path)
         item = next((candidate for candidate in state.items if candidate.safe_name == item_name), None)
         if item is None:
@@ -252,7 +258,8 @@ def export_batch(
 ) -> BatchExportSummary:
     """Explicitly export eligible finished batch items without rerunning analysis."""
     path = Path(state_path).resolve()
-    with _run_lock(path):
+    canonical_path = load_batch(path).state_path.resolve()
+    with _run_lock(canonical_path):
         state = load_batch(path)
         if state.status is not BatchStatus.FINISHED:
             raise BatchStateError("batch must be finished before exporting")
@@ -301,7 +308,7 @@ def export_batch(
             save_batch(state)
             _report_progress(progress_callback, round(completed * 100 / total), item.safe_name)
 
-        publish_batch_timing_reports(state.artifact_root, _reported_results(state))
+        _publish_reports(state)
         summary = BatchExportSummary(tuple(exported), tuple(skipped), tuple(failed))
         if stale_items:
             raise BatchExportStaleSourceError(summary, tuple(stale_items))
@@ -322,7 +329,8 @@ def run_batch(
 ) -> BatchState:
     """Run pending items sequentially, persisting each state transition."""
     path = Path(state_path).resolve()
-    with _run_lock(path):
+    canonical_path = load_batch(path).state_path.resolve()
+    with _run_lock(canonical_path):
         state = load_batch(path)
         if state.status is BatchStatus.RUNNING:
             _recover_interrupted_items(state)
@@ -401,12 +409,12 @@ def run_batch(
 
             terminal_count += 1
             save_batch(state)
-            publish_batch_timing_reports(state.artifact_root, _reported_results(state))
+            _publish_reports(state)
             reports_current = True
             _report_progress(progress_callback, round(terminal_count * 100 / total), item.safe_name)
         else:
             if not reports_current:
-                publish_batch_timing_reports(state.artifact_root, _reported_results(state))
+                _publish_reports(state)
             state.status = BatchStatus.FINISHED
             state.pause_requested = False
             save_batch(state)
@@ -422,6 +430,13 @@ def _recover_interrupted_items(state: BatchState) -> None:
             item.status = BatchItemStatus.PENDING
             item.progress = 0.0
             item.retry_count += 1
+
+
+def _publish_reports(state: BatchState) -> None:
+    try:
+        publish_batch_timing_reports(state.artifact_root, _reported_results(state))
+    except OSError as error:
+        raise BatchReportError(f"batch report publication failed: {error}") from error
 
 
 def _validate_retry_items(state: BatchState, retry_items: Sequence[str]) -> set[str]:
@@ -645,6 +660,24 @@ def _validate_state_path_location(state_path: Path) -> None:
         raise BatchStateError("batch state path escapes artifact_root")
 
 
+def _artifact_root_has_non_lock_content(artifact_root: Path, state_path: Path) -> bool:
+    if not artifact_root.exists():
+        return False
+    children = list(artifact_root.iterdir())
+    analysis_dir = state_path.parent
+    if children != [analysis_dir] or not analysis_dir.is_dir():
+        return bool(children)
+    analysis_children = list(analysis_dir.iterdir())
+    lock_path = Path(f"{state_path}.run.lock")
+    if analysis_children != [lock_path]:
+        return bool(analysis_children)
+    try:
+        lock_stat = lock_path.lstat()
+    except OSError:
+        return True
+    return not stat.S_ISREG(lock_stat.st_mode) or lock_stat.st_nlink != 1
+
+
 def _validate_artifact_child(artifact_root: Path, relative_path: Path) -> None:
     resolved_root = artifact_root.resolve()
     resolved_child = (resolved_root / relative_path).resolve()
@@ -756,7 +789,7 @@ def _required_bool(data: dict[str, object], key: str) -> bool:
 def _run_lock(state_path: Path) -> Iterator[None]:
     lock_path = Path(f"{state_path.resolve()}.run.lock")
     lock_path.parent.mkdir(parents=True, exist_ok=True)
-    lock_file = lock_path.open("a+b")
+    lock_file = _open_safe_lock_file(lock_path)
     try:
         _acquire_file_lock(lock_file)
     except _LockUnavailable as error:
@@ -773,6 +806,33 @@ def _run_lock(state_path: Path) -> Iterator[None]:
             _release_file_lock(lock_file)
         finally:
             lock_file.close()
+
+
+def _open_safe_lock_file(lock_path: Path) -> BinaryIO:
+    flags = os.O_RDWR | os.O_CREAT
+    flags |= getattr(os, "O_BINARY", 0)
+    flags |= getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = os.open(lock_path, flags, 0o600)
+    except OSError as error:
+        raise BatchStateError("batch lock file is unsafe") from error
+    try:
+        path_stat = lock_path.lstat()
+        file_stat = os.fstat(descriptor)
+        reparse_flag = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+        path_attributes = getattr(path_stat, "st_file_attributes", 0)
+        unsafe = (
+            not stat.S_ISREG(path_stat.st_mode)
+            or path_stat.st_nlink != 1
+            or (reparse_flag and path_attributes & reparse_flag)
+            or (path_stat.st_dev, path_stat.st_ino) != (file_stat.st_dev, file_stat.st_ino)
+        )
+        if unsafe:
+            raise BatchStateError("batch lock file is unsafe")
+        return os.fdopen(descriptor, "r+b")
+    except BaseException:
+        os.close(descriptor)
+        raise
 
 
 def _acquire_file_lock(lock_file: BinaryIO) -> None:

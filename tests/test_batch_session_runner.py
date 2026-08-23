@@ -352,7 +352,7 @@ def test_rerun_republishes_reports_after_previous_publication_failure(tmp_path, 
 
     monkeypatch.setattr(batch_session, "publish_batch_timing_reports", publish)
 
-    with pytest.raises(OSError, match="report write failed"):
+    with pytest.raises(batch_session.BatchReportError, match="report write failed"):
         run_batch(state_path)
 
     interrupted = load_batch(state_path)
