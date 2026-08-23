@@ -9,6 +9,7 @@ import pytest
 from frame_timing_agent import tool_cli
 from frame_timing_agent import batch_session
 from frame_timing_agent.batch_session import BatchItemStatus, BatchStatus, load_batch, save_batch
+from frame_timing_agent.run_workflow import StaleSourceError
 from frame_timing_agent.tool_cli import main
 
 
@@ -330,6 +331,74 @@ def test_batch_export_reports_stale_source_without_suggesting_export(
     assert not (state_path.parents[1] / "frames" / "output_frames").exists()
     assert str(tmp_path) not in stdout
     assert str(tmp_path) not in stderr
+
+
+def test_batch_export_reports_stale_source_raised_during_actual_export(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    frame_dir = tmp_path / "frames"
+    state_path = tmp_path / "output" / "batch" / "analysis" / "batch_state.json"
+    _write_frames(frame_dir)
+    create_code, _, _, _ = _invoke(
+        capsys,
+        ["batch", "create", "--frames", str(frame_dir), "--state", str(state_path)],
+    )
+    assert create_code == 0
+    run_code, _, _, _ = _invoke(capsys, ["batch", "run", "--state", str(state_path)])
+    assert run_code == 0
+    state = load_batch(state_path)
+    state.items[0].status = BatchItemStatus.COMPLETED
+    save_batch(state)
+    exported = []
+
+    def fail_after_export_starts(*args, **kwargs):
+        exported.append(args[0])
+        raise StaleSourceError("input changed after export started")
+
+    monkeypatch.setattr(batch_session, "export_run", fail_after_export_starts)
+
+    exit_code, payload, stdout, stderr = _invoke(capsys, ["batch", "export", "--state", str(state_path)])
+
+    assert exported
+    assert exit_code == 4
+    assert payload["error"] == {"code": "stale_source", "message": "batch source changed since analysis"}
+    assert "export" not in payload.get("result", {}).get("next_actions", [])
+    assert str(tmp_path) not in stdout
+    assert str(tmp_path) not in stderr
+
+
+def test_batch_export_reports_ordinary_export_failure_as_unsafe_export(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    frame_dir = tmp_path / "frames"
+    state_path = tmp_path / "output" / "batch" / "analysis" / "batch_state.json"
+    _write_frames(frame_dir)
+    create_code, _, _, _ = _invoke(
+        capsys,
+        ["batch", "create", "--frames", str(frame_dir), "--state", str(state_path)],
+    )
+    assert create_code == 0
+    run_code, _, _, _ = _invoke(capsys, ["batch", "run", "--state", str(state_path)])
+    assert run_code == 0
+    state = load_batch(state_path)
+    state.items[0].status = BatchItemStatus.COMPLETED
+    save_batch(state)
+    monkeypatch.setattr(
+        batch_session,
+        "export_run",
+        lambda *args, **kwargs: (_ for _ in ()).throw(ValueError("synthetic export failure")),
+    )
+
+    exit_code, payload, stdout, stderr = _invoke(capsys, ["batch", "export", "--state", str(state_path)])
+
+    assert exit_code == 4
+    assert payload["error"] == {"code": "unsafe_export", "message": "one or more batch items could not be exported"}
+    assert str(tmp_path) not in stdout
+    assert stderr == ""
 
 
 def test_batch_approval_reports_stale_source_without_paths(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:

@@ -6,6 +6,7 @@ from frame_timing_agent import batch_session
 from frame_timing_agent.auto_timing_agent import TimingAgentResult
 from frame_timing_agent.batch_discovery import DiscoveryResult
 from frame_timing_agent.batch_session import (
+    BatchExportStaleSourceError,
     BatchItemStatus,
     BatchStateError,
     BatchStatus,
@@ -13,6 +14,7 @@ from frame_timing_agent.batch_session import (
     load_batch,
     save_batch,
 )
+from frame_timing_agent.run_workflow import StaleSourceError
 
 
 def make_finished_batch(tmp_path: Path) -> Path:
@@ -134,31 +136,60 @@ def test_export_persists_each_eligible_item_after_its_output_is_written(tmp_path
     assert (first_output, second_output) in persisted_output_sets
 
 
-def test_export_blocks_changed_input_and_preserves_previous_valid_output(tmp_path, monkeypatch):
+def test_export_preserves_typed_stale_failure_and_prior_valid_output(tmp_path, monkeypatch):
     state_path = make_finished_batch(tmp_path)
     state = load_batch(state_path)
-    item = state.items[0]
-    previous_output = state.artifact_root / item.safe_name / "output_frames"
+    first_item = state.items[0]
+    item = state.items[1]
+    previous_output = state.artifact_root / first_item.safe_name / "output_frames"
     previous_output.mkdir(parents=True)
     marker = previous_output / "previous-output.txt"
     marker.write_text("keep", encoding="utf-8")
-    item.output_path = previous_output
+    first_item.output_path = previous_output
     save_batch(state)
+    attempted: list[Path] = []
+
+    def export_one(settings, **kwargs):
+        attempted.append(settings.frame_dir)
+        if settings.frame_dir == first_item.frame_dir:
+            raise StaleSourceError("input frames changed since analysis; run analysis again before exporting")
+        return fake_export(settings)
+
     monkeypatch.setattr(
         batch_session,
         "export_run",
-        lambda *args, **kwargs: (_ for _ in ()).throw(
-            ValueError("input frames changed since analysis; run analysis again before exporting")
-        ),
+        export_one,
+    )
+    monkeypatch.setattr(batch_session, "publish_batch_timing_reports", lambda *args, **kwargs: None)
+
+    with pytest.raises(BatchExportStaleSourceError) as raised:
+        batch_session.export_batch(state_path)
+
+    persisted = load_batch(state_path)
+
+    assert attempted == [first_item.frame_dir, item.frame_dir]
+    assert raised.value.summary.exported == (item.safe_name,)
+    assert raised.value.summary.failed == (first_item.safe_name,)
+    assert raised.value.stale_items == (first_item.safe_name,)
+    assert marker.read_text(encoding="utf-8") == "keep"
+    assert persisted.items[0].output_path == previous_output
+    assert persisted.items[1].output_path == persisted.artifact_root / item.safe_name / "output_frames"
+
+
+def test_export_keeps_ordinary_failures_in_normal_summary(tmp_path, monkeypatch):
+    state_path = make_finished_batch(tmp_path)
+    monkeypatch.setattr(
+        batch_session,
+        "export_run",
+        lambda *args, **kwargs: (_ for _ in ()).throw(ValueError("synthetic export failure")),
     )
     monkeypatch.setattr(batch_session, "publish_batch_timing_reports", lambda *args, **kwargs: None)
 
     summary = batch_session.export_batch(state_path)
-    persisted = load_batch(state_path)
 
-    assert item.safe_name in summary.failed
-    assert marker.read_text(encoding="utf-8") == "keep"
-    assert persisted.items[0].output_path == previous_output
+    state = load_batch(state_path)
+    assert summary.exported == ()
+    assert summary.failed == (state.items[0].safe_name, state.items[1].safe_name)
 
 
 def test_mixed_export_report_counts_only_items_with_output_directories(tmp_path, monkeypatch):

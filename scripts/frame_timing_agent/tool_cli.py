@@ -17,6 +17,7 @@ from frame_timing_agent.artifact_io import (
 from frame_timing_agent.batch_discovery import discover_frame_directories
 from frame_timing_agent.batch_session import (
     BatchBusyError,
+    BatchExportStaleSourceError,
     BatchItemState,
     BatchItemStatus,
     BatchState,
@@ -41,7 +42,6 @@ from frame_timing_agent.artifact_layout import (
 from frame_timing_agent.configuration import parse_strategy_request
 from frame_timing_agent.contracts import SCHEMA_VERSION, ConfigurationError, PolicyName
 from frame_timing_agent.serialization import canonical_json_bytes
-from frame_timing_agent.run_workflow import verify_input_snapshot
 from frame_timing_agent.service import (
     analyze_frames,
     apply_validated_strategy,
@@ -291,9 +291,10 @@ def _dispatch_batch(args: argparse.Namespace) -> tuple[int, dict[str, object]]:
             raise _BatchStaleSourceError() from exc
         return EXIT_SUCCESS, _batch_response(state)
     if action == "export":
-        state = load_batch(state_path)
-        _verify_batch_export_sources(state)
-        summary = export_batch(state_path)
+        try:
+            summary = export_batch(state_path)
+        except BatchExportStaleSourceError as exc:
+            raise _BatchStaleSourceError() from exc
         state = load_batch(state_path)
         export = {
             "exported": list(summary.exported),
@@ -343,23 +344,6 @@ def _batch_health_failed(state: BatchState) -> bool:
     except (OSError, json.JSONDecodeError):
         return True
     return not isinstance(health, dict) or health.get("status") != "ok"
-
-
-def _verify_batch_export_sources(state: BatchState) -> None:
-    for item in state.items:
-        if item.status is not BatchItemStatus.COMPLETED and not (
-            item.status is BatchItemStatus.REVIEW_REQUIRED and item.approved
-        ):
-            continue
-        try:
-            verify_input_snapshot(
-                state.artifact_root / item.safe_name / "analysis",
-                item.frame_dir,
-                state.fps,
-                state.limit_first_n,
-            )
-        except (OSError, ValueError) as exc:
-            raise _BatchStaleSourceError() from exc
 
 
 def _batch_response(

@@ -21,7 +21,13 @@ from frame_timing_agent.batch_timing_agent import (
     _failure_result,
     publish_batch_timing_reports,
 )
-from frame_timing_agent.run_workflow import RunSettings, analyze_run, export_run, verify_input_snapshot
+from frame_timing_agent.run_workflow import (
+    RunSettings,
+    StaleSourceError,
+    analyze_run,
+    export_run,
+    verify_input_snapshot,
+)
 
 
 SCHEMA_VERSION = 1
@@ -75,6 +81,15 @@ class BatchExportSummary:
     exported: tuple[str, ...]
     skipped: tuple[str, ...]
     failed: tuple[str, ...]
+
+
+class BatchExportStaleSourceError(BatchStateError):
+    """Raised after export when one or more items became stale during the operation."""
+
+    def __init__(self, summary: BatchExportSummary, stale_items: tuple[str, ...]) -> None:
+        super().__init__("one or more batch export sources changed")
+        self.summary = summary
+        self.stale_items = stale_items
 
 
 @dataclass
@@ -235,6 +250,7 @@ def export_batch(
         exported: list[str] = []
         skipped: list[str] = []
         failed: list[str] = []
+        stale_items: list[str] = []
         eligible_items = [item for item in state.items if _is_export_eligible(item)]
         total = len(eligible_items)
         completed = 0
@@ -257,6 +273,9 @@ def export_batch(
 
             try:
                 result = export_run(settings, progress_callback=report_item_progress)
+            except StaleSourceError:
+                failed.append(item.safe_name)
+                stale_items.append(item.safe_name)
             except Exception:
                 failed.append(item.safe_name)
             else:
@@ -268,7 +287,10 @@ def export_batch(
             _report_progress(progress_callback, round(completed * 100 / total), item.safe_name)
 
         publish_batch_timing_reports(state.artifact_root, _reported_results(state))
-        return BatchExportSummary(tuple(exported), tuple(skipped), tuple(failed))
+        summary = BatchExportSummary(tuple(exported), tuple(skipped), tuple(failed))
+        if stale_items:
+            raise BatchExportStaleSourceError(summary, tuple(stale_items))
+        return summary
 
 
 def _is_export_eligible(item: BatchItemState) -> bool:
@@ -297,8 +319,7 @@ def run_batch(
         save_batch(state)
         total = len(state.items)
         terminal_count = sum(
-            item.status not in {BatchItemStatus.PENDING, BatchItemStatus.RUNNING}
-            and item.safe_name not in retries
+            item.status not in {BatchItemStatus.PENDING, BatchItemStatus.RUNNING} and item.safe_name not in retries
             for item in state.items
         )
 
@@ -341,9 +362,7 @@ def run_batch(
                 result = analyze_run(settings, progress_callback=report_item_progress)
                 warnings = evaluate_quality(result.artifact_dir / "analysis")
                 item.warnings = tuple(warning.code for warning in warnings)
-                item.status = (
-                    BatchItemStatus.REVIEW_REQUIRED if warnings else BatchItemStatus.COMPLETED
-                )
+                item.status = BatchItemStatus.REVIEW_REQUIRED if warnings else BatchItemStatus.COMPLETED
                 item.progress = 1.0
                 item.analyzed_count = result.analyzed_count
                 item.output_count = result.estimated_output_count

@@ -9,7 +9,7 @@ import numpy as np
 import pytest
 
 from frame_timing_agent import run_workflow
-from frame_timing_agent.run_workflow import RunSettings, analyze_run, export_run
+from frame_timing_agent.run_workflow import StaleSourceError, RunSettings, analyze_run, export_run
 
 
 def _write_frame(path, value: int) -> None:
@@ -66,7 +66,7 @@ def test_export_run_keeps_previous_output_when_source_changed(tmp_path):
     existing.write_text("keep", encoding="utf-8")
     mutate_first_source_frame(settings.frame_dir)
 
-    with pytest.raises(ValueError, match="input frames changed"):
+    with pytest.raises(StaleSourceError, match="input frames changed"):
         export_run(settings)
 
     assert existing.read_text(encoding="utf-8") == "keep"

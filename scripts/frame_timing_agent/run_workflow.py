@@ -22,6 +22,10 @@ ProgressCallback = Callable[[int, str], None]
 JsonDict: TypeAlias = dict[str, Any]
 
 
+class StaleSourceError(ValueError):
+    """Raised when analysis-bound input or strategy data changes before export."""
+
+
 @dataclass(frozen=True)
 class RunSettings:
     frame_dir: Path
@@ -104,12 +108,12 @@ def verify_input_snapshot(
     strategy_sha256 = expected.pop("strategy_sha256", None)
     current = capture_input_snapshot(frame_dir, fps=fps, limit_first_n=limit_first_n)
     if current != expected:
-        raise ValueError("input frames changed since analysis; run analysis again before exporting")
+        raise StaleSourceError("input frames changed since analysis; run analysis again before exporting")
     if strategy_sha256 is None:
-        raise ValueError("analysis snapshot is not bound to a strategy; run analysis again before exporting")
+        raise StaleSourceError("analysis snapshot is not bound to a strategy; run analysis again before exporting")
     strategy_path = analysis_dir / "strategy.json"
     if not strategy_path.is_file() or _file_sha256(strategy_path) != strategy_sha256:
-        raise ValueError("analysis strategy changed since analysis; run analysis again before exporting")
+        raise StaleSourceError("analysis strategy changed since analysis; run analysis again before exporting")
     return True
 
 
@@ -201,11 +205,7 @@ def export_run(
 def _validate_run_path_safety(settings: RunSettings) -> None:
     frame_dir = settings.frame_dir.expanduser().resolve()
     artifact_dir = settings.artifact_dir.expanduser().resolve()
-    if (
-        frame_dir == artifact_dir
-        or frame_dir.is_relative_to(artifact_dir)
-        or artifact_dir.is_relative_to(frame_dir)
-    ):
+    if frame_dir == artifact_dir or frame_dir.is_relative_to(artifact_dir) or artifact_dir.is_relative_to(frame_dir):
         raise ValueError("artifact directory must not overlap the input frame directory")
     for child_name in ("analysis", "output_frames"):
         write_path = settings.artifact_dir / child_name
