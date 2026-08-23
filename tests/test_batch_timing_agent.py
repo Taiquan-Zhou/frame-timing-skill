@@ -138,7 +138,7 @@ class BatchTimingAgentTest(unittest.TestCase):
                 return real_write_text(path, data, *args, **kwargs)
 
             with patch.object(Path, "write_text", guarded_write_text):
-                failed = legacy_batch_timing._failure_result(
+                failed = legacy_batch_timing.build_failure_result(
                     BatchTimingItem(name="failed", frames=frames),
                     artifact_dir,
                     RuntimeError("analysis failed"),
@@ -169,7 +169,7 @@ class BatchTimingAgentTest(unittest.TestCase):
                 return real_write_text(path, data, *args, **kwargs)
 
             with patch.object(Path, "write_text", guarded_write_text):
-                failed = legacy_batch_timing._failure_result(
+                failed = legacy_batch_timing.build_failure_result(
                     BatchTimingItem(name="failed", frames=frames),
                     artifact_dir,
                     RuntimeError("new failure"),

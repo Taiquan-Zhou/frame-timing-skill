@@ -35,7 +35,9 @@ def test_discovery_prefers_clean_frames_and_deduplicates(tmp_path):
     result = discover_frame_directories(explicit=[preferred], root=tmp_path)
 
     assert result.frame_dirs == (preferred.resolve(),)
-    assert any(issue.path == (tmp_path / "output").resolve() and issue.code == "ignored_output" for issue in result.issues)
+    assert any(
+        issue.path == (tmp_path / "output").resolve() and issue.code == "ignored_output" for issue in result.issues
+    )
 
 
 def test_discovery_accepts_direct_children_but_not_arbitrary_nested_directories(tmp_path):

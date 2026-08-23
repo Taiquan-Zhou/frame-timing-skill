@@ -103,7 +103,7 @@ def run_batch_timing_agent(
             )
             results.append(_success_result(item, item_artifact_dir, result))
         except Exception as exc:  # Keep batch processing independent across directories.
-            results.append(_failure_result(item, item_artifact_dir, exc))
+            results.append(build_failure_result(item, item_artifact_dir, exc))
 
     return publish_batch_timing_reports(artifact_root, results, preview_only=not write)
 
@@ -250,7 +250,7 @@ def _success_result(
     )
 
 
-def _failure_result(item: BatchTimingItem, item_artifact_dir: Path, exc: Exception) -> BatchTimingItemResult:
+def build_failure_result(item: BatchTimingItem, item_artifact_dir: Path, exc: Exception) -> BatchTimingItemResult:
     error = _public_error(exc, item.frames, item_artifact_dir)
     item_analysis_dir = item_artifact_dir / "analysis"
     human_review_path = item_analysis_dir / "human_review.md"
@@ -395,9 +395,7 @@ def _write_batch_human_review(
     ]
     for item in results:
         review_path = (
-            _artifact_relative_path(artifact_root, item.human_review_path)
-            if _has_current_human_review(item)
-            else ""
+            _artifact_relative_path(artifact_root, item.human_review_path) if _has_current_human_review(item) else ""
         )
         review_label = f"`{review_path}`" if review_path else "无"
         lines.append(
@@ -448,9 +446,7 @@ def _write_review_dashboard(path: Path, artifact_root: Path, results: Sequence[B
     for item in results:
         visual_index = item.artifact_dir / "analysis" / "visual_review" / "index.md"
         human_review_link = (
-            _markdown_link(path, item.human_review_path, "human_review.md")
-            if _has_current_human_review(item)
-            else "无"
+            _markdown_link(path, item.human_review_path, "human_review.md") if _has_current_human_review(item) else "无"
         )
         lines.append(
             "| "

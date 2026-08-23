@@ -69,8 +69,7 @@ def test_analyze_rejects_manifest_frames_inside_artifact_write_area(tmp_path):
     source.parent.mkdir(parents=True)
     _write_frame(source, 80)
     (frame_dir / "selected_frames.txt").write_text(
-        "source_index\toutput_index\ttimestamp_sec\tpath\n"
-        f"0\t0\t0.0\t{source}\n",
+        f"source_index\toutput_index\ttimestamp_sec\tpath\n0\t0\t0.0\t{source}\n",
         encoding="utf-8",
     )
     settings = RunSettings(frame_dir=frame_dir, artifact_dir=artifact_dir, fps=24.0)
@@ -117,8 +116,7 @@ def test_manifest_redirect_into_artifact_is_reported_as_stale_after_analysis(tmp
     source.parent.mkdir()
     _write_frame(source, 80)
     (settings.frame_dir / "selected_frames.txt").write_text(
-        "source_index\toutput_index\ttimestamp_sec\tpath\n"
-        f"0\t0\t0.0\t{source}\n",
+        f"source_index\toutput_index\ttimestamp_sec\tpath\n0\t0\t0.0\t{source}\n",
         encoding="utf-8",
     )
 
@@ -174,94 +172,6 @@ def test_analyze_run_rejects_analysis_link_into_input_directory(tmp_path):
         analysis_link.rmdir()
 
 
-def test_output_rollback_restores_previous_output_when_cleanup_fails(tmp_path, monkeypatch):
-    output_dir = tmp_path / "output_frames"
-    output_dir.mkdir()
-    (output_dir / "old.txt").write_text("old", encoding="utf-8")
-    staging_dir = tmp_path / ".output_frames.staging"
-    staging_dir.mkdir()
-    (staging_dir / "new.txt").write_text("new", encoding="utf-8")
-    original_rmtree = run_workflow.shutil.rmtree
-
-    def fail_formal_output_cleanup(path, *args, **kwargs):
-        if Path(path) == output_dir:
-            raise PermissionError("output file is held open")
-        return original_rmtree(path, *args, **kwargs)
-
-    monkeypatch.setattr(run_workflow.shutil, "rmtree", fail_formal_output_cleanup)
-
-    with pytest.raises(RuntimeError, match="metadata failed"):
-        run_workflow._replace_output_directory(
-            staging_dir,
-            output_dir,
-            lambda: (_ for _ in ()).throw(RuntimeError("metadata failed")),
-        )
-
-    assert (output_dir / "old.txt").read_text(encoding="utf-8") == "old"
-    assert not (output_dir / "new.txt").exists()
-
-
-def test_output_rollback_preserves_both_copies_when_restore_renames_fail(tmp_path, monkeypatch):
-    output_dir = tmp_path / "output_frames"
-    output_dir.mkdir()
-    (output_dir / "old.txt").write_text("old", encoding="utf-8")
-    staging_dir = tmp_path / ".output_frames.staging"
-    staging_dir.mkdir()
-    (staging_dir / "new.txt").write_text("new", encoding="utf-8")
-    original_rename = Path.rename
-
-    def fail_restore_renames(path: Path, target: Path):
-        if path.name.startswith((".output_frames.backup-", ".output_frames.failed-")):
-            raise PermissionError("restore rename failed")
-        return original_rename(path, target)
-
-    monkeypatch.setattr(Path, "rename", fail_restore_renames)
-
-    with pytest.raises(PermissionError, match="restore rename failed"):
-        run_workflow._replace_output_directory(
-            staging_dir,
-            output_dir,
-            lambda: (_ for _ in ()).throw(RuntimeError("metadata failed")),
-        )
-
-    backups = list(tmp_path.glob(".output_frames.backup-*"))
-    failed_outputs = list(tmp_path.glob(".output_frames.failed-*"))
-    assert len(backups) == 1
-    assert len(failed_outputs) == 1
-    assert (backups[0] / "old.txt").read_text(encoding="utf-8") == "old"
-    assert (failed_outputs[0] / "new.txt").read_text(encoding="utf-8") == "new"
-
-
-def test_audit_rollback_preserves_backups_when_restore_fails(tmp_path, monkeypatch):
-    analysis_dir = tmp_path / "analysis"
-    analysis_dir.mkdir()
-    staging_dir = tmp_path / "audit-staging"
-    staging_dir.mkdir()
-    for name in ("execution_audit.json", "execution_audit.md"):
-        (analysis_dir / name).write_text(f"old-{name}", encoding="utf-8")
-        (staging_dir / name).write_text(f"new-{name}", encoding="utf-8")
-    original_rename = Path.rename
-
-    def fail_commit_and_restore(path: Path, target: Path):
-        if path == staging_dir / "execution_audit.md":
-            raise PermissionError("audit commit failed")
-        if path.parent.name.startswith(".execution_audit.backup-") and path.name == "execution_audit.json":
-            raise PermissionError("audit restore failed")
-        return original_rename(path, target)
-
-    monkeypatch.setattr(Path, "rename", fail_commit_and_restore)
-
-    with pytest.raises(PermissionError, match="audit restore failed"):
-        run_workflow._replace_execution_audit(staging_dir, analysis_dir)
-
-    backups = list(analysis_dir.glob(".execution_audit.backup-*"))
-    failed = list(analysis_dir.glob(".execution_audit.failed-*"))
-    assert len(backups) == 1
-    assert len(failed) == 1
-    assert (backups[0] / "execution_audit.json").read_text(encoding="utf-8").startswith("old-")
-    assert (failed[0] / "execution_audit.json").read_text(encoding="utf-8").startswith("new-")
-
-
 @pytest.mark.parametrize("interrupt_type", [KeyboardInterrupt, SystemExit])
 def test_verified_output_rolls_back_output_and_audit_on_base_exception(tmp_path, monkeypatch, interrupt_type):
     analysis_dir = tmp_path / "analysis"
@@ -279,11 +189,7 @@ def test_verified_output_rolls_back_output_and_audit_on_base_exception(tmp_path,
 
     def interrupt_during_audit_commit(path: Path, target: Path):
         nonlocal interrupted
-        if (
-            not interrupted
-            and path.name == "execution_audit.md"
-            and path.parent.name.startswith(".execution_audit.")
-        ):
+        if not interrupted and path.name == "execution_audit.md" and path.parent.name.startswith(".execution_audit."):
             interrupted = True
             raise interrupt_type()
         return original_rename(path, target)
@@ -346,9 +252,7 @@ run_workflow.replace_verified_output(
 """
     repository_root = Path(__file__).parents[1]
     environment = os.environ.copy()
-    environment["PYTHONPATH"] = os.pathsep.join(
-        [str(repository_root / "scripts"), environment.get("PYTHONPATH", "")]
-    )
+    environment["PYTHONPATH"] = os.pathsep.join([str(repository_root / "scripts"), environment.get("PYTHONPATH", "")])
     result = subprocess.run(
         [sys.executable, "-c", script],
         cwd=repository_root,

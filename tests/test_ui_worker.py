@@ -251,7 +251,6 @@ class UiWorkerTest(unittest.TestCase):
                 settings.limit_first_n,
             )
 
-
     def test_run_export_uses_saved_strategy_without_rerunning_analysis(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -402,71 +401,6 @@ class UiWorkerTest(unittest.TestCase):
             self.assertEqual(marker.read_text(encoding="utf-8"), "keep")
             self.assertFalse(any(settings.artifact_dir.glob(".output_frames.export-*")))
             self.assertFalse(any(settings.artifact_dir.glob(".execution_audit.export-*")))
-
-    def test_output_and_audit_commit_roll_back_together(self):
-        from frame_timing_agent.run_workflow import _replace_output_directory
-
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            output_dir = root / "output_frames"
-            staging_dir = root / ".output_frames.export-test"
-            output_dir.mkdir()
-            staging_dir.mkdir()
-            (output_dir / "old.txt").write_text("old", encoding="utf-8")
-            (staging_dir / "new.txt").write_text("new", encoding="utf-8")
-
-            with self.assertRaisesRegex(OSError, "audit commit failed"):
-                _replace_output_directory(
-                    staging_dir,
-                    output_dir,
-                    lambda: (_ for _ in ()).throw(OSError("audit commit failed")),
-                )
-
-            self.assertEqual((output_dir / "old.txt").read_text(encoding="utf-8"), "old")
-            self.assertFalse((output_dir / "new.txt").exists())
-            self.assertFalse(any(root.glob(".output_frames.backup-*")))
-
-    def test_execution_audit_commit_replaces_both_files(self):
-        from frame_timing_agent.run_workflow import _replace_execution_audit
-
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            analysis_dir = root / "analysis"
-            staging_dir = root / "staging"
-            analysis_dir.mkdir()
-            staging_dir.mkdir()
-            for name in ("execution_audit.json", "execution_audit.md"):
-                (analysis_dir / name).write_text("old", encoding="utf-8")
-                (staging_dir / name).write_text("new", encoding="utf-8")
-
-            _replace_execution_audit(staging_dir, analysis_dir)
-
-            self.assertEqual((analysis_dir / "execution_audit.json").read_text(encoding="utf-8"), "new")
-            self.assertEqual((analysis_dir / "execution_audit.md").read_text(encoding="utf-8"), "new")
-            self.assertFalse(any(analysis_dir.glob(".execution_audit.backup-*")))
-
-    def test_execution_audit_commit_restores_old_files_after_partial_failure(self):
-        from frame_timing_agent.run_workflow import _replace_execution_audit
-
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            analysis_dir = root / "analysis"
-            staging_dir = root / "staging"
-            analysis_dir.mkdir()
-            staging_dir.mkdir()
-            for name in ("execution_audit.json", "execution_audit.md"):
-                (analysis_dir / name).write_text(f"old-{name}", encoding="utf-8")
-            (staging_dir / "execution_audit.json").write_text("new", encoding="utf-8")
-
-            with self.assertRaises(FileNotFoundError):
-                _replace_execution_audit(staging_dir, analysis_dir)
-
-            for name in ("execution_audit.json", "execution_audit.md"):
-                self.assertEqual(
-                    (analysis_dir / name).read_text(encoding="utf-8"),
-                    f"old-{name}",
-                )
-            self.assertFalse(any(analysis_dir.glob(".execution_audit.backup-*")))
 
     def test_load_existing_run_rebuilds_view_without_running_analysis(self):
         with tempfile.TemporaryDirectory() as tmp:

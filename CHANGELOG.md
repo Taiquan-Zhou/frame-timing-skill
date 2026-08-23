@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.5.0 - 2026-08-23
+
+- Add recoverable CPU-only offline batches for explicit frame directories and discovered directory roots.
+- Add batch create, run, resume, approve, export, and health workflows to the stable JSON CLI.
+- Add a batch workspace to the optional Windows UI while preserving the existing single-run workflow.
+- Persist item progress after each directory, recover interrupted runs, and require explicit continuation after restart.
+- Add conservative quality warnings, explicit review approval, export verification, and transaction recovery.
+- Keep processing sequential and local; GPU scheduling, distributed workers, databases, and cloud services remain out of scope.
+
 ## 0.4.0 - 2026-07-30
 
 - Add a modular Windows desktop UI for selecting frame directories, reviewing timing metrics, and exporting model-ready frames.

@@ -6,7 +6,6 @@ import os
 import re
 import stat
 import uuid
-import errno
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -14,12 +13,20 @@ from enum import Enum
 from pathlib import Path
 from typing import BinaryIO, Callable, Iterator, Sequence
 
+from frame_timing_agent._file_lock import (
+    LockUnavailableError as _LockUnavailable,
+    UnsafeLockFileError,
+    acquire_lock as _acquire_file_lock,
+    open_lock_file,
+    release_lock as _release_file_lock,
+)
+
 from frame_timing_agent.batch_discovery import DiscoveryResult
 from frame_timing_agent.batch_quality import QualityWarning, evaluate_quality
 from frame_timing_agent.batch_timing_agent import (
     BatchTimingItem,
     BatchTimingItemResult,
-    _failure_result,
+    build_failure_result,
     publish_batch_timing_reports,
 )
 from frame_timing_agent.run_workflow import (
@@ -59,10 +66,6 @@ class BatchBusyError(BatchStateError):
 
 class BatchReportError(RuntimeError):
     """Raised when durable batch summary publication fails."""
-
-
-class _LockUnavailable(OSError):
-    pass
 
 
 @dataclass
@@ -345,6 +348,15 @@ def _is_export_eligible(item: BatchItemState) -> bool:
     )
 
 
+def item_has_export_artifacts(item: BatchItemState) -> bool:
+    """Return whether the persisted output path still has the minimum export artifacts."""
+    return (
+        item.output_path is not None
+        and item.output_path.is_dir()
+        and (item.output_path.parent / "analysis" / "execution_audit.json").is_file()
+    )
+
+
 def run_batch(
     state_path: Path | str,
     progress_callback: Callable[[int, str], None] | None = None,
@@ -421,7 +433,7 @@ def run_batch(
                 item.output_count = result.estimated_output_count
                 item.output_path = result.output_dir
             except Exception as error:
-                failed = _failure_result(
+                failed = build_failure_result(
                     BatchTimingItem(name=item.safe_name, frames=item.frame_dir),
                     settings.artifact_dir,
                     error,
@@ -654,9 +666,7 @@ def _validate_state(state: BatchState) -> None:
         item.status in {BatchItemStatus.PENDING, BatchItemStatus.RUNNING} for item in state.items
     ):
         raise BatchStateError("finished batch cannot contain pending or running items")
-    if state.status is not BatchStatus.RUNNING and any(
-        item.status is BatchItemStatus.RUNNING for item in state.items
-    ):
+    if state.status is not BatchStatus.RUNNING and any(item.status is BatchItemStatus.RUNNING for item in state.items):
         raise BatchStateError("running item requires a running batch")
 
 
@@ -905,69 +915,10 @@ def _run_lock(state_path: Path) -> Iterator[None]:
 
 
 def _open_safe_lock_file(lock_path: Path) -> BinaryIO:
-    flags = os.O_RDWR | os.O_CREAT
-    flags |= getattr(os, "O_BINARY", 0)
-    flags |= getattr(os, "O_NOFOLLOW", 0)
     try:
-        descriptor = os.open(lock_path, flags, 0o600)
-    except OSError as error:
+        return open_lock_file(lock_path)
+    except UnsafeLockFileError as error:
         raise BatchStateError("batch lock file is unsafe") from error
-    try:
-        path_stat = lock_path.lstat()
-        file_stat = os.fstat(descriptor)
-        reparse_flag = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
-        path_attributes = getattr(path_stat, "st_file_attributes", 0)
-        unsafe = (
-            not stat.S_ISREG(path_stat.st_mode)
-            or path_stat.st_nlink != 1
-            or (reparse_flag and path_attributes & reparse_flag)
-            or (path_stat.st_dev, path_stat.st_ino) != (file_stat.st_dev, file_stat.st_ino)
-        )
-        if unsafe:
-            raise BatchStateError("batch lock file is unsafe")
-        return os.fdopen(descriptor, "r+b")
-    except BaseException:
-        os.close(descriptor)
-        raise
-
-
-def _acquire_file_lock(lock_file: BinaryIO) -> None:
-    lock_file.seek(0, os.SEEK_END)
-    if lock_file.tell() == 0:
-        lock_file.write(b"L")
-        lock_file.flush()
-    lock_file.seek(0)
-    if os.name == "nt":
-        import msvcrt
-
-        try:
-            msvcrt.locking(lock_file.fileno(), msvcrt.LK_NBLCK, 1)
-        except OSError as error:
-            if error.errno in {errno.EACCES, errno.EAGAIN, errno.EDEADLK}:
-                raise _LockUnavailable from error
-            raise
-        return
-    import fcntl
-
-    try:
-        fcntl.flock(  # type: ignore[attr-defined]
-            lock_file.fileno(),
-            fcntl.LOCK_EX | fcntl.LOCK_NB,  # type: ignore[attr-defined]
-        )
-    except BlockingIOError as error:
-        raise _LockUnavailable from error
-
-
-def _release_file_lock(lock_file: BinaryIO) -> None:
-    lock_file.seek(0)
-    if os.name == "nt":
-        import msvcrt
-
-        msvcrt.locking(lock_file.fileno(), msvcrt.LK_UNLCK, 1)
-        return
-    import fcntl
-
-    fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)  # type: ignore[attr-defined]
 
 
 def _write_lock_owner(lock_file: BinaryIO) -> None:

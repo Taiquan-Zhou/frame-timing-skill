@@ -36,6 +36,7 @@ from frame_timing_agent.batch_session import (
     approve_item,
     create_batch,
     export_batch,
+    item_has_export_artifacts,
     load_batch,
     recover_batch,
     run_batch,
@@ -281,7 +282,7 @@ class BatchWorkspace(QWidget):
         for item in sorted(state.items, key=lambda candidate: candidate.safe_name.casefold()):
             row = QListWidgetItem()
             row.setData(Qt.ItemDataRole.UserRole, item.safe_name)
-            exported = " · 已导出" if item.output_path is not None else ""
+            exported = " · 已导出" if item_has_export_artifacts(item) else ""
             warning = f" · {len(item.warnings)} 警告" if item.warnings else ""
             row.setText(
                 f"{item.safe_name}\n{_STATUS_LABELS[item.status]} · {round(item.progress * 100)}%{warning}{exported}"
@@ -645,8 +646,7 @@ class BatchWorkspace(QWidget):
             and state is not None
             and state.status is BatchStatus.FINISHED
             and any(
-                candidate.output_path is None
-                and (
+                (
                     candidate.status is BatchItemStatus.COMPLETED
                     or (candidate.status is BatchItemStatus.REVIEW_REQUIRED and candidate.approved)
                 )
@@ -674,7 +674,7 @@ class BatchWorkspace(QWidget):
             row = self.item_list.item(index)
             if row.data(Qt.ItemDataRole.UserRole) != item.safe_name:
                 continue
-            exported = " · 已导出" if item.output_path is not None else ""
+            exported = " · 已导出" if item_has_export_artifacts(item) else ""
             warning = f" · {len(item.warnings)} 警告" if item.warnings else ""
             row.setText(
                 f"{item.safe_name}\n{_STATUS_LABELS[item.status]} · {round(item.progress * 100)}%{warning}{exported}"

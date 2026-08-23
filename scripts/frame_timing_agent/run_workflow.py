@@ -5,14 +5,19 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, BinaryIO, Callable, Iterator, TypeAlias, cast
 import csv
-import errno
 import hashlib
 import io
 import json
-import os
 import shutil
-import stat
 import uuid
+
+from frame_timing_agent._file_lock import (
+    LockUnavailableError,
+    UnsafeLockFileError,
+    acquire_lock as _acquire_export_lock,
+    open_lock_file,
+    release_lock as _release_export_lock,
+)
 
 from frame_timing_agent.apply_frame_strategy import apply_strategy
 from frame_timing_agent.auto_timing_agent import TimingAgentResult, run_timing_agent
@@ -404,7 +409,7 @@ def _export_lock(artifact_dir: Path) -> Iterator[None]:
     lock_file = _open_export_lock_file(lock_path)
     try:
         _acquire_export_lock(lock_file)
-    except BlockingIOError as error:
+    except LockUnavailableError as error:
         lock_file.close()
         raise ExportBusyError("export is already running") from error
     except BaseException:
@@ -420,135 +425,10 @@ def _export_lock(artifact_dir: Path) -> Iterator[None]:
 
 
 def _open_export_lock_file(lock_path: Path) -> BinaryIO:
-    flags = os.O_RDWR | os.O_CREAT | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
     try:
-        descriptor = os.open(lock_path, flags, 0o600)
-    except OSError as error:
+        return open_lock_file(lock_path)
+    except UnsafeLockFileError as error:
         raise ValueError("export lock file is unsafe") from error
-    try:
-        path_stat = lock_path.lstat()
-        file_stat = os.fstat(descriptor)
-        reparse_flag = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
-        unsafe = (
-            not stat.S_ISREG(path_stat.st_mode)
-            or path_stat.st_nlink != 1
-            or (reparse_flag and getattr(path_stat, "st_file_attributes", 0) & reparse_flag)
-            or (path_stat.st_dev, path_stat.st_ino) != (file_stat.st_dev, file_stat.st_ino)
-        )
-        if unsafe:
-            raise ValueError("export lock file is unsafe")
-        return os.fdopen(descriptor, "r+b")
-    except BaseException:
-        os.close(descriptor)
-        raise
-
-
-def _acquire_export_lock(lock_file: BinaryIO) -> None:
-    lock_file.seek(0, os.SEEK_END)
-    if lock_file.tell() == 0:
-        lock_file.write(b"L")
-        lock_file.flush()
-    lock_file.seek(0)
-    if os.name == "nt":
-        import msvcrt
-
-        try:
-            msvcrt.locking(lock_file.fileno(), msvcrt.LK_NBLCK, 1)
-        except OSError as error:
-            if error.errno in {errno.EACCES, errno.EAGAIN, errno.EDEADLK}:
-                raise BlockingIOError from error
-            raise
-        return
-    import fcntl
-
-    fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)  # type: ignore[attr-defined]
-
-
-def _release_export_lock(lock_file: BinaryIO) -> None:
-    lock_file.seek(0)
-    if os.name == "nt":
-        import msvcrt
-
-        msvcrt.locking(lock_file.fileno(), msvcrt.LK_UNLCK, 1)
-        return
-    import fcntl
-
-    fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)  # type: ignore[attr-defined]
-
-
-def _replace_output_directory(
-    staging_dir: Path,
-    output_dir: Path,
-    commit_metadata: Callable[[], None] | None = None,
-) -> None:
-    backup_dir = output_dir.with_name(f".{output_dir.name}.backup-{uuid.uuid4().hex}")
-    if output_dir.exists():
-        output_dir.rename(backup_dir)
-    try:
-        staging_dir.rename(output_dir)
-        if commit_metadata is not None:
-            commit_metadata()
-    except BaseException:
-        _restore_output_backup(output_dir, backup_dir)
-        raise
-    if backup_dir.exists():
-        shutil.rmtree(backup_dir, ignore_errors=True)
-
-
-def _restore_output_backup(output_dir: Path, backup_dir: Path) -> None:
-    failed_dir = output_dir.with_name(f".{output_dir.name}.failed-{uuid.uuid4().hex}")
-    had_previous_output = backup_dir.exists()
-    moved_failed_output = False
-    if output_dir.exists():
-        output_dir.rename(failed_dir)
-        moved_failed_output = True
-    try:
-        if backup_dir.exists():
-            backup_dir.rename(output_dir)
-    except BaseException:
-        if moved_failed_output and failed_dir.exists() and not output_dir.exists():
-            failed_dir.rename(output_dir)
-        raise
-    finally:
-        if moved_failed_output and (not had_previous_output or output_dir.exists()):
-            shutil.rmtree(failed_dir, ignore_errors=True)
-
-
-def _replace_execution_audit(staging_dir: Path, analysis_dir: Path) -> None:
-    names = EXECUTION_AUDIT_NAMES
-    backup_dir = analysis_dir / f".execution_audit.backup-{uuid.uuid4().hex}"
-    backup_dir.mkdir()
-    try:
-        for name in names:
-            target = analysis_dir / name
-            if target.exists():
-                target.rename(backup_dir / name)
-        for name in names:
-            (staging_dir / name).rename(analysis_dir / name)
-    except BaseException:
-        failed_dir = analysis_dir / f".execution_audit.failed-{uuid.uuid4().hex}"
-        failed_dir.mkdir()
-        recovery_error: Exception | None = None
-        for name in names:
-            target = analysis_dir / name
-            backup = backup_dir / name
-            if target.exists():
-                try:
-                    target.rename(failed_dir / name)
-                except Exception as error:
-                    recovery_error = recovery_error or error
-            if backup.exists():
-                try:
-                    backup.rename(target)
-                except Exception as error:
-                    recovery_error = recovery_error or error
-        if recovery_error is not None:
-            raise recovery_error
-        shutil.rmtree(failed_dir, ignore_errors=True)
-        shutil.rmtree(backup_dir, ignore_errors=True)
-        raise
-    else:
-        shutil.rmtree(backup_dir, ignore_errors=True)
 
 
 def _report(callback: ProgressCallback | None, percent: int, message: str) -> None:

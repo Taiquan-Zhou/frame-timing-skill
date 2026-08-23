@@ -212,7 +212,23 @@ class BatchWorkspaceTest(unittest.TestCase):
             workspace.select_item("zeta")
             self.assertTrue(workspace.approve_button.isEnabled())
             self.assertFalse(workspace.retry_button.isEnabled())
-            self.assertFalse(workspace.export_button.isEnabled())
+            self.assertTrue(workspace.export_button.isEnabled())
+        finally:
+            workspace.close()
+
+    def test_missing_persisted_output_remains_exportable_and_is_not_labeled_exported(self):
+        from PySide6.QtCore import QThreadPool
+
+        from frame_timing_agent.ui.batch_workspace import BatchWorkspace
+
+        state = self.make_state(status="finished", item_status="completed")
+        state.items[0].output_path = state.artifact_root / state.items[0].safe_name / "output_frames"
+        workspace = BatchWorkspace(QThreadPool())
+        try:
+            workspace.set_state(state)
+
+            self.assertTrue(workspace.export_button.isEnabled())
+            self.assertNotIn("已导出", workspace.item_list.item(0).text())
         finally:
             workspace.close()
 
@@ -309,7 +325,7 @@ class BatchWorkspaceTest(unittest.TestCase):
         finally:
             workspace.close()
 
-    def test_fully_exported_batch_does_not_offer_export_again(self):
+    def test_persisted_output_does_not_block_explicit_reexport(self):
         from PySide6.QtCore import QThreadPool
 
         from frame_timing_agent.ui.batch_workspace import BatchWorkspace
@@ -319,7 +335,7 @@ class BatchWorkspaceTest(unittest.TestCase):
         workspace = BatchWorkspace(QThreadPool())
         try:
             workspace.set_state(state)
-            self.assertFalse(workspace.export_button.isEnabled())
+            self.assertTrue(workspace.export_button.isEnabled())
         finally:
             workspace.close()
 
@@ -424,6 +440,59 @@ class BatchWorkspaceTest(unittest.TestCase):
                 workspace.export_eligible()
             start.assert_not_called()
             self.assertFalse(workspace.is_running)
+        finally:
+            workspace.close()
+
+    def test_add_directory_resets_finished_batch_and_enables_start(self):
+        from PySide6.QtCore import QThreadPool
+
+        from frame_timing_agent.ui.batch_workspace import BatchWorkspace
+
+        frame_dir = self.root / "new-frames"
+        frame_dir.mkdir()
+        workspace = BatchWorkspace(QThreadPool())
+        workspace.set_state(self.make_state(status="finished", item_status="completed"))
+        try:
+            with patch(
+                "frame_timing_agent.ui.batch_workspace.QFileDialog.getExistingDirectory",
+                return_value=str(frame_dir),
+            ):
+                workspace.add_directory()
+
+            self.assertIsNone(workspace.current_state)
+            self.assertEqual(workspace._explicit_directories, [frame_dir.resolve()])
+            self.assertEqual(workspace.status_label.text(), "已添加 1 个目录")
+            self.assertTrue(workspace.start_button.isEnabled())
+        finally:
+            workspace.close()
+
+    def test_discover_root_reports_result_and_enables_valid_batch(self):
+        from PySide6.QtCore import QThreadPool
+
+        from frame_timing_agent.batch_discovery import DiscoveryIssue, DiscoveryResult
+        from frame_timing_agent.ui.batch_workspace import BatchWorkspace
+
+        root = self.root / "input-root"
+        frames = root / "frames"
+        invalid = root / "empty"
+        frames.mkdir(parents=True)
+        workspace = BatchWorkspace(QThreadPool())
+        try:
+            with (
+                patch(
+                    "frame_timing_agent.ui.batch_workspace.QFileDialog.getExistingDirectory",
+                    return_value=str(root),
+                ),
+                patch(
+                    "frame_timing_agent.ui.batch_workspace.discover_frame_directories",
+                    return_value=DiscoveryResult((frames.resolve(),), (DiscoveryIssue(invalid, "invalid_no_frames"),)),
+                ),
+            ):
+                workspace.discover_root()
+
+            self.assertEqual(workspace._discovery_root, root.resolve())
+            self.assertEqual(workspace.status_label.text(), "发现 1 个帧目录，忽略/无效 1 项")
+            self.assertTrue(workspace.start_button.isEnabled())
         finally:
             workspace.close()
 

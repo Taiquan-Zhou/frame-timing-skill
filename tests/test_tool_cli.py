@@ -272,7 +272,9 @@ def test_batch_health_snapshot_marks_only_the_tampered_item_unexported(tmp_path:
     monkeypatch.setattr(
         tool_cli,
         "inspect_batch_artifact_health",
-        lambda root: BatchArtifactHealthResult(root, "failed", ["bad: digest mismatch"], [], 2, 0, 0, root / "a", root / "b"),
+        lambda root: BatchArtifactHealthResult(
+            root, "failed", ["bad: digest mismatch"], [], 2, 0, 0, root / "a", root / "b"
+        ),
     )
 
     def verify(analysis_dir, output_dir):
@@ -504,17 +506,23 @@ def test_batch_status_rechecks_exported_files_instead_of_trusting_cached_health(
     frame_dir = tmp_path / "frames"
     state_path = tmp_path / "output" / "batch" / "analysis" / "batch_state.json"
     _write_frames(frame_dir)
-    assert _invoke(
-        capsys,
-        ["batch", "create", "--frames", str(frame_dir), "--state", str(state_path)],
-    )[0] == 0
+    assert (
+        _invoke(
+            capsys,
+            ["batch", "create", "--frames", str(frame_dir), "--state", str(state_path)],
+        )[0]
+        == 0
+    )
     assert _invoke(capsys, ["batch", "run", "--state", str(state_path)])[0] == 0
     state = load_batch(state_path)
     if state.items[0].status is BatchItemStatus.REVIEW_REQUIRED:
-        assert _invoke(
-            capsys,
-            ["batch", "approve", "--state", str(state_path), "--item", state.items[0].safe_name],
-        )[0] == 0
+        assert (
+            _invoke(
+                capsys,
+                ["batch", "approve", "--state", str(state_path), "--item", state.items[0].safe_name],
+            )[0]
+            == 0
+        )
     assert _invoke(capsys, ["batch", "export", "--state", str(state_path)])[0] == 0
 
     state = load_batch(state_path)

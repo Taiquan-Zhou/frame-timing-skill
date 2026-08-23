@@ -88,22 +88,15 @@ def _read_bad_quality_counts(path: Path) -> tuple[int, int, frozenset[int]]:
                 source_index = int(raw_source_index)
                 source_indices.add(source_index)
                 raw_output_index = row.get("output_index")
-                if (
-                    not isinstance(raw_output_index, str)
-                    or re.fullmatch(r"0|[1-9][0-9]*", raw_output_index) is None
-                ):
-                    raise ValueError(
-                        f"invalid output_index at frame metrics row {row_number}: {raw_output_index!r}"
-                    )
+                if not isinstance(raw_output_index, str) or re.fullmatch(r"0|[1-9][0-9]*", raw_output_index) is None:
+                    raise ValueError(f"invalid output_index at frame metrics row {row_number}: {raw_output_index!r}")
                 output_index = int(raw_output_index)
                 if output_index in output_indices:
                     raise ValueError(f"duplicate output_index at frame metrics row {row_number}: {output_index}")
                 output_indices.add(output_index)
                 value = row.get("bad_quality_candidate")
                 if value not in {"0", "1"}:
-                    raise ValueError(
-                        f"invalid bad_quality_candidate at frame metrics row {row_number}: {value!r}"
-                    )
+                    raise ValueError(f"invalid bad_quality_candidate at frame metrics row {row_number}: {value!r}")
                 total_count += 1
                 bad_count += value == "1"
     except FileNotFoundError as error:
@@ -163,8 +156,10 @@ def _read_low_motion_ranges(
         ):
             if isinstance(frame_count, int) and not isinstance(frame_count, bool) and frame_count > total_count:
                 raise ValueError(f"segment frame_count exceeds analyzed frames at index {index}: {path}")
-            if isinstance(start, int) and isinstance(end, int) and (
-                start not in source_indices or end not in source_indices
+            if (
+                isinstance(start, int)
+                and isinstance(end, int)
+                and (start not in source_indices or end not in source_indices)
             ):
                 raise ValueError(f"segment endpoint is outside frame metrics at index {index}: {path}")
             raise ValueError(f"invalid segment at index {index}: {path}")

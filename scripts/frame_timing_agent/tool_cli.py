@@ -29,6 +29,7 @@ from frame_timing_agent.batch_session import (
     approve_item,
     create_batch,
     export_batch,
+    item_has_export_artifacts,
     load_batch,
     run_batch,
 )
@@ -356,12 +357,8 @@ def _batch_terminal_response(
     return EXIT_SUCCESS, payload
 
 
-def _batch_health_failed(state: BatchState) -> bool:
-    return _batch_health_snapshot(state)[0]
-
-
 def _batch_health_snapshot(state: BatchState) -> tuple[bool, dict[str, bool]]:
-    exported = {item.safe_name: _batch_item_export_exists(item) for item in state.items}
+    exported = {item.safe_name: item_has_export_artifacts(item) for item in state.items}
     output_items = [item for item in state.items if item.output_path is not None]
     if output_items:
         try:
@@ -433,7 +430,7 @@ def _batch_response(
 
 def _batch_item_response(item: BatchItemState, *, exported: bool | None = None) -> dict[str, object]:
     if exported is None:
-        exported = _batch_item_export_exists(item)
+        exported = item_has_export_artifacts(item)
     return {
         "name": item.safe_name,
         "status": item.status.value,
@@ -485,16 +482,8 @@ def _batch_next_actions(
     return actions
 
 
-def _batch_item_export_exists(item: BatchItemState) -> bool:
-    return (
-        item.output_path is not None
-        and item.output_path.is_dir()
-        and (item.output_path.parent / "analysis" / "execution_audit.json").is_file()
-    )
-
-
 def _batch_item_export_is_valid(item: BatchItemState) -> bool:
-    if not _batch_item_export_exists(item):
+    if not item_has_export_artifacts(item):
         return False
     assert item.output_path is not None
     try:

@@ -47,7 +47,7 @@ class PackageMetadataTest(unittest.TestCase):
     def test_repository_declares_public_release_metadata(self):
         data = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
 
-        self.assertEqual(data["project"]["version"], "0.4.0")
+        self.assertEqual(data["project"]["version"], "0.5.0")
         self.assertTrue(Path("LICENSE").is_file())
         self.assertTrue(Path("CHANGELOG.md").is_file())
         self.assertTrue(Path("SECURITY.md").is_file())
@@ -58,7 +58,7 @@ class PackageMetadataTest(unittest.TestCase):
             "https://github.com/Taiquan-Zhou/frame-timing-skill",
         )
 
-    def test_release_metadata_is_finalized_for_v040(self):
+    def test_release_metadata_is_finalized_for_v050(self):
         changelog = Path("CHANGELOG.md").read_text(encoding="utf-8")
         data = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
 
@@ -72,6 +72,8 @@ class PackageMetadataTest(unittest.TestCase):
         self.assertIn("not pixel stabilization", changelog)
         self.assertIn("## 0.4.0 - 2026-07-30", changelog)
         self.assertIn("Windows desktop UI", changelog)
+        self.assertIn("## 0.5.0 - 2026-08-23", changelog)
+        self.assertIn("recoverable CPU-only offline batches", changelog)
 
     def test_runtime_dependencies_are_bounded_for_reproducible_installs(self):
         data = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
