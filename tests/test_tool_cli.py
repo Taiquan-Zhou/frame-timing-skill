@@ -212,6 +212,7 @@ def test_batch_status_exposes_explicit_retry_action_for_failed_items(
     state.items[0].progress = 1.0
     state.items[0].last_error = "analysis failed"
     save_batch(state)
+    (state_path.parent / "maintenance_report.json").write_text('{"status": "ok"}', encoding="utf-8")
 
     exit_code, payload, stdout, stderr = _invoke(capsys, ["batch", "status", "--state", str(state_path)])
 
@@ -300,6 +301,158 @@ def test_batch_approval_and_export_require_explicit_actions(tmp_path: Path, caps
     assert (state_path.parents[1] / "frames" / "output_frames").is_dir()
     assert str(tmp_path) not in export_stdout
     assert export_stderr == ""
+
+
+def test_batch_export_reports_stale_source_without_suggesting_export(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    frame_dir = tmp_path / "frames"
+    state_path = tmp_path / "output" / "batch" / "analysis" / "batch_state.json"
+    _write_frames(frame_dir)
+    create_code, _, _, _ = _invoke(
+        capsys,
+        ["batch", "create", "--frames", str(frame_dir), "--state", str(state_path)],
+    )
+    assert create_code == 0
+    run_code, _, _, _ = _invoke(capsys, ["batch", "run", "--state", str(state_path)])
+    assert run_code == 0
+    state = load_batch(state_path)
+    state.items[0].status = BatchItemStatus.COMPLETED
+    save_batch(state)
+    (frame_dir / "frame_000000_src_000000.png").write_bytes(b"changed after analysis")
+
+    exit_code, payload, stdout, stderr = _invoke(capsys, ["batch", "export", "--state", str(state_path)])
+
+    assert exit_code == 4
+    assert payload["error"] == {"code": "stale_source", "message": "batch source changed since analysis"}
+    assert "export" not in payload.get("result", {}).get("next_actions", [])
+    assert not (state_path.parents[1] / "frames" / "output_frames").exists()
+    assert str(tmp_path) not in stdout
+    assert str(tmp_path) not in stderr
+
+
+def test_batch_approval_reports_stale_source_without_paths(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    frame_dir = tmp_path / "frames"
+    state_path = tmp_path / "output" / "batch" / "analysis" / "batch_state.json"
+    _write_frames(frame_dir)
+    create_code, _, _, _ = _invoke(
+        capsys,
+        ["batch", "create", "--frames", str(frame_dir), "--state", str(state_path)],
+    )
+    assert create_code == 0
+    run_code, _, _, _ = _invoke(capsys, ["batch", "run", "--state", str(state_path)])
+    assert run_code == 0
+    state = load_batch(state_path)
+    state.items[0].status = BatchItemStatus.REVIEW_REQUIRED
+    state.items[0].approved = False
+    save_batch(state)
+    (frame_dir / "frame_000000_src_000000.png").write_bytes(b"changed after analysis")
+
+    exit_code, payload, stdout, stderr = _invoke(
+        capsys,
+        ["batch", "approve", "--state", str(state_path), "--item", "frames"],
+    )
+
+    assert exit_code == 4
+    assert payload["error"] == {"code": "stale_source", "message": "batch source changed since analysis"}
+    assert str(tmp_path) not in stdout
+    assert str(tmp_path) not in stderr
+
+
+@pytest.mark.parametrize("health_payload", [None, "{", '{"status": "failed"}'])
+def test_finished_batch_requires_healthy_maintenance_report(
+    health_payload: str | None,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    frame_dir = tmp_path / "frames"
+    state_path = tmp_path / "output" / "batch" / "analysis" / "batch_state.json"
+    _write_frames(frame_dir)
+    create_code, _, _, _ = _invoke(
+        capsys,
+        ["batch", "create", "--frames", str(frame_dir), "--state", str(state_path)],
+    )
+    assert create_code == 0
+    state = load_batch(state_path)
+    state.status = BatchStatus.FINISHED
+    state.items[0].status = BatchItemStatus.COMPLETED
+    state.items[0].progress = 1.0
+    save_batch(state)
+    maintenance_path = state_path.parent / "maintenance_report.json"
+    if health_payload is not None:
+        maintenance_path.write_text(health_payload, encoding="utf-8")
+
+    exit_code, payload, stdout, stderr = _invoke(capsys, ["batch", "status", "--state", str(state_path)])
+
+    assert exit_code == 5
+    assert payload["error"] == {"code": "artifact_health_failed", "message": "batch artifact health check failed"}
+    assert str(tmp_path) not in stdout
+    assert str(tmp_path) not in stderr
+
+
+def test_ready_batch_allows_missing_maintenance_report(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    frame_dir = tmp_path / "frames"
+    state_path = tmp_path / "output" / "batch" / "analysis" / "batch_state.json"
+    _write_frames(frame_dir)
+    create_code, _, _, _ = _invoke(
+        capsys,
+        ["batch", "create", "--frames", str(frame_dir), "--state", str(state_path)],
+    )
+    assert create_code == 0
+
+    exit_code, payload, _, stderr = _invoke(capsys, ["batch", "status", "--state", str(state_path)])
+
+    assert exit_code == 0
+    assert payload["result"]["batch"]["status"] == "ready"
+    assert stderr == ""
+
+
+def test_batch_run_does_not_retry_failed_item_without_retry_id(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    frame_dir = tmp_path / "frames"
+    state_path = tmp_path / "output" / "batch" / "analysis" / "batch_state.json"
+    _write_frames(frame_dir)
+    create_code, _, _, _ = _invoke(
+        capsys,
+        ["batch", "create", "--frames", str(frame_dir), "--state", str(state_path)],
+    )
+    assert create_code == 0
+    state = load_batch(state_path)
+    state.status = BatchStatus.FINISHED
+    state.items[0].status = BatchItemStatus.FAILED
+    state.items[0].progress = 1.0
+    state.items[0].last_error = "analysis failed"
+    save_batch(state)
+
+    exit_code, payload, _, stderr = _invoke(capsys, ["batch", "run", "--state", str(state_path)])
+
+    assert exit_code == 4
+    assert payload["error"]["code"] == "analysis_failed"
+    assert payload["result"]["items"][0]["status"] == "failed"
+    assert payload["result"]["items"][0]["retry_count"] == 0
+    assert stderr == ""
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["batch"],
+        ["batch", "status"],
+        ["batch", "create", "--state", "output/batch/analysis/batch_state.json"],
+        ["batch", "status", "--state", "not-a-batch-state.json"],
+    ],
+)
+def test_batch_argument_errors_use_invalid_input_code(
+    argv: list[str],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    exit_code, payload, _, stderr = _invoke(capsys, argv)
+
+    assert exit_code == 2
+    assert payload["error"] == {"code": "invalid_input", "message": "batch command input is invalid"}
+    assert stderr
 
 
 def test_batch_errors_are_stable_and_do_not_leak_state_paths(

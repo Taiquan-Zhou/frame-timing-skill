@@ -41,6 +41,7 @@ from frame_timing_agent.artifact_layout import (
 from frame_timing_agent.configuration import parse_strategy_request
 from frame_timing_agent.contracts import SCHEMA_VERSION, ConfigurationError, PolicyName
 from frame_timing_agent.serialization import canonical_json_bytes
+from frame_timing_agent.run_workflow import verify_input_snapshot
 from frame_timing_agent.service import (
     analyze_frames,
     apply_validated_strategy,
@@ -71,11 +72,14 @@ class _ArgumentParser(argparse.ArgumentParser):
 
 def main(argv: Sequence[str] | None = None) -> int:
     command: str | None = None
+    raw_argv = list(argv) if argv is not None else sys.argv[1:]
     try:
-        args = _parser().parse_args(list(argv) if argv is not None else None)
+        args = _parser().parse_args(raw_argv)
         command = str(args.command)
         exit_code, payload = _dispatch(args)
     except CliInputError as exc:
+        if command == "batch" or (raw_argv and raw_argv[0] == "batch"):
+            return _emit_error(EXIT_INPUT_ERROR, "invalid_input", "batch command input is invalid", exc)
         return _emit_error(EXIT_INPUT_ERROR, "input_error", "command arguments are invalid", exc)
     except ArtifactFormatError as exc:
         return _emit_error(EXIT_INPUT_ERROR, "invalid_artifact", "artifact JSON is invalid", exc)
@@ -287,6 +291,8 @@ def _dispatch_batch(args: argparse.Namespace) -> tuple[int, dict[str, object]]:
             raise _BatchStaleSourceError() from exc
         return EXIT_SUCCESS, _batch_response(state)
     if action == "export":
+        state = load_batch(state_path)
+        _verify_batch_export_sources(state)
         summary = export_batch(state_path)
         state = load_batch(state_path)
         export = {
@@ -333,10 +339,27 @@ def _batch_health_failed(state: BatchState) -> bool:
     try:
         health = json.loads(health_path.read_text(encoding="utf-8"))
     except FileNotFoundError:
-        return False
+        return state.status is BatchStatus.FINISHED
     except (OSError, json.JSONDecodeError):
         return True
     return not isinstance(health, dict) or health.get("status") != "ok"
+
+
+def _verify_batch_export_sources(state: BatchState) -> None:
+    for item in state.items:
+        if item.status is not BatchItemStatus.COMPLETED and not (
+            item.status is BatchItemStatus.REVIEW_REQUIRED and item.approved
+        ):
+            continue
+        try:
+            verify_input_snapshot(
+                state.artifact_root / item.safe_name / "analysis",
+                item.frame_dir,
+                state.fps,
+                state.limit_first_n,
+            )
+        except (OSError, ValueError) as exc:
+            raise _BatchStaleSourceError() from exc
 
 
 def _batch_response(
