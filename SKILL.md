@@ -73,6 +73,46 @@ frame-timing-tool verify --frames path/to/clean_frames --artifact-root output/fr
 
 Only report completion when verify exits 0 and `health.json` is valid.
 
+## CPU-only Offline Batch Workflow
+
+Use the recoverable batch workflow for one or more already-clean frame directories, or for deterministic discovery below one root. It is CPU-only and must remain fully local. Keep the state path under an `output/` directory.
+
+Create from one or multiple explicit directories by repeating `--frames`, or use `--root` for discovery:
+
+```bash
+frame-timing-tool batch create --frames path/to/a/clean_frames --frames path/to/b/clean_frames --state output/frame_timing_batch/analysis/batch_state.json --fps 30
+frame-timing-tool batch create --root path/to/dataset_root --state output/frame_timing_batch/analysis/batch_state.json --fps 30
+```
+
+Follow this exact control sequence:
+
+```text
+batch create -> batch run/status -> report review_required ->
+request explicit approval -> batch approve -> request explicit export -> batch export
+```
+
+Commands:
+
+```bash
+frame-timing-tool batch run --state output/frame_timing_batch/analysis/batch_state.json
+frame-timing-tool batch status --state output/frame_timing_batch/analysis/batch_state.json
+frame-timing-tool batch run --state output/frame_timing_batch/analysis/batch_state.json --retry-item FAILED_ITEM_NAME
+frame-timing-tool batch approve --state output/frame_timing_batch/analysis/batch_state.json --item ITEM_NAME --note "reviewed"
+frame-timing-tool batch export --state output/frame_timing_batch/analysis/batch_state.json
+```
+
+Rules:
+
+- The Agent must not auto-resume. Reopening or inspecting an unfinished batch never authorizes `batch run`.
+- The Agent must not auto-approve any `review_required` item. Report the warning codes and request explicit approval first.
+- The Agent must not auto-retry failed items. Report failures, request authorization, then pass only approved names with `batch run --retry-item ITEM_NAME`.
+- The Agent must not auto-export. Request explicit export after the batch is finished and approvals are resolved.
+- Never modify source frames. Export only verified byte-identical copies under each item's `output_frames/`.
+- Do not invent quality scores. Batch review uses only the bad-quality-candidate ratio and existing `low_motion_review` ranges.
+- The state file must use the canonical `output/**/analysis/batch_state.json` layout.
+
+The older `frame-timing-batch` entry point is compatibility-only. It does not provide the recoverable session, explicit review approval, and explicit verified-export state machine above, so it must not be used for the recoverable production workflow.
+
 ## Output Contract
 
 Agent-safe v3 artifacts:

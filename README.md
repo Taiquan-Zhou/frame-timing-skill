@@ -39,6 +39,44 @@ Frame Timing Skill 是一个面向三维重建、NeRF、Gaussian Splatting 和�
 
 所有分析和复制操作都在本机完成。源目录不会被覆盖；运行产物默认写入源目录旁的 `output/frame_timing_ui/`。
 
+### CPU-only 离线批次
+
+批量处理面向没有独立显卡的离线生产环境，当前只使用 CPU，不要求 CUDA。桌面端通过“单目录 / 批量处理”切换保留原有单目录流程，并支持：
+
+- 添加单目录或多个目录；也可以选择“发现根目录”，按确定性顺序发现其中的帧目录。
+- 顺序分析各项目；单个项目失败不会阻止后续项目。
+- 在当前项目完成后暂停。程序重新打开时恢复上次记录的批次；已完成批次可以重新查看，未完成批次必须由用户显式继续。
+- 对 `review_required` 项展示可解释风险；首版只有 `bad_quality_candidate >= 10%` 和存在 `low_motion_review` 区间两类信号。
+- 只有用户显式批准后，待复核项目才具备导出资格；导出也必须显式触发。
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/Taiquan-Zhou/frame-timing-skill/main/assets/frame-timing-batch-ui.png" alt="Frame Timing Skill recoverable offline batch workspace" width="100%">
+</p>
+
+启动桌面端：
+
+```bash
+frame-timing-ui
+```
+
+结构化 CLI 支持单目录、多个目录和根目录发现。`--frames` 可以重复传入：
+
+```bash
+# 单目录或多个目录
+frame-timing-tool batch create --frames path/to/a/clean_frames --frames path/to/b/clean_frames --state output/frame_timing_batch/analysis/batch_state.json --fps 30
+
+# 从根目录发现
+frame-timing-tool batch create --root path/to/dataset_root --state output/frame_timing_batch/analysis/batch_state.json --fps 30
+
+frame-timing-tool batch run --state output/frame_timing_batch/analysis/batch_state.json
+frame-timing-tool batch status --state output/frame_timing_batch/analysis/batch_state.json
+frame-timing-tool batch run --state output/frame_timing_batch/analysis/batch_state.json --retry-item FAILED_ITEM_NAME
+frame-timing-tool batch approve --state output/frame_timing_batch/analysis/batch_state.json --item ITEM_NAME --note "reviewed"
+frame-timing-tool batch export --state output/frame_timing_batch/analysis/batch_state.json
+```
+
+`batch run` 也是中断后的显式继续入口；失败项只有在用户同意后才能通过 `--retry-item` 显式重试。程序和 Agent 都不会自动继续、重试、批准或导出。批次状态文件必须使用规范路径 `output/**/analysis/batch_state.json`；每个项目的分析和 `output_frames/` 位于同一批次根目录下。分析和导出前后都会校验输入快照，输出帧按字节验证，整个流程不会修改源帧。待复核项需要显式批准，批次完成后仍需显式导出。
+
 ### 作为 Agent Skill 使用
 
 让 AI Agent 或 AI 编程工具安装本仓库：

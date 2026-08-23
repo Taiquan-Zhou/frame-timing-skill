@@ -132,9 +132,11 @@ class PackageMetadataTest(unittest.TestCase):
         self.assertIn("Install this skill: https://github.com/Taiquan-Zhou/frame-timing-skill", readme_en)
         self.assertIn("assets/frame-timing-ui.png", readme)
         self.assertIn("assets/frame-timing-ui.png", readme_en)
+        self.assertIn("assets/frame-timing-batch-ui.png", readme)
         self.assertIn("FrameTimingSkill-Windows-x64.zip", readme)
         self.assertIn("FrameTimingSkill-Windows-x64.zip", readme_en)
         self.assertTrue((Path("assets") / "frame-timing-ui.png").is_file())
+        self.assertTrue((Path("assets") / "frame-timing-batch-ui.png").is_file())
         for content in [readme, readme_en, skill, usage, artifact_contract]:
             self.assertIn("coverage_first", content)
             self.assertIn("balanced", content)

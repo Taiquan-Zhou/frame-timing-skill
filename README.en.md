@@ -39,6 +39,33 @@ Usage:
 
 All analysis and copying stay on the local machine. Source frames are not overwritten. Desktop artifacts are normally written under a sibling `output/frame_timing_ui/` directory.
 
+### CPU-only Offline Batches
+
+Batch processing is designed for offline machines without a dedicated GPU and does not require CUDA. The desktop app keeps the existing single-directory workflow and adds a compact Batch Processing workspace for explicit directories or deterministic root discovery.
+
+- Items run sequentially, and one failed item does not stop later items.
+- Pause takes effect after the current item. Reopening the app restores the last recorded batch for inspection; an unfinished batch never resumes automatically and requires an explicit Continue action.
+- `review_required` is limited to two explainable signals: `bad_quality_candidate >= 10%` and existing `low_motion_review` ranges.
+- Review approval and verified export are always explicit actions.
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/Taiquan-Zhou/frame-timing-skill/main/assets/frame-timing-batch-ui.png" alt="Frame Timing Skill recoverable offline batch workspace" width="100%">
+</p>
+
+```bash
+frame-timing-ui
+
+frame-timing-tool batch create --frames path/to/a/clean_frames --frames path/to/b/clean_frames --state output/frame_timing_batch/analysis/batch_state.json --fps 30
+frame-timing-tool batch create --root path/to/dataset_root --state output/frame_timing_batch/analysis/batch_state.json --fps 30
+frame-timing-tool batch run --state output/frame_timing_batch/analysis/batch_state.json
+frame-timing-tool batch status --state output/frame_timing_batch/analysis/batch_state.json
+frame-timing-tool batch run --state output/frame_timing_batch/analysis/batch_state.json --retry-item FAILED_ITEM_NAME
+frame-timing-tool batch approve --state output/frame_timing_batch/analysis/batch_state.json --item ITEM_NAME --note "reviewed"
+frame-timing-tool batch export --state output/frame_timing_batch/analysis/batch_state.json
+```
+
+`batch run` is also the explicit resume action. A failed item may be retried with `--retry-item` only after user authorization. Neither the app nor an Agent may automatically resume, retry, approve, or export. The canonical state path is `output/**/analysis/batch_state.json`; item analysis and verified `output_frames/` stay inside the same batch root. Source snapshots are checked before export, copied frames are byte-verified, and source frames are never modified.
+
 ### Use as an Agent Skill
 
 Ask an AI agent or coding tool to install this repository:

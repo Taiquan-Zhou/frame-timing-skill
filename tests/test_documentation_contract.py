@@ -3,6 +3,8 @@ from __future__ import annotations
 import tomllib
 from pathlib import Path
 
+import cv2
+
 from frame_timing_agent import __all__ as public_exports
 from frame_timing_agent.artifact_layout import (
     ANALYSIS_ARTIFACT,
@@ -27,6 +29,7 @@ DOC_PATHS = (
     ROOT / "references" / "agent-integration.md",
     ROOT / "references" / "migration-v2-to-v3.md",
 )
+BATCH_UI_SCREENSHOT = ROOT / "assets" / "frame-timing-batch-ui.png"
 
 
 def _read(path: Path) -> str:
@@ -101,3 +104,82 @@ def test_migration_docs_keep_v2_and_v3_boundaries_explicit() -> None:
     assert "override" in migration
     assert "does not automatically route" in migration
     assert "does not generate duplicate frames" in migration
+
+
+def test_readme_and_skill_document_recoverable_offline_batch_contract() -> None:
+    readme = _read(ROOT / "README.md")
+    readme_en = _read(ROOT / "README.en.md")
+    skill = _read(ROOT / "SKILL.md")
+
+    for phrase in (
+        "CPU-only",
+        "离线批次",
+        "单目录",
+        "多个目录",
+        "发现根目录",
+        "frame-timing-ui",
+        "frame-timing-tool batch create",
+        "frame-timing-tool batch run",
+        "frame-timing-tool batch status",
+        "frame-timing-tool batch approve",
+        "frame-timing-tool batch export",
+        "--retry-item",
+        "review_required",
+        ">= 10%",
+        "恢复上次记录的批次",
+        "未完成批次必须由用户显式继续",
+        "显式继续",
+        "显式批准",
+        "显式导出",
+        "不会修改源帧",
+    ):
+        assert phrase in readme
+
+    for phrase in (
+        "CPU-only",
+        "frame-timing-ui",
+        "frame-timing-tool batch create",
+        "frame-timing-tool batch run",
+        "frame-timing-tool batch status",
+        "frame-timing-tool batch approve",
+        "frame-timing-tool batch export",
+        "--retry-item",
+        "review_required",
+        "explicit Continue",
+        "automatically resume, retry, approve, or export",
+        "never modified",
+    ):
+        assert phrase in readme_en
+
+    for phrase in (
+        "CPU-only",
+        "frame-timing-tool batch create",
+        "frame-timing-tool batch run",
+        "frame-timing-tool batch status",
+        "frame-timing-tool batch approve",
+        "frame-timing-tool batch export",
+        "--retry-item",
+        "review_required",
+        "must not auto-resume",
+        "must not auto-approve",
+        "must not auto-retry",
+        "must not auto-export",
+        "frame-timing-batch",
+        "compatibility-only",
+        "must not be used for the recoverable production workflow",
+    ):
+        assert phrase in skill
+
+
+def test_real_batch_ui_screenshot_is_documented() -> None:
+    readme = _read(ROOT / "README.md")
+    readme_en = _read(ROOT / "README.en.md")
+
+    assert "assets/frame-timing-batch-ui.png" in readme
+    assert "assets/frame-timing-batch-ui.png" in readme_en
+    assert BATCH_UI_SCREENSHOT.is_file()
+    screenshot = cv2.imread(str(BATCH_UI_SCREENSHOT))
+    assert screenshot is not None
+    height, width = screenshot.shape[:2]
+    assert width >= 1200
+    assert height >= 800
