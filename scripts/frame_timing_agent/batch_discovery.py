@@ -110,7 +110,7 @@ def _root_candidates(root: Path, issues: list[DiscoveryIssue]) -> list[Path]:
             ignored_code = _ignored_code(child.relative_to(root).parts)
             if ignored_code is not None:
                 issues.append(DiscoveryIssue(child, ignored_code))
-            elif _is_directory_link(child):
+            elif _is_path_link(child):
                 issues.append(DiscoveryIssue(child, "ignored_link"))
             else:
                 retained_names.append(directory_name)
@@ -129,7 +129,7 @@ def _root_candidates(root: Path, issues: list[DiscoveryIssue]) -> list[Path]:
     return sorted(candidates, key=_sort_key)
 
 
-def _is_directory_link(path: Path) -> bool:
+def _is_path_link(path: Path) -> bool:
     if path.is_symlink():
         return True
     try:
@@ -143,7 +143,7 @@ def _is_directory_link(path: Path) -> bool:
 
 def _contains_supported_frames(path: Path) -> bool:
     return any(
-        entry.is_file() and entry.suffix.casefold() in SUPPORTED_EXTENSIONS
+        not _is_path_link(entry) and entry.is_file() and entry.suffix.casefold() in SUPPORTED_EXTENSIONS
         for entry in path.iterdir()
     )
 

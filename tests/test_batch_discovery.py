@@ -125,6 +125,16 @@ def test_discovery_does_not_follow_directory_links(tmp_path):
     assert DiscoveryIssue(link.absolute(), "ignored_link") in result.issues
 
 
+def test_discovery_ignores_supported_file_links(tmp_path, monkeypatch):
+    candidate = make_frames(tmp_path / "video_a")
+    frame = candidate / "frame_000001.jpg"
+    monkeypatch.setattr(batch_discovery, "_is_path_link", lambda path: path == frame)
+
+    result = discover_frame_directories(root=tmp_path)
+
+    assert result.frame_dirs == ()
+
+
 def test_discovery_suppresses_explicit_parent_when_preferred_child_is_selected(tmp_path):
     parent = make_frames(tmp_path / "video_a")
     preferred = make_frames(tmp_path / "video_a" / "clean_frames")

@@ -174,6 +174,9 @@ def test_export_preserves_typed_stale_failure_and_prior_valid_output(tmp_path, m
     assert marker.read_text(encoding="utf-8") == "keep"
     assert persisted.items[0].output_path == previous_output
     assert persisted.items[1].output_path == persisted.artifact_root / item.safe_name / "output_frames"
+    assert persisted.items[0].status is BatchItemStatus.FAILED
+    assert persisted.items[0].approved is False
+    assert persisted.items[0].note is None
 
 
 def test_export_keeps_ordinary_failures_in_normal_summary(tmp_path, monkeypatch):

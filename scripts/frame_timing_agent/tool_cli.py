@@ -294,7 +294,17 @@ def _dispatch_batch(args: argparse.Namespace) -> tuple[int, dict[str, object]]:
         try:
             summary = export_batch(state_path)
         except BatchExportStaleSourceError as exc:
-            raise _BatchStaleSourceError() from exc
+            state = load_batch(state_path)
+            export = {
+                "exported": list(exc.summary.exported),
+                "skipped": list(exc.summary.skipped),
+                "failed": list(exc.summary.failed),
+            }
+            payload = _batch_response(state, export=export)
+            payload["status"] = "failed"
+            payload["result"]["stale_items"] = list(exc.stale_items)
+            payload["error"] = {"code": "stale_source", "message": "batch source changed since analysis"}
+            return EXIT_EXECUTION_FAILED, payload
         state = load_batch(state_path)
         export = {
             "exported": list(summary.exported),
@@ -314,6 +324,8 @@ def _batch_state_path(raw_path: str) -> Path:
     state_path = Path(raw_path).resolve()
     if state_path.name != "batch_state.json" or state_path.parent.name != "analysis":
         raise CliInputError("batch state path is not canonical")
+    if "output" not in {part.casefold() for part in state_path.parents[1].parts}:
+        raise CliInputError("batch artifact root must be inside an output directory")
     return state_path
 
 
@@ -373,19 +385,25 @@ def _batch_response(
     }
     if export is not None:
         result["export"] = export
+    artifacts = {"batch_state": "analysis/batch_state.json"}
+    if state.status is BatchStatus.FINISHED and (state.artifact_root / "analysis" / "batch_summary.json").is_file():
+        artifacts["batch_summary"] = "analysis/batch_summary.json"
+    if state.status is BatchStatus.FINISHED and (state.artifact_root / "analysis" / "human_review.md").is_file():
+        artifacts["human_review"] = "analysis/human_review.md"
     return _response(
         "ok",
         state.batch_id,
-        {
-            "batch_state": "analysis/batch_state.json",
-            "batch_summary": "analysis/batch_summary.json",
-            "human_review": "analysis/human_review.md",
-        },
+        artifacts,
         result,
     )
 
 
 def _batch_item_response(item: BatchItemState) -> dict[str, object]:
+    exported = (
+        item.output_path is not None
+        and item.output_path.is_dir()
+        and (item.output_path.parent / "analysis" / "execution_audit.json").is_file()
+    )
     return {
         "name": item.safe_name,
         "status": item.status.value,
@@ -393,7 +411,7 @@ def _batch_item_response(item: BatchItemState) -> dict[str, object]:
         "retry_count": item.retry_count,
         "risks": list(item.warnings),
         "approved": item.approved,
-        "exported": item.output_path is not None,
+        "exported": exported,
         "analyzed_count": item.analyzed_count,
         "output_count": item.output_count,
         "error": item.last_error,
@@ -403,7 +421,7 @@ def _batch_item_response(item: BatchItemState) -> dict[str, object]:
 def _batch_next_actions(state: BatchState) -> list[str]:
     actions: list[str] = []
     if (
-        state.status in {BatchStatus.READY, BatchStatus.PAUSED}
+        state.status in {BatchStatus.READY, BatchStatus.RUNNING, BatchStatus.PAUSED}
         or any(item.status is BatchItemStatus.PENDING for item in state.items)
         or any(item.status is BatchItemStatus.FAILED for item in state.items)
     ):
@@ -411,7 +429,7 @@ def _batch_next_actions(state: BatchState) -> list[str]:
     if any(item.status is BatchItemStatus.REVIEW_REQUIRED and not item.approved for item in state.items):
         actions.append("approve")
     if (
-        not any(item.status is BatchItemStatus.REVIEW_REQUIRED and not item.approved for item in state.items)
+        state.status is BatchStatus.FINISHED
         and any(
             item.status is BatchItemStatus.COMPLETED
             or (item.status is BatchItemStatus.REVIEW_REQUIRED and item.approved)

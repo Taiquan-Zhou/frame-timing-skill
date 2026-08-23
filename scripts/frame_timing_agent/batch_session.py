@@ -128,6 +128,12 @@ def create_batch(
     resolved_artifact_root = Path(artifact_root).resolve()
     if any(_paths_overlap(resolved_artifact_root, frame_dir) for frame_dir in frame_dirs):
         raise ValueError("artifact_root must not overlap a source frame directory")
+    _validate_artifact_child(resolved_artifact_root, Path("analysis"))
+    existing_state_path = resolved_artifact_root / "analysis" / "batch_state.json"
+    if existing_state_path.exists():
+        raise BatchStateError(f"batch state already exists: {existing_state_path}")
+    if resolved_artifact_root.exists() and any(resolved_artifact_root.iterdir()):
+        raise BatchStateError(f"batch artifact root is not empty: {resolved_artifact_root}")
 
     now = _timestamp()
     state = BatchState(
@@ -142,13 +148,17 @@ def create_batch(
             for frame_dir, safe_name in zip(frame_dirs, _unique_safe_names(frame_dirs))
         ],
     )
-    save_batch(state)
+    with _run_lock(state.state_path):
+        if state.state_path.exists():
+            raise BatchStateError(f"batch state already exists: {state.state_path}")
+        save_batch(state)
     return state
 
 
 def load_batch(state_path: Path | str) -> BatchState:
     """Load a batch state after validating its schema and typed fields."""
     path = Path(state_path)
+    _validate_state_path_location(path)
     try:
         raw_state = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as error:
@@ -276,6 +286,11 @@ def export_batch(
             except StaleSourceError:
                 failed.append(item.safe_name)
                 stale_items.append(item.safe_name)
+                item.status = BatchItemStatus.FAILED
+                item.progress = 1.0
+                item.last_error = "stale_source: source frames changed after analysis"
+                item.approved = False
+                item.note = None
             except Exception:
                 failed.append(item.safe_name)
             else:
@@ -309,6 +324,8 @@ def run_batch(
     path = Path(state_path).resolve()
     with _run_lock(path):
         state = load_batch(path)
+        if state.status is BatchStatus.RUNNING:
+            _recover_interrupted_items(state)
         retries = _validate_retry_items(state, retry_items)
         for item in state.items:
             if item.safe_name in retries:
@@ -322,6 +339,7 @@ def run_batch(
             item.status not in {BatchItemStatus.PENDING, BatchItemStatus.RUNNING} and item.safe_name not in retries
             for item in state.items
         )
+        reports_current = False
 
         for item in state.items:
             is_retry = item.safe_name in retries
@@ -342,6 +360,7 @@ def run_batch(
             item.output_count = None
             item.output_path = None
             item.status = BatchItemStatus.RUNNING
+            reports_current = False
             item.progress = 0.0
             item.last_error = None
             save_batch(state)
@@ -383,19 +402,26 @@ def run_batch(
             terminal_count += 1
             save_batch(state)
             publish_batch_timing_reports(state.artifact_root, _reported_results(state))
+            reports_current = True
             _report_progress(progress_callback, round(terminal_count * 100 / total), item.safe_name)
         else:
-            state.status = BatchStatus.FINISHED
-            state.pause_requested = False
-            save_batch(state)
-
-        if state.status is BatchStatus.RUNNING:
+            if not reports_current:
+                publish_batch_timing_reports(state.artifact_root, _reported_results(state))
             state.status = BatchStatus.FINISHED
             state.pause_requested = False
             save_batch(state)
         if state.status is BatchStatus.FINISHED:
             _report_progress(progress_callback, 100, "batch finished")
         return state
+
+
+def _recover_interrupted_items(state: BatchState) -> None:
+    state.pause_requested = False
+    for item in state.items:
+        if item.status is BatchItemStatus.RUNNING:
+            item.status = BatchItemStatus.PENDING
+            item.progress = 0.0
+            item.retry_count += 1
 
 
 def _validate_retry_items(state: BatchState, retry_items: Sequence[str]) -> set[str]:
@@ -550,12 +576,19 @@ def _validate_state(state: BatchState) -> None:
     if not isinstance(state.artifact_root, Path):
         raise BatchStateError("artifact_root must be a Path")
     _validate_canonical_path(state.artifact_root, "artifact_root")
+    _validate_artifact_child(state.artifact_root, Path("analysis"))
     if not isinstance(state.items, list) or not state.items:
         raise BatchStateError("batch state must contain at least one item")
     if len({item.safe_name.casefold() for item in state.items}) != len(state.items):
         raise BatchStateError("item safe names must be unique")
+    normalized_sources = {os.path.normcase(str(item.frame_dir)) for item in state.items}
+    if len(normalized_sources) != len(state.items):
+        raise BatchStateError("source frame directories must be unique")
     for item in state.items:
         _validate_item(state, item)
+        _validate_artifact_child(state.artifact_root, Path(item.safe_name))
+        if _paths_overlap(state.artifact_root, item.frame_dir):
+            raise BatchStateError("artifact_root must not overlap a source frame directory")
     if state.status is BatchStatus.FINISHED and any(
         item.status in {BatchItemStatus.PENDING, BatchItemStatus.RUNNING} for item in state.items
     ):
@@ -601,6 +634,22 @@ def _validate_item(state: BatchState, item: BatchItemState) -> None:
         expected_output_path = state.artifact_root / item.safe_name / "output_frames"
         if item.output_path != expected_output_path:
             raise BatchStateError("item output_path does not match its artifact directory")
+
+
+def _validate_state_path_location(state_path: Path) -> None:
+    if state_path.name != "batch_state.json" or state_path.parent.name != "analysis":
+        return
+    artifact_root = state_path.absolute().parent.parent.resolve()
+    resolved_state_path = state_path.resolve()
+    if not resolved_state_path.is_relative_to(artifact_root):
+        raise BatchStateError("batch state path escapes artifact_root")
+
+
+def _validate_artifact_child(artifact_root: Path, relative_path: Path) -> None:
+    resolved_root = artifact_root.resolve()
+    resolved_child = (resolved_root / relative_path).resolve()
+    if not resolved_child.is_relative_to(resolved_root):
+        raise BatchStateError(f"batch artifact path escapes artifact_root: {relative_path}")
 
 
 def _validate_timestamp(value: str, name: str) -> None:

@@ -49,6 +49,8 @@ def capture_input_snapshot(
                 "source_index": record.source_index,
                 "output_index": record.output_index,
                 "instance_id": record.instance_id,
+                "timestamp_sec": record.timestamp_sec,
+                "is_duplicate": record.is_duplicate,
                 "path": str(path),
                 "size": path.stat().st_size,
                 "sha256": _file_sha256(path),
@@ -106,7 +108,11 @@ def verify_input_snapshot(
     analysis_dir = Path(analysis_dir)
     expected = _read_snapshot(analysis_dir)
     strategy_sha256 = expected.pop("strategy_sha256", None)
-    current = capture_input_snapshot(frame_dir, fps=fps, limit_first_n=limit_first_n)
+    try:
+        current = capture_input_snapshot(frame_dir, fps=fps, limit_first_n=limit_first_n)
+        _validate_snapshot_source_paths(current, analysis_dir.parent)
+    except (OSError, ValueError, KeyError) as exc:
+        raise StaleSourceError("input frames changed since analysis; run analysis again before exporting") from exc
     if current != expected:
         raise StaleSourceError("input frames changed since analysis; run analysis again before exporting")
     if strategy_sha256 is None:
@@ -147,6 +153,7 @@ def analyze_run(
 ) -> TimingAgentResult:
     _validate_run_path_safety(settings)
     before = capture_input_snapshot(settings.frame_dir, settings.fps, settings.limit_first_n)
+    _validate_snapshot_source_paths(before, settings.artifact_dir)
     result = run_timing_agent(
         frames=settings.frame_dir,
         artifact_dir=settings.artifact_dir,
@@ -157,6 +164,7 @@ def analyze_run(
         progress_callback=progress_callback,
     )
     after = capture_input_snapshot(settings.frame_dir, settings.fps, settings.limit_first_n)
+    _validate_snapshot_source_paths(after, settings.artifact_dir)
     if after != before:
         raise ValueError("input frames changed during analysis; run analysis again")
     write_input_snapshot(settings.artifact_dir / "analysis", bind_strategy_snapshot(after, result.strategy_path))
@@ -218,6 +226,23 @@ def _validate_run_path_safety(settings: RunSettings) -> None:
             or frame_dir.is_relative_to(resolved_write_path)
         ):
             raise ValueError("artifact write path must not overlap the input frame directory")
+
+
+def _validate_snapshot_source_paths(snapshot: JsonDict, artifact_dir: Path | str) -> None:
+    resolved_artifact_dir = Path(artifact_dir).expanduser().resolve()
+    frames = snapshot.get("frames")
+    if not isinstance(frames, list):
+        raise ValueError("input snapshot frames must be a list")
+    for frame in frames:
+        if not isinstance(frame, dict) or not isinstance(frame.get("path"), str):
+            raise ValueError("input snapshot contains an invalid frame path")
+        source_path = Path(frame["path"]).expanduser().resolve()
+        if _paths_overlap(source_path, resolved_artifact_dir):
+            raise ValueError("source frame path must not overlap the artifact directory")
+
+
+def _paths_overlap(left: Path, right: Path) -> bool:
+    return left == right or left.is_relative_to(right) or right.is_relative_to(left)
 
 
 def replace_verified_output(staging_dir: Path, output_dir: Path, analysis_dir: Path, audit: JsonDict) -> None:

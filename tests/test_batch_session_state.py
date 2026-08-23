@@ -1,5 +1,6 @@
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -139,6 +140,84 @@ def test_create_batch_rejects_artifact_root_inside_source_directory(tmp_path):
         create_batch(make_discovery(frame_dir), artifact_root=artifact_root, fps=24.0)
 
     assert not artifact_root.exists()
+
+
+def test_create_batch_refuses_to_replace_an_existing_batch(tmp_path):
+    frame_dir = tmp_path / "frames"
+    frame_dir.mkdir()
+    artifact_root = tmp_path / "batch-artifacts"
+    created = create_batch(make_discovery(frame_dir), artifact_root=artifact_root, fps=24.0)
+    before = created.state_path.read_bytes()
+
+    with pytest.raises(BatchStateError, match="already exists"):
+        create_batch(make_discovery(frame_dir), artifact_root=artifact_root, fps=24.0)
+
+    assert created.state_path.read_bytes() == before
+
+
+def test_create_batch_rejects_nonempty_artifact_root(tmp_path):
+    frame_dir = tmp_path / "frames"
+    frame_dir.mkdir()
+    artifact_root = tmp_path / "batch-artifacts"
+    artifact_root.mkdir()
+    (artifact_root / "old-report.json").write_text("{}", encoding="utf-8")
+
+    with pytest.raises(BatchStateError, match="not empty"):
+        create_batch(make_discovery(frame_dir), artifact_root=artifact_root, fps=24.0)
+
+
+def test_create_batch_rejects_analysis_link_outside_artifact_root(tmp_path):
+    frame_dir = tmp_path / "frames"
+    frame_dir.mkdir()
+    artifact_root = tmp_path / "batch-artifacts"
+    artifact_root.mkdir()
+    external = tmp_path / "external"
+    external.mkdir()
+    analysis_link = artifact_root / "analysis"
+    make_directory_link(analysis_link, external)
+    try:
+        with pytest.raises(BatchStateError, match="not empty|escapes artifact_root"):
+            create_batch(make_discovery(frame_dir), artifact_root=artifact_root, fps=24.0)
+        assert not (external / "batch_state.json").exists()
+    finally:
+        analysis_link.rmdir()
+
+
+def test_load_rejects_analysis_link_outside_artifact_root(tmp_path):
+    frame_dir = tmp_path / "frames"
+    frame_dir.mkdir()
+    artifact_root = tmp_path / "batch-artifacts"
+    state = create_batch(make_discovery(frame_dir), artifact_root=artifact_root, fps=24.0)
+    payload = state.state_path.read_text(encoding="utf-8")
+    shutil.rmtree(state.state_path.parent)
+    external = tmp_path / "external"
+    external.mkdir()
+    (external / "batch_state.json").write_text(payload, encoding="utf-8")
+    analysis_link = artifact_root / "analysis"
+    make_directory_link(analysis_link, external)
+    try:
+        with pytest.raises(BatchStateError, match="escapes artifact_root"):
+            load_batch(analysis_link / "batch_state.json")
+    finally:
+        analysis_link.rmdir()
+
+
+@pytest.mark.parametrize("tamper", ["duplicate_source", "artifact_overlap"])
+def test_load_rejects_tampered_source_path_invariants(tmp_path, tamper):
+    first = tmp_path / "first" / "frames"
+    second = tmp_path / "second" / "frames"
+    first.mkdir(parents=True)
+    second.mkdir(parents=True)
+    state = create_batch(make_discovery(first, second), artifact_root=tmp_path / "batch-artifacts", fps=24.0)
+    payload = json.loads(state.state_path.read_text(encoding="utf-8"))
+    if tamper == "duplicate_source":
+        payload["items"][1]["frame_dir"] = payload["items"][0]["frame_dir"]
+    else:
+        payload["items"][1]["frame_dir"] = str(state.artifact_root / state.items[1].safe_name / "output_frames")
+    state.state_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(BatchStateError, match="source frame directories|must not overlap"):
+        load_batch(state.state_path)
 
 
 def test_save_preserves_existing_file_and_cleans_temp_file_when_replace_fails(tmp_path, monkeypatch):

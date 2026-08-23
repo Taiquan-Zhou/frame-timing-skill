@@ -57,6 +57,60 @@ def test_analyze_run_binds_source_and_strategy(tmp_path):
 
     snapshot = json.loads((result.artifact_dir / "analysis" / "input_snapshot.json").read_text())
     assert snapshot["strategy_sha256"]
+    assert {"timestamp_sec", "is_duplicate"}.issubset(snapshot["frames"][0])
+
+
+def test_analyze_rejects_manifest_frames_inside_artifact_write_area(tmp_path):
+    frame_dir = tmp_path / "frames"
+    frame_dir.mkdir()
+    artifact_dir = tmp_path / "run"
+    source = artifact_dir / "output_frames" / "frame_000000_src_000000.jpg"
+    source.parent.mkdir(parents=True)
+    _write_frame(source, 80)
+    (frame_dir / "selected_frames.txt").write_text(
+        "source_index\toutput_index\ttimestamp_sec\tpath\n"
+        f"0\t0\t0.0\t{source}\n",
+        encoding="utf-8",
+    )
+    settings = RunSettings(frame_dir=frame_dir, artifact_dir=artifact_dir, fps=24.0)
+
+    with pytest.raises(ValueError, match="source frame path must not overlap"):
+        analyze_run(settings)
+
+    assert source.is_file()
+
+
+def test_missing_source_is_reported_as_stale_after_analysis(tmp_path):
+    settings = make_analyzed_settings(tmp_path)
+    next(settings.frame_dir.glob("*.jpg")).unlink()
+
+    with pytest.raises(StaleSourceError, match="input frames changed"):
+        run_workflow.verify_input_snapshot(
+            settings.artifact_dir / "analysis",
+            settings.frame_dir,
+            settings.fps,
+            settings.limit_first_n,
+        )
+
+
+def test_manifest_redirect_into_artifact_is_reported_as_stale_after_analysis(tmp_path):
+    settings = make_analyzed_settings(tmp_path)
+    source = settings.artifact_dir / "output_frames" / "frame_000000_src_000000.jpg"
+    source.parent.mkdir()
+    _write_frame(source, 80)
+    (settings.frame_dir / "selected_frames.txt").write_text(
+        "source_index\toutput_index\ttimestamp_sec\tpath\n"
+        f"0\t0\t0.0\t{source}\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(StaleSourceError, match="input frames changed"):
+        run_workflow.verify_input_snapshot(
+            settings.artifact_dir / "analysis",
+            settings.frame_dir,
+            settings.fps,
+            settings.limit_first_n,
+        )
 
 
 def test_export_run_keeps_previous_output_when_source_changed(tmp_path):

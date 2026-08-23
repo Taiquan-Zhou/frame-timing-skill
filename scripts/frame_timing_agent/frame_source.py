@@ -53,7 +53,11 @@ def _parse_source_index_from_path(path: Path) -> int:
 
 
 def _iter_frame_paths(frame_dir: Path) -> list[Path]:
-    return [path for path in frame_dir.iterdir() if path.is_file() and path.suffix.lower() in SUPPORTED_EXTENSIONS]
+    return [
+        path
+        for path in frame_dir.iterdir()
+        if not path.is_symlink() and path.is_file() and path.suffix.lower() in SUPPORTED_EXTENSIONS
+    ]
 
 
 def _build_filename_records(frame_dir: Path, fps: float) -> list[FrameRecord]:
@@ -81,6 +85,8 @@ def _build_selected_records(frame_dir: Path, fps: float) -> list[FrameRecord]:
             path = _resolve_selected_frame_path(frame_dir, raw_path)
             if not path.is_file():
                 raise FileNotFoundError(f"selected frame path does not exist: {path}")
+            if path.is_symlink():
+                raise ValueError(f"selected frame path must not be a symbolic link: {path}")
 
             source_index = int(row["source_index"])
             parsed_source_index = _parse_source_index_from_path(path)

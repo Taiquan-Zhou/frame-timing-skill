@@ -315,6 +315,56 @@ def test_explicit_continuation_runs_only_pending_items(tmp_path, monkeypatch):
     assert result.status is BatchStatus.FINISHED
 
 
+def test_explicit_continuation_recovers_an_interrupted_running_item(tmp_path, monkeypatch):
+    state_path = make_batch(tmp_path, count=1)
+    state = load_batch(state_path)
+    state.status = BatchStatus.RUNNING
+    state.items[0].status = BatchItemStatus.RUNNING
+    state.items[0].progress = 0.4
+    save_batch(state)
+    analyzed = []
+    monkeypatch.setattr(batch_session, "publish_batch_timing_reports", lambda artifact_root, results: None)
+
+    def analyze(settings, progress_callback=None):
+        analyzed.append(settings.frame_dir)
+        return fake_result(settings)
+
+    monkeypatch.setattr(batch_session, "analyze_run", analyze)
+
+    result = run_batch(state_path)
+
+    assert analyzed == [state.items[0].frame_dir]
+    assert result.status is BatchStatus.FINISHED
+    assert result.items[0].status is BatchItemStatus.COMPLETED
+    assert result.items[0].retry_count == 1
+
+
+def test_rerun_republishes_reports_after_previous_publication_failure(tmp_path, monkeypatch):
+    state_path = make_batch(tmp_path, count=1)
+    monkeypatch.setattr(batch_session, "analyze_run", lambda settings, progress_callback=None: fake_result(settings))
+    calls = 0
+
+    def publish(artifact_root, results):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise OSError("report write failed")
+
+    monkeypatch.setattr(batch_session, "publish_batch_timing_reports", publish)
+
+    with pytest.raises(OSError, match="report write failed"):
+        run_batch(state_path)
+
+    interrupted = load_batch(state_path)
+    assert interrupted.status is BatchStatus.RUNNING
+    assert interrupted.items[0].status is BatchItemStatus.COMPLETED
+
+    result = run_batch(state_path)
+
+    assert result.status is BatchStatus.FINISHED
+    assert calls >= 2
+
+
 def test_completed_and_review_items_are_not_repeated(tmp_path, monkeypatch):
     state_path = make_batch(tmp_path)
     state = load_batch(state_path)

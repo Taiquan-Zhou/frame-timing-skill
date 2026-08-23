@@ -154,8 +154,6 @@ def test_batch_create_accepts_explicit_frames_and_reports_safe_ready_status(
     assert payload["status"] == "ok"
     assert payload["artifacts"] == {
         "batch_state": "analysis/batch_state.json",
-        "batch_summary": "analysis/batch_summary.json",
-        "human_review": "analysis/human_review.md",
     }
     assert payload["result"]["batch"]["status"] == "ready"
     assert payload["result"]["progress"] == {"completed": 0, "total": 1}
@@ -193,6 +191,28 @@ def test_batch_create_accepts_discovery_root(tmp_path: Path, capsys: pytest.Capt
     assert payload["result"]["items"][0]["name"] == "clean_frames"
     assert str(tmp_path) not in stdout
     assert stderr == ""
+
+
+def test_batch_item_response_does_not_claim_missing_export_artifacts(tmp_path: Path) -> None:
+    from frame_timing_agent.batch_session import BatchItemState, BatchItemStatus
+    from frame_timing_agent.tool_cli import _batch_item_response
+
+    output_path = tmp_path / "item" / "output_frames"
+    item = BatchItemState(
+        frame_dir=tmp_path / "frames",
+        safe_name="frames",
+        status=BatchItemStatus.COMPLETED,
+        output_path=output_path,
+    )
+
+    assert _batch_item_response(item)["exported"] is False
+
+    output_path.mkdir(parents=True)
+    analysis_dir = output_path.parent / "analysis"
+    analysis_dir.mkdir()
+    (analysis_dir / "execution_audit.json").write_text('{"status":"ok"}', encoding="utf-8")
+
+    assert _batch_item_response(item)["exported"] is True
 
 
 def test_batch_status_exposes_explicit_retry_action_for_failed_items(
@@ -327,6 +347,8 @@ def test_batch_export_reports_stale_source_without_suggesting_export(
 
     assert exit_code == 4
     assert payload["error"] == {"code": "stale_source", "message": "batch source changed since analysis"}
+    assert payload["result"]["export"] == {"exported": [], "skipped": [], "failed": ["frames"]}
+    assert payload["result"]["stale_items"] == ["frames"]
     assert "export" not in payload.get("result", {}).get("next_actions", [])
     assert not (state_path.parents[1] / "frames" / "output_frames").exists()
     assert str(tmp_path) not in stdout
@@ -364,6 +386,8 @@ def test_batch_export_reports_stale_source_raised_during_actual_export(
     assert exported
     assert exit_code == 4
     assert payload["error"] == {"code": "stale_source", "message": "batch source changed since analysis"}
+    assert payload["result"]["export"] == {"exported": [], "skipped": [], "failed": ["frames"]}
+    assert payload["result"]["stale_items"] == ["frames"]
     assert "export" not in payload.get("result", {}).get("next_actions", [])
     assert str(tmp_path) not in stdout
     assert str(tmp_path) not in stderr

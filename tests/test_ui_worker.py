@@ -140,6 +140,7 @@ class UiWorkerTest(unittest.TestCase):
             with (
                 patch("frame_timing_agent.ui.worker.analyze_run", return_value=result) as analyze,
                 patch("frame_timing_agent.ui.worker.build_analysis_view", return_value=_view(settings.artifact_dir)),
+                patch("frame_timing_agent.ui.worker.verify_input_snapshot", return_value=True),
             ):
                 view = run_analysis(settings)
 
@@ -166,6 +167,7 @@ class UiWorkerTest(unittest.TestCase):
             with (
                 patch("frame_timing_agent.ui.worker.analyze_run", side_effect=analyze) as mocked,
                 patch("frame_timing_agent.ui.worker.build_analysis_view", return_value=_view(settings.artifact_dir)),
+                patch("frame_timing_agent.ui.worker.verify_input_snapshot", return_value=True),
             ):
                 run_analysis(settings, lambda percent, message: updates.append((percent, message)))
 
@@ -217,6 +219,37 @@ class UiWorkerTest(unittest.TestCase):
                 self.assertRaisesRegex(ValueError, "changed during analysis"),
             ):
                 run_analysis(settings)
+
+    def test_run_analysis_verifies_snapshot_after_building_the_view(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            settings = RunSettings(root / "frames", root / "output" / "run")
+            settings.frame_dir.mkdir()
+            (settings.frame_dir / "frame_000000.jpg").write_bytes(b"frame")
+            result = TimingAgentResult(
+                1,
+                1,
+                settings.artifact_dir,
+                settings.artifact_dir / "analysis" / "strategy.json",
+                None,
+            )
+            result.strategy_path.parent.mkdir(parents=True)
+            result.strategy_path.write_text("{}", encoding="utf-8")
+
+            with (
+                patch("frame_timing_agent.ui.worker.analyze_run", return_value=result),
+                patch("frame_timing_agent.ui.worker.build_analysis_view", return_value=_view(settings.artifact_dir)),
+                patch("frame_timing_agent.ui.worker.persist_thumbnails", return_value=()),
+                patch("frame_timing_agent.ui.worker.verify_input_snapshot", return_value=True) as verify,
+            ):
+                run_analysis(settings)
+
+            verify.assert_called_once_with(
+                settings.artifact_dir / "analysis",
+                settings.frame_dir,
+                settings.fps,
+                settings.limit_first_n,
+            )
 
 
     def test_run_export_uses_saved_strategy_without_rerunning_analysis(self):

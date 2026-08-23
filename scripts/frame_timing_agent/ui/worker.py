@@ -74,6 +74,12 @@ def run_analysis(settings: RunSettings, progress_callback: ProgressCallback | No
     )
     analysis_dir = settings.artifact_dir / "analysis"
     frozen_thumbnails = persist_thumbnails(analysis_dir, view.thumbnails)
+    verify_input_snapshot(
+        analysis_dir,
+        settings.frame_dir,
+        settings.fps,
+        settings.limit_first_n,
+    )
     return replace(view, thumbnails=frozen_thumbnails, source_snapshot_matches=True)
 
 
