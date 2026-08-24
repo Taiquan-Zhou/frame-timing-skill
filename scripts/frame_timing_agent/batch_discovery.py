@@ -133,12 +133,10 @@ def _is_path_link(path: Path) -> bool:
     if path.is_symlink():
         return True
     try:
-        attributes = path.lstat().st_file_attributes
-    except AttributeError:
-        return False
+        attributes = getattr(path.lstat(), "st_file_attributes", 0)
     except OSError:
         return False
-    return bool(attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT)
+    return bool(attributes & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0))
 
 
 def _contains_supported_frames(path: Path) -> bool:

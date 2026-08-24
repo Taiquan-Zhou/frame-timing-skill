@@ -49,7 +49,7 @@ def acquire_lock(lock_file: BinaryIO) -> None:
         import msvcrt
 
         try:
-            msvcrt.locking(lock_file.fileno(), msvcrt.LK_NBLCK, 1)
+            getattr(msvcrt, "locking")(lock_file.fileno(), getattr(msvcrt, "LK_NBLCK"), 1)
         except OSError as error:
             if error.errno in {errno.EACCES, errno.EAGAIN, errno.EDEADLK}:
                 raise LockUnavailableError from error
@@ -58,9 +58,9 @@ def acquire_lock(lock_file: BinaryIO) -> None:
     import fcntl
 
     try:
-        fcntl.flock(  # type: ignore[attr-defined]
+        getattr(fcntl, "flock")(
             lock_file.fileno(),
-            fcntl.LOCK_EX | fcntl.LOCK_NB,  # type: ignore[attr-defined]
+            getattr(fcntl, "LOCK_EX") | getattr(fcntl, "LOCK_NB"),
         )
     except BlockingIOError as error:
         raise LockUnavailableError from error
@@ -71,8 +71,8 @@ def release_lock(lock_file: BinaryIO) -> None:
     if os.name == "nt":
         import msvcrt
 
-        msvcrt.locking(lock_file.fileno(), msvcrt.LK_UNLCK, 1)
+        getattr(msvcrt, "locking")(lock_file.fileno(), getattr(msvcrt, "LK_UNLCK"), 1)
         return
     import fcntl
 
-    fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)  # type: ignore[attr-defined]
+    getattr(fcntl, "flock")(lock_file.fileno(), getattr(fcntl, "LOCK_UN"))
