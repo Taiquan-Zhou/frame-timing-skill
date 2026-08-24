@@ -28,6 +28,13 @@ def make_directory_link(link: Path, target: Path) -> None:
     link.symlink_to(target, target_is_directory=True)
 
 
+def remove_directory_link(link: Path) -> None:
+    if os.name == "nt":
+        link.rmdir()
+    else:
+        link.unlink()
+
+
 def test_discovery_prefers_clean_frames_and_deduplicates(tmp_path):
     preferred = make_frames(tmp_path / "video_a" / "clean_frames")
     make_frames(tmp_path / "output" / "clean_frames")
@@ -121,7 +128,7 @@ def test_discovery_does_not_follow_directory_links(tmp_path):
     try:
         result = discover_frame_directories(root=tmp_path)
     finally:
-        link.rmdir()
+        remove_directory_link(link)
 
     assert result.frame_dirs == ()
     assert DiscoveryIssue(link.absolute(), "ignored_link") in result.issues

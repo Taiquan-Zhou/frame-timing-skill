@@ -41,6 +41,13 @@ def make_directory_link(link: Path, target: Path) -> None:
     link.symlink_to(target, target_is_directory=True)
 
 
+def remove_directory_link(link: Path) -> None:
+    if os.name == "nt":
+        link.rmdir()
+    else:
+        link.unlink()
+
+
 def create_state_with_statuses(tmp_path: Path, statuses: list[str]):
     frame_dirs = []
     for index in range(len(statuses)):
@@ -313,7 +320,7 @@ def test_create_batch_rejects_analysis_link_outside_artifact_root(tmp_path):
             create_batch(make_discovery(frame_dir), artifact_root=artifact_root, fps=24.0)
         assert not (external / "batch_state.json").exists()
     finally:
-        analysis_link.rmdir()
+        remove_directory_link(analysis_link)
 
 
 def test_load_rejects_analysis_link_outside_artifact_root(tmp_path):
@@ -332,7 +339,7 @@ def test_load_rejects_analysis_link_outside_artifact_root(tmp_path):
         with pytest.raises(BatchStateError, match="escapes artifact_root"):
             load_batch(analysis_link / "batch_state.json")
     finally:
-        analysis_link.rmdir()
+        remove_directory_link(analysis_link)
 
 
 @pytest.mark.parametrize("tamper", ["duplicate_source", "artifact_overlap"])
@@ -414,7 +421,7 @@ def test_recover_uses_same_lock_through_directory_alias(tmp_path):
             with pytest.raises(BatchBusyError, match="already running"):
                 recover_batch(alias_state_path)
     finally:
-        alias_root.rmdir()
+        remove_directory_link(alias_root)
 
 
 def test_run_lock_is_released_when_owner_process_is_terminated(tmp_path):

@@ -51,6 +51,13 @@ def make_directory_link(link, target) -> None:
     link.symlink_to(target, target_is_directory=True)
 
 
+def remove_directory_link(link) -> None:
+    if os.name == "nt":
+        link.rmdir()
+    else:
+        link.unlink()
+
+
 def test_analyze_run_binds_source_and_strategy(tmp_path):
     settings = make_settings_with_frames(tmp_path)
 
@@ -169,7 +176,7 @@ def test_analyze_run_rejects_analysis_link_into_input_directory(tmp_path):
         with pytest.raises(ValueError, match="artifact write path must stay"):
             analyze_run(settings)
     finally:
-        analysis_link.rmdir()
+        remove_directory_link(analysis_link)
 
 
 @pytest.mark.parametrize("interrupt_type", [KeyboardInterrupt, SystemExit])
