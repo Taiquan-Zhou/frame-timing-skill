@@ -18,10 +18,10 @@ from PySide6.QtWidgets import (
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
-    QStyle,
 )
 
 from frame_timing_agent.ui.history import RunRecord
+from frame_timing_agent.ui.style import make_icon
 from frame_timing_agent.ui.worker import create_task
 
 
@@ -114,15 +114,15 @@ class RunHistoryDialog(QDialog):
         actions.setSpacing(9)
         self.delete_button = QPushButton("删除记录与产物")
         self.delete_button.setObjectName("destructiveButton")
-        self.delete_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_TrashIcon))
+        self.delete_button.setIcon(make_icon("trash", "#b42318"))
         self.delete_button.clicked.connect(self._delete_selected)
         actions.addWidget(self.delete_button)
         self.open_artifact_button = QPushButton("打开分析产物")
-        self.open_artifact_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_DirOpenIcon))
+        self.open_artifact_button.setIcon(make_icon("open"))
         self.open_artifact_button.clicked.connect(self._open_artifact)
         actions.addWidget(self.open_artifact_button)
         self.open_output_button = QPushButton("打开输出目录")
-        self.open_output_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_DirOpenIcon))
+        self.open_output_button.setIcon(make_icon("open"))
         self.open_output_button.clicked.connect(self._open_output)
         actions.addWidget(self.open_output_button)
         actions.addStretch()
@@ -131,7 +131,7 @@ class RunHistoryDialog(QDialog):
         actions.addWidget(self.close_button)
         self.reopen_button = QPushButton("重新打开结果")
         self.reopen_button.setObjectName("primaryButton")
-        self.reopen_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_DialogOpenButton))
+        self.reopen_button.setIcon(make_icon("resume", "#ffffff"))
         self.reopen_button.clicked.connect(self._accept_selected)
         actions.addWidget(self.reopen_button)
         root.addLayout(actions)

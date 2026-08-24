@@ -1,6 +1,9 @@
 import tomllib
 import unittest
+from contextlib import redirect_stderr
+from io import StringIO
 from pathlib import Path
+from unittest.mock import patch
 
 
 PRIVATE_REFERENCE_PATTERNS = (
@@ -12,6 +15,24 @@ PRIVATE_REFERENCE_PATTERNS = (
 
 
 class PackageMetadataTest(unittest.TestCase):
+    def test_ui_entrypoint_recommends_installing_wheel_ui_extra(self):
+        from frame_timing_agent.ui.app import main
+
+        original_import = __import__
+
+        def import_without_pyside(name, *args, **kwargs):
+            if name.startswith("PySide6"):
+                raise ModuleNotFoundError("No module named 'PySide6'")
+            return original_import(name, *args, **kwargs)
+
+        stderr = StringIO()
+        with patch("builtins.__import__", side_effect=import_without_pyside), redirect_stderr(stderr):
+            result = main([])
+
+        self.assertEqual(result, 2)
+        self.assertIn('python -m pip install "frame-timing-skill[ui]"', stderr.getvalue())
+        self.assertNotIn('pip install -e ".[ui]"', stderr.getvalue())
+
     def test_pyproject_declares_build_backend_and_config_package_data(self):
         data = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
 
@@ -26,7 +47,11 @@ class PackageMetadataTest(unittest.TestCase):
     def test_repository_declares_public_release_metadata(self):
         data = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
 
-        self.assertEqual(data["project"]["version"], "0.4.0")
+        self.assertEqual(data["project"]["version"], "0.5.0")
+        self.assertEqual(
+            data["project"]["description"],
+            "Agent-ready frame analysis and selection engine with audited local workflows.",
+        )
         self.assertTrue(Path("LICENSE").is_file())
         self.assertTrue(Path("CHANGELOG.md").is_file())
         self.assertTrue(Path("SECURITY.md").is_file())
@@ -37,7 +62,7 @@ class PackageMetadataTest(unittest.TestCase):
             "https://github.com/Taiquan-Zhou/frame-timing-skill",
         )
 
-    def test_release_metadata_is_finalized_for_v040(self):
+    def test_release_metadata_is_finalized_for_v050(self):
         changelog = Path("CHANGELOG.md").read_text(encoding="utf-8")
         data = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
 
@@ -51,6 +76,8 @@ class PackageMetadataTest(unittest.TestCase):
         self.assertIn("not pixel stabilization", changelog)
         self.assertIn("## 0.4.0 - 2026-07-30", changelog)
         self.assertIn("Windows desktop UI", changelog)
+        self.assertIn("## 0.5.0 - 2026-08-23", changelog)
+        self.assertIn("recoverable CPU-only offline batches", changelog)
 
     def test_runtime_dependencies_are_bounded_for_reproducible_installs(self):
         data = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
@@ -71,6 +98,16 @@ class PackageMetadataTest(unittest.TestCase):
         self.assertEqual(data["project"]["scripts"]["frame-timing-benchmark"], "frame_timing_agent.benchmark_cli:main")
         self.assertEqual(data["project"]["scripts"]["frame-timing-ui"], "frame_timing_agent.ui.app:main")
         self.assertIn("PySide6-Essentials>=6.6,<6.9", data["project"]["optional-dependencies"]["ui"])
+
+    def test_agent_safe_batch_commands_reuse_the_existing_tool_entrypoint(self):
+        data = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
+        scripts = data["project"]["scripts"]
+
+        self.assertEqual(
+            [name for name, target in scripts.items() if target == "frame_timing_agent.tool_cli:main"],
+            ["frame-timing-tool"],
+        )
+        self.assertNotIn("frame-timing-tool-batch", scripts)
 
     def test_console_entrypoints_use_python310_runtime_typing(self):
         for path in [
@@ -112,19 +149,21 @@ class PackageMetadataTest(unittest.TestCase):
         self.assertIn("[English](README.en.md)", readme)
         self.assertIn("[中文](README.md)", readme_en)
         self.assertIn("[README.md](README.md)", readme_zh_compat)
-        self.assertIn("## 普通用户", readme)
-        self.assertIn("## AI Agent 和开发者", readme)
-        self.assertIn("## For Users", readme_en)
-        self.assertIn("## For Agents And Developers", readme_en)
+        self.assertIn("## 桌面工作台", readme)
+        self.assertIn("## Agent 与系统集成", readme)
+        self.assertIn("## Desktop Workspace", readme_en)
+        self.assertIn("## Agent and System Integration", readme_en)
         self.assertIn("### Agent-safe v3 JSON CLI", readme)
         self.assertIn("### Agent-safe v3 JSON CLI", readme_en)
         self.assertIn("Install this skill: https://github.com/Taiquan-Zhou/frame-timing-skill", readme)
         self.assertIn("Install this skill: https://github.com/Taiquan-Zhou/frame-timing-skill", readme_en)
         self.assertIn("assets/frame-timing-ui.png", readme)
         self.assertIn("assets/frame-timing-ui.png", readme_en)
+        self.assertIn("assets/frame-timing-batch-ui.png", readme)
         self.assertIn("FrameTimingSkill-Windows-x64.zip", readme)
         self.assertIn("FrameTimingSkill-Windows-x64.zip", readme_en)
         self.assertTrue((Path("assets") / "frame-timing-ui.png").is_file())
+        self.assertTrue((Path("assets") / "frame-timing-batch-ui.png").is_file())
         for content in [readme, readme_en, skill, usage, artifact_contract]:
             self.assertIn("coverage_first", content)
             self.assertIn("balanced", content)

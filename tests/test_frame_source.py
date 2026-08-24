@@ -60,6 +60,24 @@ class FrameSourceLoaderTest(unittest.TestCase):
             self.assertEqual([record.source_index for record in records], [1, 3])
             self.assertEqual([record.output_index for record in records], [0, 1])
 
+    def test_load_frame_records_ignores_linked_image_files(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            frame_dir = root / "frames"
+            frame_dir.mkdir()
+            _write_image(frame_dir / "frame_000001.jpg", 30)
+            external = root / "frame_000002.jpg"
+            _write_image(external, 60)
+            linked = frame_dir / "frame_000002.jpg"
+            try:
+                linked.symlink_to(external)
+            except OSError:
+                self.skipTest("file symlinks are unavailable")
+
+            records = load_frame_records(frame_dir, fps=10.0)
+
+            self.assertEqual([record.source_index for record in records], [1])
+
     def test_load_frame_records_prefers_selected_frames_metadata(self):
         with tempfile.TemporaryDirectory() as tmp:
             frame_dir = Path(tmp)

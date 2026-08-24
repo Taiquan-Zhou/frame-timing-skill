@@ -3,6 +3,8 @@ from __future__ import annotations
 import tomllib
 from pathlib import Path
 
+import cv2
+
 from frame_timing_agent import __all__ as public_exports
 from frame_timing_agent.artifact_layout import (
     ANALYSIS_ARTIFACT,
@@ -26,6 +28,10 @@ DOC_PATHS = (
     ROOT / "references" / "artifact_contract.md",
     ROOT / "references" / "agent-integration.md",
     ROOT / "references" / "migration-v2-to-v3.md",
+)
+UI_SCREENSHOTS = (
+    ROOT / "assets" / "frame-timing-ui.png",
+    ROOT / "assets" / "frame-timing-batch-ui.png",
 )
 
 
@@ -101,3 +107,115 @@ def test_migration_docs_keep_v2_and_v3_boundaries_explicit() -> None:
     assert "override" in migration
     assert "does not automatically route" in migration
     assert "does not generate duplicate frames" in migration
+
+
+def test_readme_and_skill_document_recoverable_offline_batch_contract() -> None:
+    readme = _read(ROOT / "README.md")
+    readme_en = _read(ROOT / "README.en.md")
+    skill = _read(ROOT / "SKILL.md")
+
+    for phrase in (
+        "CPU-only",
+        "单目录工作台",
+        "离线批次",
+        "frame-timing-ui",
+        "frame-timing-tool batch create",
+        "frame-timing-tool batch run",
+        "frame-timing-tool batch status",
+        "frame-timing-tool batch approve",
+        "frame-timing-tool batch export",
+        "--retry-item",
+        "review_required",
+        "显式",
+    ):
+        assert phrase in readme
+
+    for phrase in (
+        "CPU-only",
+        "frame-timing-ui",
+        "frame-timing-tool batch create",
+        "frame-timing-tool batch run",
+        "frame-timing-tool batch status",
+        "frame-timing-tool batch approve",
+        "frame-timing-tool batch export",
+        "--retry-item",
+        "review_required",
+        "explicit",
+    ):
+        assert phrase in readme_en
+
+    for phrase in (
+        "CPU-only",
+        "frame-timing-tool batch create",
+        "frame-timing-tool batch run",
+        "frame-timing-tool batch status",
+        "frame-timing-tool batch approve",
+        "frame-timing-tool batch export",
+        "--retry-item",
+        "review_required",
+        "must not auto-resume",
+        "must not auto-approve",
+        "must not auto-retry",
+        "must not auto-export",
+        "frame-timing-batch",
+        "compatibility-only",
+        "must not be used for the recoverable production workflow",
+    ):
+        assert phrase in skill
+
+
+def test_real_ui_screenshots_are_documented() -> None:
+    readme = _read(ROOT / "README.md")
+    readme_en = _read(ROOT / "README.en.md")
+
+    assert "assets/frame-timing-batch-ui.png" in readme
+    assert "assets/frame-timing-batch-ui.png" in readme_en
+    for screenshot_path in UI_SCREENSHOTS:
+        relative_path = screenshot_path.relative_to(ROOT).as_posix()
+        assert f'src="{relative_path}"' in readme
+        assert f'src="{relative_path}"' in readme_en
+        assert screenshot_path.is_file()
+        screenshot = cv2.imread(str(screenshot_path))
+        assert screenshot is not None
+        height, width = screenshot.shape[:2]
+        assert width >= 1200
+        assert height >= 800
+
+
+def test_readme_positions_desktop_as_the_human_workspace_for_one_agent_ready_engine() -> None:
+    readme = _read(ROOT / "README.md")
+    readme_en = _read(ROOT / "README.en.md")
+
+    assert "Agent 可调用" in readme
+    assert "本地人工工作台" in readme
+    assert "同一套核心" in readme
+    assert "当前版本以帧目录为输入" in readme
+    assert "agent-ready" in readme_en
+    assert "human-in-the-loop workspace" in readme_en
+    assert "same deterministic core" in readme_en
+    assert "The current release accepts frame directories" in readme_en
+    assert "autonomous agent" not in readme.lower()
+    assert "autonomous agent" not in readme_en.lower()
+
+
+def test_release_docs_explain_workflow_choice_batch_lifecycle_and_artifacts() -> None:
+    readme = _read(ROOT / "README.md")
+    readme_en = _read(ROOT / "README.en.md")
+    skill = _read(ROOT / "SKILL.md")
+
+    for content in (readme, readme_en):
+        assert "frame-timing-tool batch" in content
+        assert "batch_state.json" in content
+        assert "output_frames/" in content
+
+    assert "选择工作流" in readme
+    assert "assets/frame-timing-ui.png" in readme
+    assert "assets/frame-timing-batch-ui.png" in readme
+    assert "Choose a Workflow" in readme_en
+    assert "assets/frame-timing-ui.png" in readme_en
+    assert "assets/frame-timing-batch-ui.png" in readme_en
+    assert "Batch Artifact Contract" in skill
+    assert "batch_summary.json" in skill
+    assert "review_dashboard.md" in skill
+    assert "frame-timing-batch" in skill
+    assert "compatibility-only" in skill

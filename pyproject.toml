@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "frame-timing-skill"
-version = "0.4.0"
-description = "Audited frame timing optimization skill for already-clean extracted frames."
+version = "0.5.0"
+description = "Agent-ready frame analysis and selection engine with audited local workflows."
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
@@ -79,6 +79,9 @@ frame_timing_agent = ["config/*.json"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["scripts"]
+
+[tool.coverage.report]
+precision = 2
 
 [tool.ruff]
 line-length = 120

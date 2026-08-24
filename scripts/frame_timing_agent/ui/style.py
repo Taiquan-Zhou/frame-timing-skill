@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen, QPixmap
+from PySide6.QtGui import QColor, QIcon, QPainter, QPainterPath, QPen, QPixmap, QPolygonF
 
 
 LINE_COLOR = "#2563eb"
@@ -74,25 +74,82 @@ def make_line_icon(kind: str, color: str, size: int = 24) -> QPixmap:
         path.quadTo(19, 21, 19, 19.5)
         path.lineTo(19, 15)
         painter.drawPath(path)
+    elif kind in {"folder", "open"}:
+        path = QPainterPath(QPointF(3.5, 8))
+        path.lineTo(8.5, 8)
+        path.lineTo(10.5, 5.5)
+        path.lineTo(20.5, 5.5)
+        path.lineTo(20.5, 18.5)
+        path.lineTo(3.5, 18.5)
+        path.closeSubpath()
+        painter.drawPath(path)
+    elif kind == "discover":
+        painter.drawRoundedRect(QRectF(3.5, 5.5, 12.5, 12), 1.5, 1.5)
+        painter.drawEllipse(QPointF(16.5, 15.5), 3.5, 3.5)
+        painter.drawLine(QPointF(19, 18), QPointF(21.5, 20.5))
+    elif kind in {"play", "resume"}:
+        painter.setBrush(QColor(color))
+        painter.drawPolygon(QPolygonF((QPointF(8, 5), QPointF(19, 12), QPointF(8, 19))))
+    elif kind == "pause":
+        painter.drawLine(QPointF(9, 6), QPointF(9, 18))
+        painter.drawLine(QPointF(15, 6), QPointF(15, 18))
+    elif kind == "retry":
+        painter.drawArc(QRectF(4.5, 4.5, 15, 15), 40 * 16, 275 * 16)
+        painter.drawLine(QPointF(5.2, 6.5), QPointF(5.2, 11))
+        painter.drawLine(QPointF(5.2, 6.5), QPointF(9.5, 6.5))
+    elif kind == "history":
+        painter.drawRoundedRect(QRectF(4, 4, 16, 16), 2, 2)
+        for y in (8, 12, 16):
+            painter.drawLine(QPointF(8, y), QPointF(16.5, y))
+    elif kind == "trash":
+        painter.drawLine(QPointF(5, 7), QPointF(19, 7))
+        painter.drawLine(QPointF(9, 4.5), QPointF(15, 4.5))
+        painter.drawRoundedRect(QRectF(7, 7, 10, 13), 1.5, 1.5)
+        painter.drawLine(QPointF(10, 10), QPointF(10, 17))
+        painter.drawLine(QPointF(14, 10), QPointF(14, 17))
+    elif kind == "back":
+        painter.drawLine(QPointF(19, 12), QPointF(6, 12))
+        painter.drawLine(QPointF(6, 12), QPointF(11, 7))
+        painter.drawLine(QPointF(6, 12), QPointF(11, 17))
+    elif kind == "add":
+        painter.drawLine(QPointF(12, 5), QPointF(12, 19))
+        painter.drawLine(QPointF(5, 12), QPointF(19, 12))
+    elif kind == "check":
+        painter.drawLine(QPointF(5, 12.5), QPointF(10, 17.5))
+        painter.drawLine(QPointF(10, 17.5), QPointF(20, 6.5))
 
     painter.end()
     return pixmap
 
 
+def make_icon(kind: str, color: str = "#475569", size: int = 24) -> QIcon:
+    return QIcon(make_line_icon(kind, color, size))
+
+
 def main_window_stylesheet() -> str:
     return """
-        QMainWindow, QWidget { background: #f7f9fc; color: #172033; font-family: "Microsoft YaHei UI", "Segoe UI"; font-size: 13px; }
+        QMainWindow, QWidget { background: #f6f8fb; color: #172033; font-family: "Microsoft YaHei UI", "Segoe UI Variable", "Segoe UI"; font-size: 13px; }
         QLabel { background: transparent; }
-        QFrame#header { background: #ffffff; border: 1px solid #e2e8f0; border-radius: 8px; }
-        QFrame#summaryCard, QFrame#panel { background: #ffffff; border: 1px solid #e2e8f0; border-radius: 8px; }
+        QFrame#header { background: #ffffff; border: 1px solid #dfe5ed; border-radius: 8px; }
+        QFrame#singleRunControls, QFrame#batchCreateActions, QFrame#batchRunActions, QFrame#batchReviewSection, QFrame#batchOutputSection { background: transparent; border: none; }
+        QFrame#summaryCard, QFrame#panel { background: #ffffff; border: 1px solid #dfe5ed; border-radius: 8px; }
         QFrame#thumbnail { background: #ffffff; border: 1px solid #e5eaf1; border-radius: 8px; }
         QFrame#metricSwitch { background: #ffffff; border: 1px solid #d8e1ec; border-radius: 7px; }
+        QFrame#modeSwitch { background: #ffffff; border: 1px solid #d8e1ec; border-radius: 7px; }
+        QFrame#batchToolbar { background: #ffffff; border: 1px solid #dfe5ed; border-radius: 8px; }
+        QFrame#batchStatusBar { background: transparent; border: none; }
+        QSplitter#batchSplitter::handle { background: #e2e8f0; width: 1px; }
+        QListWidget#batchList { background: #ffffff; border: 1px solid #e2e8f0; border-radius: 7px; outline: none; padding: 4px; }
+        QListWidget#batchList::item { border-bottom: 1px solid #edf1f6; padding: 9px 8px; }
+        QListWidget#batchList::item:selected { background: #eaf2ff; color: #1d4ed8; }
+        QLabel#batchWarning { color: #b45309; }
         QLabel#brandIcon { background: #e9f2ff; border-radius: 8px; }
         QLabel#summaryIconBlue { background: #eaf2ff; border-radius: 23px; }
         QLabel#summaryIconPurple { background: #f1edff; border-radius: 23px; }
         QLabel#summaryIconGreen { background: #e8f7f1; border-radius: 23px; }
         QLabel#title { font-size: 19px; font-weight: 700; color: #0f172a; }
         QLabel#sectionTitle { font-size: 16px; font-weight: 700; color: #0f172a; }
+        QLabel[role="subsection"] { font-size: 12px; font-weight: 600; color: #475569; padding-top: 3px; }
         QLabel#summaryCaption { color: #64748b; font-size: 12px; }
         QLabel#summaryValue { font-size: 21px; font-weight: 700; color: #0f172a; }
         QLabel#strategyName { font-size: 17px; font-weight: 650; color: #0f172a; }
@@ -101,11 +158,11 @@ def main_window_stylesheet() -> str:
         QLabel#thumbnailSource { color: #1e293b; font-weight: 600; }
         QLabel#localNote { color: #1f9d68; padding-top: 5px; }
         QLabel#progressPercent { color: #2563eb; font-weight: 600; }
-        QLineEdit#destinationField { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 3px 8px; min-height: 0; }
+        QLineEdit#destinationField { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 3px 8px; min-height: 22px; }
         QLineEdit, QSpinBox { background: #ffffff; border: 1px solid #d5deea; border-radius: 7px; padding: 7px 10px; min-height: 24px; selection-background-color: #bfdbfe; }
         QLineEdit:hover, QSpinBox:hover { border-color: #b8c5d6; }
         QLineEdit:focus, QSpinBox:focus { border: 1px solid #3b82f6; }
-        QPushButton { background: #ffffff; color: #334155; border: 1px solid #d5deea; border-radius: 7px; padding: 7px 14px; min-height: 22px; }
+        QPushButton { background: #ffffff; color: #334155; border: 1px solid #d5deea; border-radius: 7px; padding: 7px 13px; min-height: 22px; }
         QPushButton:hover { background: #f8fafc; border-color: #93b4e8; color: #1d4ed8; }
         QPushButton:pressed { background: #eef4ff; }
         QPushButton:disabled { background: #f1f4f8; color: #9aa7b8; border-color: #e3e8ef; }
@@ -119,6 +176,9 @@ def main_window_stylesheet() -> str:
         QPushButton#segmentButton[last="true"] { border-right: none; }
         QPushButton#segmentButton:hover { background: #f8fafc; color: #1d4ed8; }
         QPushButton#segmentButton:checked { background: #eaf2ff; color: #1d4ed8; }
+        QPushButton#modeButton { background: transparent; color: #475569; border: none; border-right: 1px solid #d8e1ec; border-radius: 0; padding: 5px 18px; min-height: 24px; }
+        QPushButton#modeButton:hover { background: #f8fafc; color: #1d4ed8; }
+        QPushButton#modeButton:checked { background: #eaf2ff; color: #1d4ed8; }
         QProgressBar { background: #e8edf4; border: none; border-radius: 3px; max-height: 6px; }
         QProgressBar::chunk { background: #2563eb; border-radius: 3px; }
         QToolTip { background: #ffffff; color: #334155; border: 1px solid #d8e0ea; padding: 5px; }

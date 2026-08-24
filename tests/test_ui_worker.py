@@ -125,7 +125,7 @@ class UiWorkerTest(unittest.TestCase):
             self.assertTrue(unsafe.is_dir())
             self.assertEqual(store.list_records(), [record])
 
-    def test_run_analysis_uses_preview_mode(self):
+    def test_run_analysis_delegates_to_core_workflow(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             settings = RunSettings(root / "frames", root / "output" / "run", fps=24.0, limit_first_n=120)
@@ -138,20 +138,14 @@ class UiWorkerTest(unittest.TestCase):
             result.strategy_path.write_text("{}", encoding="utf-8")
 
             with (
-                patch("frame_timing_agent.ui.worker.run_timing_agent", return_value=result) as run_agent,
+                patch("frame_timing_agent.ui.worker.analyze_run", return_value=result) as analyze,
                 patch("frame_timing_agent.ui.worker.build_analysis_view", return_value=_view(settings.artifact_dir)),
+                patch("frame_timing_agent.ui.worker.verify_input_snapshot", return_value=True),
             ):
                 view = run_analysis(settings)
 
             self.assertEqual(view.analyzed_count, 2)
-            run_agent.assert_called_once_with(
-                frames=settings.frame_dir,
-                artifact_dir=settings.artifact_dir,
-                limit_first_n=120,
-                mode="reconstruction_balanced",
-                write=False,
-                fps=24.0,
-            )
+            analyze.assert_called_once_with(settings, progress_callback=None)
 
     def test_run_analysis_forwards_progress_updates(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -166,13 +160,14 @@ class UiWorkerTest(unittest.TestCase):
             result.strategy_path.write_text("{}", encoding="utf-8")
             updates: list[tuple[int, str]] = []
 
-            def run_agent(**kwargs):
-                kwargs["progress_callback"](37, "正在计算帧指标")
+            def analyze(settings, progress_callback):
+                progress_callback(37, "正在计算帧指标")
                 return result
 
             with (
-                patch("frame_timing_agent.ui.worker.run_timing_agent", side_effect=run_agent) as mocked,
+                patch("frame_timing_agent.ui.worker.analyze_run", side_effect=analyze) as mocked,
                 patch("frame_timing_agent.ui.worker.build_analysis_view", return_value=_view(settings.artifact_dir)),
+                patch("frame_timing_agent.ui.worker.verify_input_snapshot", return_value=True),
             ):
                 run_analysis(settings, lambda percent, message: updates.append((percent, message)))
 
@@ -190,12 +185,12 @@ class UiWorkerTest(unittest.TestCase):
             )
             updates: list[tuple[int, str]] = []
 
-            def run_agent(**kwargs):
-                kwargs["progress_callback"](100, "分析帧目录完成")
+            def analyze(settings, progress_callback):
+                progress_callback(100, "分析帧目录完成")
                 return result
 
             with (
-                patch("frame_timing_agent.ui.worker.run_timing_agent", side_effect=run_agent),
+                patch("frame_timing_agent.ui.worker.analyze_run", side_effect=analyze),
                 patch("frame_timing_agent.ui.worker.build_analysis_view", side_effect=ValueError("broken artifacts")),
             ):
                 with self.assertRaisesRegex(ValueError, "broken artifacts"):
@@ -211,22 +206,11 @@ class UiWorkerTest(unittest.TestCase):
             frame = frames / "frame_000000.jpg"
             frame.write_bytes(b"original")
             settings = RunSettings(frames, root / "output" / "run")
-            result = TimingAgentResult(
-                1,
-                1,
-                settings.artifact_dir,
-                settings.artifact_dir / "analysis" / "strategy.json",
-                None,
-            )
-
-            def mutate_during_analysis(**_kwargs):
-                frame.write_bytes(b"changed")
-                return result
 
             with (
                 patch(
-                    "frame_timing_agent.ui.worker.run_timing_agent",
-                    side_effect=mutate_during_analysis,
+                    "frame_timing_agent.ui.worker.analyze_run",
+                    side_effect=ValueError("input frames changed during analysis; run analysis again"),
                 ),
                 patch(
                     "frame_timing_agent.ui.worker.build_analysis_view",
@@ -236,7 +220,36 @@ class UiWorkerTest(unittest.TestCase):
             ):
                 run_analysis(settings)
 
-            self.assertFalse((settings.artifact_dir / "analysis" / "input_snapshot.json").exists())
+    def test_run_analysis_verifies_snapshot_after_building_the_view(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            settings = RunSettings(root / "frames", root / "output" / "run")
+            settings.frame_dir.mkdir()
+            (settings.frame_dir / "frame_000000.jpg").write_bytes(b"frame")
+            result = TimingAgentResult(
+                1,
+                1,
+                settings.artifact_dir,
+                settings.artifact_dir / "analysis" / "strategy.json",
+                None,
+            )
+            result.strategy_path.parent.mkdir(parents=True)
+            result.strategy_path.write_text("{}", encoding="utf-8")
+
+            with (
+                patch("frame_timing_agent.ui.worker.analyze_run", return_value=result),
+                patch("frame_timing_agent.ui.worker.build_analysis_view", return_value=_view(settings.artifact_dir)),
+                patch("frame_timing_agent.ui.worker.persist_thumbnails", return_value=()),
+                patch("frame_timing_agent.ui.worker.verify_input_snapshot", return_value=True) as verify,
+            ):
+                run_analysis(settings)
+
+            verify.assert_called_once_with(
+                settings.artifact_dir / "analysis",
+                settings.frame_dir,
+                settings.fps,
+                settings.limit_first_n,
+            )
 
     def test_run_export_uses_saved_strategy_without_rerunning_analysis(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -263,15 +276,23 @@ class UiWorkerTest(unittest.TestCase):
             exported_view = _view(settings.artifact_dir, output_dir=output_dir)
 
             with (
-                patch("frame_timing_agent.ui.worker.run_timing_agent") as run_agent,
+                patch(
+                    "frame_timing_agent.ui.worker.export_run",
+                    return_value=TimingAgentResult(
+                        1,
+                        1,
+                        settings.artifact_dir,
+                        analysis_dir / "strategy.json",
+                        output_dir,
+                    ),
+                ) as export,
                 patch("frame_timing_agent.ui.worker.build_analysis_view", return_value=exported_view),
                 patch("frame_timing_agent.ui.worker.load_execution_summary", return_value=execution),
             ):
                 view = run_export(settings)
 
             self.assertEqual(view.execution, execution)
-            run_agent.assert_not_called()
-            self.assertTrue((output_dir / "frame_000000_src_000000.jpg").is_file())
+            export.assert_called_once_with(settings, progress_callback=None)
 
     def test_run_export_rejects_frames_changed_after_analysis(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -335,7 +356,7 @@ class UiWorkerTest(unittest.TestCase):
 
             with (
                 patch(
-                    "frame_timing_agent.ui.worker.verify_input_snapshot",
+                    "frame_timing_agent.run_workflow.verify_input_snapshot",
                     side_effect=mutate_before_second_verify,
                 ),
                 self.assertRaisesRegex(ValueError, "changed since analysis"),
@@ -370,7 +391,7 @@ class UiWorkerTest(unittest.TestCase):
 
             with (
                 patch(
-                    "frame_timing_agent.ui.worker.write_execution_audit",
+                    "frame_timing_agent.run_workflow.write_execution_audit",
                     side_effect=OSError("disk full"),
                 ),
                 self.assertRaisesRegex(OSError, "disk full"),
@@ -380,71 +401,6 @@ class UiWorkerTest(unittest.TestCase):
             self.assertEqual(marker.read_text(encoding="utf-8"), "keep")
             self.assertFalse(any(settings.artifact_dir.glob(".output_frames.export-*")))
             self.assertFalse(any(settings.artifact_dir.glob(".execution_audit.export-*")))
-
-    def test_output_and_audit_commit_roll_back_together(self):
-        from frame_timing_agent.ui.worker import _replace_output_directory
-
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            output_dir = root / "output_frames"
-            staging_dir = root / ".output_frames.export-test"
-            output_dir.mkdir()
-            staging_dir.mkdir()
-            (output_dir / "old.txt").write_text("old", encoding="utf-8")
-            (staging_dir / "new.txt").write_text("new", encoding="utf-8")
-
-            with self.assertRaisesRegex(OSError, "audit commit failed"):
-                _replace_output_directory(
-                    staging_dir,
-                    output_dir,
-                    lambda: (_ for _ in ()).throw(OSError("audit commit failed")),
-                )
-
-            self.assertEqual((output_dir / "old.txt").read_text(encoding="utf-8"), "old")
-            self.assertFalse((output_dir / "new.txt").exists())
-            self.assertFalse(any(root.glob(".output_frames.backup-*")))
-
-    def test_execution_audit_commit_replaces_both_files(self):
-        from frame_timing_agent.ui.worker import _replace_execution_audit
-
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            analysis_dir = root / "analysis"
-            staging_dir = root / "staging"
-            analysis_dir.mkdir()
-            staging_dir.mkdir()
-            for name in ("execution_audit.json", "execution_audit.md"):
-                (analysis_dir / name).write_text("old", encoding="utf-8")
-                (staging_dir / name).write_text("new", encoding="utf-8")
-
-            _replace_execution_audit(staging_dir, analysis_dir)
-
-            self.assertEqual((analysis_dir / "execution_audit.json").read_text(encoding="utf-8"), "new")
-            self.assertEqual((analysis_dir / "execution_audit.md").read_text(encoding="utf-8"), "new")
-            self.assertFalse(any(analysis_dir.glob(".execution_audit.backup-*")))
-
-    def test_execution_audit_commit_restores_old_files_after_partial_failure(self):
-        from frame_timing_agent.ui.worker import _replace_execution_audit
-
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            analysis_dir = root / "analysis"
-            staging_dir = root / "staging"
-            analysis_dir.mkdir()
-            staging_dir.mkdir()
-            for name in ("execution_audit.json", "execution_audit.md"):
-                (analysis_dir / name).write_text(f"old-{name}", encoding="utf-8")
-            (staging_dir / "execution_audit.json").write_text("new", encoding="utf-8")
-
-            with self.assertRaises(FileNotFoundError):
-                _replace_execution_audit(staging_dir, analysis_dir)
-
-            for name in ("execution_audit.json", "execution_audit.md"):
-                self.assertEqual(
-                    (analysis_dir / name).read_text(encoding="utf-8"),
-                    f"old-{name}",
-                )
-            self.assertFalse(any(analysis_dir.glob(".execution_audit.backup-*")))
 
     def test_load_existing_run_rebuilds_view_without_running_analysis(self):
         with tempfile.TemporaryDirectory() as tmp:

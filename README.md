@@ -2,70 +2,101 @@
 
 [English](README.en.md)
 
-Frame Timing Skill 是一个面向三维重建、NeRF、Gaussian Splatting 和摄影测量的本地帧时序分析与选择工具。它分析已经清理好的图片帧目录，帮助识别静止、快速运动、抖动和需要人工复核的区间，并生成可审计的建模帧输出。
+面向三维重建数据准备的 **Agent 可调用帧分析与筛选引擎**。同一套核心能力既可以作为 Skill / CLI 接入 Agent，也提供 Windows **本地人工工作台**，用于单目录复核、CPU-only 离线批处理和可验证输出。
 
 [![Latest Release](https://img.shields.io/github/v/release/Taiquan-Zhou/frame-timing-skill?label=Release)](https://github.com/Taiquan-Zhou/frame-timing-skill/releases/latest)
 [![CI](https://github.com/Taiquan-Zhou/frame-timing-skill/actions/workflows/ci.yml/badge.svg)](https://github.com/Taiquan-Zhou/frame-timing-skill/actions/workflows/ci.yml)
 [![下载 Windows 桌面版](https://img.shields.io/badge/Windows-下载桌面版-2563eb?logo=windows)](https://github.com/Taiquan-Zhou/frame-timing-skill/releases/latest/download/FrameTimingSkill-Windows-x64.zip)
 
-## 普通用户
+```text
+Agent Skill / CLI ─┐
+                   ├─ analyze → plan → validate → apply → verify
+Windows 工作台 ───┘
+```
+
+当前版本以帧目录为输入。核心分析与策略执行在固定输入和配置下可复现；人工复核、批准和导出始终由用户显式触发。处理不依赖云端服务，也不会修改源帧。
+
+## 桌面工作台
+
+### 选择工作流
+
+| 工作流 | 适用场景 | 入口 |
+| --- | --- | --- |
+| 单目录工作台 | 分析、查看并导出一个帧目录 | `FrameTimingSkill.exe` / `frame-timing-ui` |
+| CPU-only 离线批次 | 顺序处理一个或多个帧目录 | 桌面端“批量处理” / `frame-timing-tool batch` |
+| Agent-safe v3 | Agent Skill 或系统集成 | `frame-timing-tool` |
+
+#### 单目录工作台
+
+选择帧目录并设置 FPS，查看时序曲线、区间和代表帧，确认后生成 `output_frames/`。
+
+<p align="center">
+  <img src="assets/frame-timing-ui.png" alt="Frame Timing Skill 单目录工作台" width="100%">
+</p>
+
+#### CPU-only 离线批次
+
+添加多个目录或发现根目录，顺序分析并隔离失败项；中断后由用户继续，待复核项经显式批准后才能导出。
+
+<p align="center">
+  <img src="assets/frame-timing-batch-ui.png" alt="Frame Timing Skill 离线批次工作台" width="100%">
+</p>
 
 ### Windows 桌面版
 
-桌面版适合直接检查本地帧目录，不需要上传原图，也不需要先配置 Python。
-
 **[下载 FrameTimingSkill Windows x64](https://github.com/Taiquan-Zhou/frame-timing-skill/releases/latest/download/FrameTimingSkill-Windows-x64.zip)**
-
-<p align="center">
-  <img src="https://raw.githubusercontent.com/Taiquan-Zhou/frame-timing-skill/main/assets/frame-timing-ui.png" alt="Frame Timing Skill Windows desktop interface" width="100%">
-</p>
-
-桌面端目前提供：
-
-- 选择已清理的帧目录并设置 FPS。
-- 查看运动、清晰度和对比度时序曲线。
-- 查看静止、快速运动、极快速运动和待复核区间。
-- 预览与策略区间相关的代表帧。
-- 生成独立的 `output_frames/`，不修改源帧目录。
-- 保存本地设置、运行记录和历史结果缩略图。
-- 导出前绑定输入和策略摘要，并校验复制后的输出帧。
-
-使用步骤：
 
 1. 下载并解压 `FrameTimingSkill-Windows-x64.zip`。
 2. 运行 `FrameTimingSkill.exe`。
-3. 选择已经清理好的图片帧目录，设置 FPS，然后点击“开始分析”。
-4. 检查曲线、区间和代表帧，确认后点击“生成 output_frames”。
+3. 选择帧目录，设置 FPS，然后开始分析。
 
-所有分析和复制操作都在本机完成。源目录不会被覆盖；运行产物默认写入源目录旁的 `output/frame_timing_ui/`。
+所有处理均在本机完成。源帧保持不变，运行产物写入源目录旁的 `output/`。
+
+### 主要能力
+
+- 运动、清晰度和对比度时序曲线。
+- 静止、快速运动、极快速运动和 `review_required` 区间。
+- 策略相关代表帧、运行历史与可恢复批次。
+- 单项失败隔离、显式重试、人工批准和显式导出。
+- 输入与策略摘要绑定、输出帧字节验证和审计产物。
+
+### 离线批次 CLI
+
+`--frames` 可重复传入；也可以用 `--root` 发现目录。批次状态保存在 `output/**/analysis/batch_state.json`。
+
+```bash
+frame-timing-tool batch create --frames path/to/a/frames --frames path/to/b/frames --state output/frame_timing_batch/analysis/batch_state.json --fps 30
+frame-timing-tool batch run --state output/frame_timing_batch/analysis/batch_state.json
+frame-timing-tool batch status --state output/frame_timing_batch/analysis/batch_state.json
+frame-timing-tool batch run --state output/frame_timing_batch/analysis/batch_state.json --retry-item FAILED_ITEM_NAME
+frame-timing-tool batch approve --state output/frame_timing_batch/analysis/batch_state.json --item ITEM_NAME --note "reviewed"
+frame-timing-tool batch export --state output/frame_timing_batch/analysis/batch_state.json
+```
+
+程序和 Agent 不会自动继续、重试、批准或导出。只有各项目验证后的 `output_frames/` 应传给下游工具。
+
+## Agent 与系统集成
 
 ### 作为 Agent Skill 使用
-
-让 AI Agent 或 AI 编程工具安装本仓库：
 
 ```text
 Install this skill: https://github.com/Taiquan-Zhou/frame-timing-skill
 ```
 
-然后让 Agent 处理已清理的帧目录：
-
 ```text
 Use frame-timing-skill on path/to/clean_frames.
-Analyze first, compare candidates if needed, validate before apply, and verify before using output_frames downstream.
+Analyze first, validate before apply, and verify before using output_frames downstream.
 ```
-
-## AI Agent 和开发者
 
 ### Agent-safe v3 JSON CLI
 
-Agent-safe v3 把处理过程拆成 `analyze -> plan -> validate -> apply -> verify`，使用 `schema_version 3` 和策略修订号 `coverage-static-thinning-v1`。
+Agent-safe v3 使用 `schema_version 3` 和策略修订号 `coverage-static-thinning-v1`：
 
-<p align="center">
-  <img src="https://raw.githubusercontent.com/Taiquan-Zhou/frame-timing-skill/main/assets/frame-timing-workflow.png" alt="Frame Timing workflow: clean_frames to analyze, plan, validate, apply, verify and output_frames" width="100%">
-</p>
+```text
+analyze -> plan -> validate -> apply -> verify
+```
 
 ```bash
-frame-timing-tool capabilities
 frame-timing-tool analyze --frames path/to/clean_frames --artifact-root output/frame_timing_run
 frame-timing-tool plan --analysis output/frame_timing_run/analysis.json --policy coverage_first
 frame-timing-tool validate --analysis output/frame_timing_run/analysis.json --strategy output/frame_timing_run/strategy.json
@@ -73,25 +104,14 @@ frame-timing-tool apply --frames path/to/clean_frames --analysis output/frame_ti
 frame-timing-tool verify --frames path/to/clean_frames --artifact-root output/frame_timing_run
 ```
 
-三种候选策略：
+策略包括 `coverage_first`、`balanced` 和 `jitter_reduction`；默认推荐 `coverage_first`。
 
-- `coverage_first`：推荐默认策略，优先保护非静止帧覆盖。
-- `balanced`：用于比较覆盖率与帧数之间的折中。
-- `jitter_reduction`：更积极地减少抖动候选帧，需要更严格的人工复核。
-
-### 从源码安装
-
-安装命令行工具：
+### 安装
 
 ```bash
 python -m pip install git+https://github.com/Taiquan-Zhou/frame-timing-skill.git
-```
 
-安装可选桌面界面：
-
-```bash
-git clone https://github.com/Taiquan-Zhou/frame-timing-skill.git
-cd frame-timing-skill
+# 可选桌面界面
 python -m pip install ".[ui]"
 frame-timing-ui
 ```
@@ -104,18 +124,13 @@ frame-timing path/to/clean_frames
 
 ### 输出与审计
 
-Agent-safe v3 会在 `output/frame_timing_run/` 下写入：
+Agent-safe v3 在 `output/frame_timing_run/` 中保存分析、策略、验证、执行、健康检查、人工审查和 `output_frames/`。输出图片是源帧的字节级复制，只有验证后的 `output_frames/` 用于下游处理。
 
-- `analysis.json`
-- `strategy.json`
-- `validation.json`
-- `execution.json`
-- `health.json`
-- `report.md`
-- `human_review.md`
-- `output_frames/`
+### v0.5.0 兼容说明
 
-只有 `output_frames/` 应传给下游建模工具。输出图像是源帧的字节级复制；本项目不做视频抽帧、像素修改、去模糊、图像稳定、云端上传或三维重建。
+- 原有单目录工作台和 Agent-safe v3 五阶段命令保持不变。
+- 新的可恢复批次使用 `frame-timing-tool batch ...`。
+- `frame-timing-batch` 保留为旧版兼容入口。
 
 ## License
 
