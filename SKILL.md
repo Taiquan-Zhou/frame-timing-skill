@@ -111,6 +111,24 @@ Rules:
 - Do not invent quality scores. Batch review uses only the bad-quality-candidate ratio and existing `low_motion_review` ranges.
 - The state file must use the canonical `output/**/analysis/batch_state.json` layout.
 
+### Batch Artifact Contract
+
+```text
+output/frame_timing_batch/
+  analysis/
+    batch_state.json
+    batch_summary.json
+    batch_summary.csv
+    review_dashboard.md
+    human_review.md
+    maintenance_report.json
+  <item-name>/
+    analysis/
+    output_frames/
+```
+
+Treat `batch_state.json` as tool-owned state and never edit it to bypass status, approval, retry, or export rules. `maintenance_report.json` exists after a health check. Only verified item `output_frames/` directories may be handed downstream; preserve batch summaries and audit artifacts for traceability.
+
 The older `frame-timing-batch` entry point is compatibility-only. It does not provide the recoverable session, explicit review approval, and explicit verified-export state machine above, so it must not be used for the recoverable production workflow.
 
 ## Output Contract

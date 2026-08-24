@@ -10,6 +10,16 @@ Frame Timing Skill 是一个面向三维重建、NeRF、Gaussian Splatting 和�
 
 ## 普通用户
 
+### 选择工作流
+
+| 工作流 | 适用场景 | 入口 | 核心特点 |
+| --- | --- | --- | --- |
+| 单目录工作台 | 交互检查一个已清理帧目录 | `FrameTimingSkill.exe` / `frame-timing-ui` | 曲线、代表帧、历史记录和显式导出 |
+| CPU-only 离线批次 | 连续处理一个或多个帧目录 | 桌面端“批量处理” / `frame-timing-tool batch` | 顺序执行、失败隔离、中断恢复和人工批准 |
+| Agent-safe v3 | Agent 调用或系统集成 | `frame-timing-tool` | 结构化 JSON、分阶段校验和可审计产物 |
+
+输入必须是已经抽取并清理好的图片帧目录。项目不负责视频抽帧、像素增强或三维重建。
+
 ### Windows 桌面版
 
 桌面版适合直接检查本地帧目录，不需要上传原图，也不需要先配置 Python。
@@ -59,6 +69,18 @@ Frame Timing Skill 是一个面向三维重建、NeRF、Gaussian Splatting 和�
 frame-timing-ui
 ```
 
+#### 批次生命周期
+
+```text
+创建批次 -> 顺序分析 -> 查看状态与风险 -> 显式重试/批准 -> 显式导出 -> 健康检查
+              |                                ^
+              +------ 中断后等待用户继续 -------+
+```
+
+批次会在每个目录处理后持久化状态。暂停在当前目录完成后生效；程序重启只恢复批次供查看，不会自行继续执行。
+
+#### 结构化 CLI
+
 结构化 CLI 支持单目录、多个目录和根目录发现。`--frames` 可以重复传入：
 
 ```bash
@@ -76,6 +98,30 @@ frame-timing-tool batch export --state output/frame_timing_batch/analysis/batch_
 ```
 
 `batch run` 也是中断后的显式继续入口；失败项只有在用户同意后才能通过 `--retry-item` 显式重试。程序和 Agent 都不会自动继续、重试、批准或导出。批次状态文件必须使用规范路径 `output/**/analysis/batch_state.json`；每个项目的分析和 `output_frames/` 位于同一批次根目录下。分析和导出前后都会校验输入快照，输出帧按字节验证，整个流程不会修改源帧。待复核项需要显式批准，批次完成后仍需显式导出。
+
+#### 批次产物
+
+```text
+output/frame_timing_batch/
+  analysis/
+    batch_state.json          # 可恢复状态
+    batch_summary.json        # 机器可读汇总
+    batch_summary.csv         # 表格汇总
+    review_dashboard.md       # 人工审查入口
+    human_review.md           # 批次审查说明
+    maintenance_report.json   # 健康检查结果（执行检查后生成）
+  <item-name>/
+    analysis/                 # 单项分析、策略、审计和代表帧
+    output_frames/            # 显式导出后生成
+```
+
+`batch_state.json` 是恢复入口，不应手工编辑。只有各项目的 `output_frames/` 可以传给下游建模工具；汇总文件和审计文件应与输出一起保留。
+
+#### v0.5.0 兼容说明
+
+- 原有单目录桌面工作流和 Agent-safe v3 五阶段命令保持不变。
+- 新的可恢复批次统一使用 `frame-timing-tool batch ...`。
+- `frame-timing-batch` 继续作为旧版兼容入口，但不具备新批次的恢复、审批和显式导出状态控制。
 
 ### 作为 Agent Skill 使用
 

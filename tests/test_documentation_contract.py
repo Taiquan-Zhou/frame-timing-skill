@@ -183,3 +183,24 @@ def test_real_batch_ui_screenshot_is_documented() -> None:
     height, width = screenshot.shape[:2]
     assert width >= 1200
     assert height >= 800
+
+
+def test_release_docs_explain_workflow_choice_batch_lifecycle_and_artifacts() -> None:
+    readme = _read(ROOT / "README.md")
+    readme_en = _read(ROOT / "README.en.md")
+    skill = _read(ROOT / "SKILL.md")
+
+    for content in (readme, readme_en):
+        assert "frame-timing-tool batch" in content
+        assert "batch_state.json" in content
+        assert "batch_summary.json" in content
+        assert "review_dashboard.md" in content
+        assert "output_frames/" in content
+
+    assert "选择工作流" in readme
+    assert "批次生命周期" in readme
+    assert "Choose a Workflow" in readme_en
+    assert "Batch Lifecycle" in readme_en
+    assert "Batch Artifact Contract" in skill
+    assert "frame-timing-batch" in skill
+    assert "compatibility-only" in skill
