@@ -29,7 +29,10 @@ DOC_PATHS = (
     ROOT / "references" / "agent-integration.md",
     ROOT / "references" / "migration-v2-to-v3.md",
 )
-BATCH_UI_SCREENSHOT = ROOT / "assets" / "frame-timing-batch-ui.png"
+UI_SCREENSHOTS = (
+    ROOT / "assets" / "frame-timing-ui.png",
+    ROOT / "assets" / "frame-timing-batch-ui.png",
+)
 
 
 def _read(path: Path) -> str:
@@ -161,18 +164,38 @@ def test_readme_and_skill_document_recoverable_offline_batch_contract() -> None:
         assert phrase in skill
 
 
-def test_real_batch_ui_screenshot_is_documented() -> None:
+def test_real_ui_screenshots_are_documented() -> None:
     readme = _read(ROOT / "README.md")
     readme_en = _read(ROOT / "README.en.md")
 
     assert "assets/frame-timing-batch-ui.png" in readme
     assert "assets/frame-timing-batch-ui.png" in readme_en
-    assert BATCH_UI_SCREENSHOT.is_file()
-    screenshot = cv2.imread(str(BATCH_UI_SCREENSHOT))
-    assert screenshot is not None
-    height, width = screenshot.shape[:2]
-    assert width >= 1200
-    assert height >= 800
+    for screenshot_path in UI_SCREENSHOTS:
+        relative_path = screenshot_path.relative_to(ROOT).as_posix()
+        assert f'src="{relative_path}"' in readme
+        assert f'src="{relative_path}"' in readme_en
+        assert screenshot_path.is_file()
+        screenshot = cv2.imread(str(screenshot_path))
+        assert screenshot is not None
+        height, width = screenshot.shape[:2]
+        assert width >= 1200
+        assert height >= 800
+
+
+def test_readme_positions_desktop_as_the_human_workspace_for_one_agent_ready_engine() -> None:
+    readme = _read(ROOT / "README.md")
+    readme_en = _read(ROOT / "README.en.md")
+
+    assert "Agent 可调用" in readme
+    assert "本地人工工作台" in readme
+    assert "同一套核心" in readme
+    assert "当前版本以帧目录为输入" in readme
+    assert "agent-ready" in readme_en
+    assert "human-in-the-loop workspace" in readme_en
+    assert "same deterministic core" in readme_en
+    assert "The current release accepts frame directories" in readme_en
+    assert "autonomous agent" not in readme.lower()
+    assert "autonomous agent" not in readme_en.lower()
 
 
 def test_release_docs_explain_workflow_choice_batch_lifecycle_and_artifacts() -> None:

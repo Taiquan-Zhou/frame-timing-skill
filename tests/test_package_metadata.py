@@ -48,6 +48,10 @@ class PackageMetadataTest(unittest.TestCase):
         data = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
 
         self.assertEqual(data["project"]["version"], "0.5.0")
+        self.assertEqual(
+            data["project"]["description"],
+            "Agent-ready frame analysis and selection engine with audited local workflows.",
+        )
         self.assertTrue(Path("LICENSE").is_file())
         self.assertTrue(Path("CHANGELOG.md").is_file())
         self.assertTrue(Path("SECURITY.md").is_file())
@@ -145,10 +149,10 @@ class PackageMetadataTest(unittest.TestCase):
         self.assertIn("[English](README.en.md)", readme)
         self.assertIn("[中文](README.md)", readme_en)
         self.assertIn("[README.md](README.md)", readme_zh_compat)
-        self.assertIn("## 普通用户", readme)
-        self.assertIn("## AI Agent 和开发者", readme)
-        self.assertIn("## For Users", readme_en)
-        self.assertIn("## For Agents And Developers", readme_en)
+        self.assertIn("## 桌面工作台", readme)
+        self.assertIn("## Agent 与系统集成", readme)
+        self.assertIn("## Desktop Workspace", readme_en)
+        self.assertIn("## Agent and System Integration", readme_en)
         self.assertIn("### Agent-safe v3 JSON CLI", readme)
         self.assertIn("### Agent-safe v3 JSON CLI", readme_en)
         self.assertIn("Install this skill: https://github.com/Taiquan-Zhou/frame-timing-skill", readme)

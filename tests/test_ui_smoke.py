@@ -665,9 +665,11 @@ class UiSmokeTest(unittest.TestCase):
             view = replace(view, source_snapshot_matches=False)
             window = MainWindow()
             try:
+                window.path_edit.setText("stale path")
                 window._begin_task("正在打开历史结果")
                 window._history_loaded(record, settings, view)
 
+                self.assertEqual(window.path_edit.toolTip(), str(frames))
                 self.assertFalse(window.export_button.isEnabled())
                 self.assertIn("历史结果只读", window.export_button.toolTip())
                 self.assertIn("源帧已变化", window.status_label.text())
@@ -846,9 +848,11 @@ class UiSmokeTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             frames = root / "frames"
+            history_frames = root / "history-frames"
             current_artifact = root / "current"
             history_artifact = root / "history"
             frames.mkdir()
+            history_frames.mkdir()
             current_artifact.mkdir()
             history_artifact.mkdir()
             current_view = make_view(current_artifact, 10)
@@ -857,7 +861,7 @@ class UiSmokeTest(unittest.TestCase):
                 run_id="history",
                 created_at="2026-07-15T10:00:00+08:00",
                 updated_at="2026-07-15T10:00:00+08:00",
-                frame_dir=frames,
+                frame_dir=history_frames,
                 artifact_dir=history_artifact,
                 fps=30.0,
                 analyzed_count=5,
@@ -882,6 +886,7 @@ class UiSmokeTest(unittest.TestCase):
                         time.sleep(0.01)
 
                 self.assertIs(window._current_view, history_view)
+                self.assertEqual(window.path_edit.toolTip(), str(history_frames))
                 self.assertFalse(window.return_current_button.isHidden())
                 self.assertFalse(window.export_button.isEnabled())
 
@@ -891,12 +896,13 @@ class UiSmokeTest(unittest.TestCase):
                 self.assertTrue(window.return_current_button.isHidden())
                 self.assertTrue(window.export_button.isEnabled())
                 self.assertEqual(window.input_value.text(), "10")
+                self.assertEqual(window.path_edit.toolTip(), str(frames))
             finally:
                 window._busy = False
                 window.close()
 
     def test_main_window_exposes_consistent_modern_visual_hierarchy(self):
-        from PySide6.QtWidgets import QFrame, QLabel
+        from PySide6.QtWidgets import QFrame, QLabel, QPushButton, QSizePolicy
 
         from frame_timing_agent.ui.main_window import MainWindow
 
@@ -911,15 +917,97 @@ class UiSmokeTest(unittest.TestCase):
             for panel in window.findChildren(QFrame, "panel"):
                 self.assertIsNone(panel.graphicsEffect())
             self.assertIsNotNone(window.findChild(QFrame, "metricSwitch"))
+            header = window.findChild(QFrame, "header")
+            mode_switch = window.findChild(QFrame, "modeSwitch")
+            self.assertIsNotNone(mode_switch)
+            self.assertIs(mode_switch.parentWidget(), header)
+            self.assertEqual(mode_switch.sizePolicy().horizontalPolicy(), QSizePolicy.Policy.Fixed)
+            self.assertIsNotNone(window.findChild(QFrame, "singleRunControls"))
             self.assertGreaterEqual(window.findChild(QFrame, "header").minimumHeight(), 58)
             self.assertGreaterEqual(window.minimumWidth(), 1100)
             self.assertGreaterEqual(window.path_edit.minimumWidth(), 240)
             style = window.styleSheet()
-            self.assertIn("background: #f7f9fc", style)
+            self.assertIn("background: #f6f8fb", style)
             self.assertIn("border-radius: 8px", style)
             self.assertIn("QFrame#summaryCard", style)
             self.assertIn("QPushButton#primaryButton", style)
+            for button in window.findChildren(QPushButton):
+                self.assertNotIn("📁", button.text())
+                self.assertNotIn("▶", button.text())
         finally:
+            window.close()
+
+    def test_header_shows_only_controls_for_the_active_workspace(self):
+        from PySide6.QtWidgets import QFrame
+
+        from frame_timing_agent.ui.main_window import MainWindow
+
+        window = MainWindow()
+        try:
+            single_controls = window.findChild(QFrame, "singleRunControls")
+            self.assertFalse(single_controls.isHidden())
+
+            window.select_batch_mode()
+            self.assertTrue(single_controls.isHidden())
+
+            window.select_single_mode()
+            self.assertFalse(single_controls.isHidden())
+        finally:
+            window.close()
+
+    def test_single_header_does_not_overlap_controls_at_minimum_width(self):
+        from PySide6.QtCore import QPoint
+        from PySide6.QtWidgets import QFrame
+
+        from frame_timing_agent.ui.main_window import MainWindow
+
+        window = MainWindow()
+        try:
+            window.resize(1100, 700)
+            window.show()
+            self.app.processEvents()
+            header = window.findChild(QFrame, "header")
+            controls = (
+                window.findChild(QFrame, "modeSwitch"),
+                window.path_edit,
+                window.browse_button,
+                window.fps_spin,
+                window.analyze_button,
+            )
+            rects = [
+                widget.geometry().translated(widget.parentWidget().mapTo(header, QPoint(0, 0))) for widget in controls
+            ]
+            for index, rect in enumerate(rects):
+                self.assertTrue(header.contentsRect().contains(rect), controls[index].objectName())
+                for other in rects[index + 1 :]:
+                    self.assertFalse(rect.intersects(other))
+            self.assertTrue(window.brand_title.isHidden())
+
+            window.resize(1320, 840)
+            self.app.processEvents()
+            self.assertFalse(window.brand_title.isHidden())
+        finally:
+            window.close()
+
+    def test_input_path_tooltip_tracks_visible_path(self):
+        from unittest.mock import patch
+
+        from frame_timing_agent.ui.main_window import MainWindow
+
+        window = MainWindow()
+        try:
+            path = r"D:\FrameTimingDemo\a-very-long-frame-directory\frames"
+            window.path_edit.setText(path)
+            self.assertEqual(window.path_edit.toolTip(), path)
+            window.path_edit.clear()
+            self.assertEqual(window.path_edit.toolTip(), "")
+
+            window.path_edit.setText(".")
+            with patch.object(window._thread_pool, "start"):
+                window._start_analysis()
+            self.assertEqual(window.path_edit.toolTip(), window.path_edit.text())
+        finally:
+            window._busy = False
             window.close()
 
     def test_ui_smoke_entrypoint_runs_the_real_window_lifecycle(self):

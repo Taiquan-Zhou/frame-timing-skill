@@ -95,7 +95,7 @@ class BatchWorkspaceTest(unittest.TestCase):
                 workspace.export_button,
                 workspace.open_batch_button,
             ):
-                button_rect = button.geometry()
+                button_rect = button.geometry().translated(button.parentWidget().mapTo(toolbar, QPoint(0, 0)))
                 self.assertGreaterEqual(button_rect.left(), toolbar.contentsRect().left())
                 self.assertLessEqual(button_rect.right(), toolbar.contentsRect().right())
 
@@ -110,11 +110,54 @@ class BatchWorkspaceTest(unittest.TestCase):
                 detail_scroll.verticalScrollBar().maximum(),
             )
             output_top = workspace.output_path.mapTo(detail_scroll.viewport(), QPoint(0, 0)).y()
+            self.assertGreaterEqual(workspace.artifact_path.height(), 30)
+            self.assertGreaterEqual(workspace.output_path.height(), 30)
             self.assertGreaterEqual(output_top, 0)
             self.assertLessEqual(
                 output_top + workspace.output_path.height(),
                 detail_scroll.viewport().height(),
             )
+        finally:
+            window.close()
+
+    def test_clearing_batch_selection_clears_stale_path_tooltips(self):
+        from frame_timing_agent.ui.main_window import MainWindow
+
+        window = MainWindow()
+        try:
+            workspace = window.batch_workspace
+            workspace.set_state(self.make_state(status="finished", item_status="completed"))
+            self.assertTrue(workspace.artifact_path.toolTip())
+            workspace.item_list.clear()
+            workspace._render_selected_item()
+            self.assertEqual(workspace.artifact_path.toolTip(), "")
+            self.assertEqual(workspace.output_path.toolTip(), "")
+        finally:
+            window.close()
+
+    def test_batch_workspace_exposes_clear_lifecycle_and_detail_sections(self):
+        from PySide6.QtWidgets import QFrame, QLabel
+
+        from frame_timing_agent.ui.main_window import MainWindow
+
+        window = MainWindow()
+        try:
+            workspace = window.batch_workspace
+            self.assertIsNotNone(workspace.findChild(QFrame, "batchCreateActions"))
+            self.assertIsNotNone(workspace.findChild(QFrame, "batchRunActions"))
+            self.assertIsNotNone(workspace.findChild(QFrame, "batchReviewSection"))
+            self.assertIsNotNone(workspace.findChild(QFrame, "batchOutputSection"))
+            for object_name, text in (
+                ("batchAnalysisTitle", "时序分析"),
+                ("batchFramesTitle", "代表帧"),
+                ("batchReviewTitle", "人工复核"),
+                ("batchOutputTitle", "输出位置"),
+            ):
+                label = workspace.findChild(QLabel, object_name)
+                self.assertIsNotNone(label)
+                self.assertEqual(label.text(), text)
+            self.assertEqual(workspace.thumbnail_layout.count(), 1)
+            self.assertEqual(workspace.thumbnail_layout.itemAt(0).widget().text(), "分析完成后显示代表帧")
         finally:
             window.close()
 

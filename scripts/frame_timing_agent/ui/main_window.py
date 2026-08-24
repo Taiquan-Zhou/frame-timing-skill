@@ -6,13 +6,12 @@ from functools import partial
 from pathlib import Path
 
 from PySide6.QtCore import QSettings, QSignalBlocker, Qt, QThreadPool, QUrl
-from PySide6.QtGui import QColor, QDesktopServices, QPixmap
+from PySide6.QtGui import QDesktopServices, QPixmap
 from PySide6.QtWidgets import (
     QButtonGroup,
     QDialog,
     QFileDialog,
     QFrame,
-    QGraphicsDropShadowEffect,
     QGridLayout,
     QHBoxLayout,
     QLabel,
@@ -24,7 +23,6 @@ from PySide6.QtWidgets import (
     QSizePolicy,
     QSpinBox,
     QStackedWidget,
-    QStyle,
     QVBoxLayout,
     QWidget,
 )
@@ -37,6 +35,7 @@ from frame_timing_agent.ui.style import (
     OPERATION_COLORS,
     OPERATION_LABELS,
     main_window_stylesheet,
+    make_icon,
     make_line_icon as _make_line_icon,
 )
 from frame_timing_agent.ui.view_model import AnalysisViewData, ThumbnailView
@@ -97,7 +96,6 @@ class MainWindow(QMainWindow):
         root.setContentsMargins(16, 14, 16, 16)
         root.setSpacing(14)
         root.addWidget(self._build_header())
-        root.addWidget(self._build_mode_switch())
 
         self.workspace_stack = QStackedWidget()
         self.workspace_stack.setObjectName("workspaceStack")
@@ -113,12 +111,10 @@ class MainWindow(QMainWindow):
         root.addWidget(self.workspace_stack, 1)
         self.setCentralWidget(central)
 
-    def _build_mode_switch(self) -> QWidget:
-        container = QWidget()
-        layout = QHBoxLayout(container)
-        layout.setContentsMargins(0, 0, 0, 0)
+    def _build_mode_switch(self) -> QFrame:
         switch = QFrame()
         switch.setObjectName("modeSwitch")
+        switch.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         switch_layout = QHBoxLayout(switch)
         switch_layout.setContentsMargins(0, 0, 0, 0)
         switch_layout.setSpacing(0)
@@ -138,9 +134,7 @@ class MainWindow(QMainWindow):
         self.batch_mode_button.clicked.connect(self.select_batch_mode)
         switch_layout.addWidget(self.single_mode_button)
         switch_layout.addWidget(self.batch_mode_button)
-        layout.addWidget(switch)
-        layout.addStretch()
-        return container
+        return switch
 
     def _build_single_workspace(self) -> QWidget:
         workspace = QWidget()
@@ -190,6 +184,7 @@ class MainWindow(QMainWindow):
         batch_mode = self.workspace_stack.currentWidget() is self.batch_workspace
         batch_running = self.batch_workspace.is_running
         single_enabled = not self._busy and not batch_mode and not batch_running
+        self.single_run_controls.setVisible(not batch_mode)
         self.path_edit.setEnabled(single_enabled)
         self.browse_button.setEnabled(single_enabled)
         self.analyze_button.setEnabled(single_enabled)
@@ -210,43 +205,61 @@ class MainWindow(QMainWindow):
         brand_icon.setPixmap(_make_line_icon("brand", LINE_COLOR, 20))
         layout.addWidget(brand_icon)
 
-        title = QLabel("Frame Timing Skill")
-        title.setObjectName("title")
-        layout.addWidget(title)
-        layout.addSpacing(20)
+        self.brand_title = QLabel("Frame Timing Skill")
+        self.brand_title.setObjectName("title")
+        layout.addWidget(self.brand_title)
+        layout.addSpacing(8)
+        layout.addWidget(self._build_mode_switch())
+        layout.addSpacing(8)
+
+        self.single_run_controls = QFrame()
+        self.single_run_controls.setObjectName("singleRunControls")
+        run_layout = QHBoxLayout(self.single_run_controls)
+        run_layout.setContentsMargins(0, 0, 0, 0)
+        run_layout.setSpacing(10)
 
         self.path_edit = QLineEdit()
         self.path_edit.setMinimumWidth(240)
-        self.path_edit.setPlaceholderText("选择已清理的帧目录")
+        self.path_edit.setPlaceholderText("选择帧目录")
         self.path_edit.setClearButtonEnabled(True)
         self.path_edit.addAction(
-            self.style().standardIcon(QStyle.StandardPixmap.SP_DirIcon),
+            make_icon("folder"),
             QLineEdit.ActionPosition.LeadingPosition,
         )
-        self.path_edit.textChanged.connect(self._invalidate_analysis)
-        layout.addWidget(self.path_edit, 1)
+        self.path_edit.textChanged.connect(self._path_changed)
+        run_layout.addWidget(self.path_edit, 1)
 
         self.browse_button = QPushButton("选择目录")
-        self.browse_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_DirOpenIcon))
+        self.browse_button.setIcon(make_icon("folder"))
         self.browse_button.clicked.connect(self._choose_directory)
-        layout.addWidget(self.browse_button)
+        run_layout.addWidget(self.browse_button)
 
         fps_label = QLabel("FPS")
         fps_label.setObjectName("muted")
-        layout.addWidget(fps_label)
+        run_layout.addWidget(fps_label)
         self.fps_spin = QSpinBox()
         self.fps_spin.setRange(1, 240)
         self.fps_spin.setValue(30)
         self.fps_spin.setSuffix(" fps")
         self.fps_spin.valueChanged.connect(self._invalidate_analysis)
-        layout.addWidget(self.fps_spin)
+        run_layout.addWidget(self.fps_spin)
 
         self.analyze_button = QPushButton("开始分析")
         self.analyze_button.setObjectName("primaryButton")
-        self.analyze_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_MediaPlay))
+        self.analyze_button.setIcon(make_icon("play", "#ffffff"))
         self.analyze_button.clicked.connect(self._start_analysis)
-        layout.addWidget(self.analyze_button)
+        run_layout.addWidget(self.analyze_button)
+        layout.addWidget(self.single_run_controls, 1)
+        self._sync_compact_header()
         return header
+
+    def _sync_compact_header(self) -> None:
+        if hasattr(self, "brand_title"):
+            self.brand_title.setVisible(self.width() >= 1260)
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._sync_compact_header()
 
     def _build_summary(self) -> QHBoxLayout:
         layout = QHBoxLayout()
@@ -314,16 +327,7 @@ class MainWindow(QMainWindow):
         text_layout.addStretch()
         layout.addLayout(text_layout, 1)
         parent.addWidget(frame, 1)
-        self._apply_card_shadow(frame)
         return value_label
-
-    @staticmethod
-    def _apply_card_shadow(widget: QWidget) -> None:
-        shadow = QGraphicsDropShadowEffect(widget)
-        shadow.setBlurRadius(18)
-        shadow.setOffset(0, 2)
-        shadow.setColor(QColor(15, 23, 42, 20))
-        widget.setGraphicsEffect(shadow)
 
     def _build_analysis_panel(self) -> QWidget:
         panel = QFrame()
@@ -457,27 +461,27 @@ class MainWindow(QMainWindow):
         layout.addStretch()
         self.export_button = QPushButton("生成 output_frames")
         self.export_button.setObjectName("primaryButton")
-        self.export_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_DialogSaveButton))
+        self.export_button.setIcon(make_icon("output", "#ffffff"))
         self.export_button.setEnabled(False)
         self.export_button.clicked.connect(self._start_export)
         layout.addWidget(self.export_button)
         self.return_current_button = QPushButton("返回当前结果")
-        self.return_current_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_ArrowBack))
+        self.return_current_button.setIcon(make_icon("back"))
         self.return_current_button.clicked.connect(self._return_to_current_result)
         self.return_current_button.hide()
         layout.addWidget(self.return_current_button)
         self.open_artifact_button = QPushButton("打开分析产物")
-        self.open_artifact_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_DirOpenIcon))
+        self.open_artifact_button.setIcon(make_icon("open"))
         self.open_artifact_button.setEnabled(False)
         self.open_artifact_button.clicked.connect(self._open_artifact)
         layout.addWidget(self.open_artifact_button)
         self.open_output_button = QPushButton("打开输出目录")
-        self.open_output_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_DirOpenIcon))
+        self.open_output_button.setIcon(make_icon("open"))
         self.open_output_button.setEnabled(False)
         self.open_output_button.clicked.connect(self._open_output)
         layout.addWidget(self.open_output_button)
         self.history_button = QPushButton("运行记录")
-        self.history_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_FileDialogDetailedView))
+        self.history_button.setIcon(make_icon("history"))
         self.history_button.setEnabled(self._history_store is not None)
         self.history_button.clicked.connect(self._show_history)
         layout.addWidget(self.history_button)
@@ -493,6 +497,16 @@ class MainWindow(QMainWindow):
         directory = QFileDialog.getExistingDirectory(self, "选择帧目录", self.path_edit.text() or str(Path.home()))
         if directory:
             self.path_edit.setText(directory)
+
+    def _path_changed(self, path: str) -> None:
+        self.path_edit.setToolTip(path)
+        self._invalidate_analysis()
+
+    def _set_path_text(self, path: str) -> None:
+        blocker = QSignalBlocker(self.path_edit)
+        self.path_edit.setText(path)
+        self.path_edit.setToolTip(path)
+        del blocker
 
     def _invalidate_analysis(self) -> None:
         if self._busy:
@@ -534,9 +548,7 @@ class MainWindow(QMainWindow):
         self._current_result_state = None
         self._pending_current_result_state = None
         self.return_current_button.hide()
-        path_blocker = QSignalBlocker(self.path_edit)
-        self.path_edit.setText(str(settings.frame_dir))
-        del path_blocker
+        self._set_path_text(str(settings.frame_dir))
         self._history_read_only = False
         self._export_completed = False
         self.export_button.setToolTip("")
@@ -827,11 +839,10 @@ class MainWindow(QMainWindow):
         except Exception as exc:
             self._task_failed(f"{type(exc).__name__}: {exc}")
             return
-        path_blocker = QSignalBlocker(self.path_edit)
         fps_blocker = QSignalBlocker(self.fps_spin)
-        self.path_edit.setText(str(record.frame_dir))
+        self._set_path_text(str(record.frame_dir))
         self.fps_spin.setValue(round(record.fps))
-        del path_blocker, fps_blocker
+        del fps_blocker
         self._current_settings = settings
         self._current_view = view
         self._current_record = record
@@ -855,12 +866,11 @@ class MainWindow(QMainWindow):
         if state is None:
             return
         self._render_view(state.view)
-        path_blocker = QSignalBlocker(self.path_edit)
         fps_blocker = QSignalBlocker(self.fps_spin)
         if state.settings is not None:
-            self.path_edit.setText(str(state.settings.frame_dir))
+            self._set_path_text(str(state.settings.frame_dir))
             self.fps_spin.setValue(round(state.settings.fps))
-        del path_blocker, fps_blocker
+        del fps_blocker
         self._current_settings = state.settings
         self._current_view = state.view
         self._current_record = state.record

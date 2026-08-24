@@ -2,13 +2,21 @@
 
 [English](README.en.md)
 
-面向三维重建、NeRF、Gaussian Splatting 和摄影测量的本地帧时序分析与选择工具。支持交互式单目录分析、CPU-only 离线批次和 Agent-safe 自动化流程，并生成可追溯、可验证的建模帧输出。
+面向三维重建数据准备的 **Agent 可调用帧分析与筛选引擎**。同一套核心能力既可以作为 Skill / CLI 接入 Agent，也提供 Windows **本地人工工作台**，用于单目录复核、CPU-only 离线批处理和可验证输出。
 
 [![Latest Release](https://img.shields.io/github/v/release/Taiquan-Zhou/frame-timing-skill?label=Release)](https://github.com/Taiquan-Zhou/frame-timing-skill/releases/latest)
 [![CI](https://github.com/Taiquan-Zhou/frame-timing-skill/actions/workflows/ci.yml/badge.svg)](https://github.com/Taiquan-Zhou/frame-timing-skill/actions/workflows/ci.yml)
 [![下载 Windows 桌面版](https://img.shields.io/badge/Windows-下载桌面版-2563eb?logo=windows)](https://github.com/Taiquan-Zhou/frame-timing-skill/releases/latest/download/FrameTimingSkill-Windows-x64.zip)
 
-## 普通用户
+```text
+Agent Skill / CLI ─┐
+                   ├─ analyze → plan → validate → apply → verify
+Windows 工作台 ───┘
+```
+
+当前版本以帧目录为输入。核心分析与策略执行在固定输入和配置下可复现；人工复核、批准和导出始终由用户显式触发。处理不依赖云端服务，也不会修改源帧。
+
+## 桌面工作台
 
 ### 选择工作流
 
@@ -16,14 +24,14 @@
 | --- | --- | --- |
 | 单目录工作台 | 分析、查看并导出一个帧目录 | `FrameTimingSkill.exe` / `frame-timing-ui` |
 | CPU-only 离线批次 | 顺序处理一个或多个帧目录 | 桌面端“批量处理” / `frame-timing-tool batch` |
-| Agent-safe v3 | Agent 调用或系统集成 | `frame-timing-tool` |
+| Agent-safe v3 | Agent Skill 或系统集成 | `frame-timing-tool` |
 
 #### 单目录工作台
 
 选择帧目录并设置 FPS，查看时序曲线、区间和代表帧，确认后生成 `output_frames/`。
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/Taiquan-Zhou/frame-timing-skill/main/assets/frame-timing-ui.png" alt="Frame Timing Skill 单目录工作台" width="100%">
+  <img src="assets/frame-timing-ui.png" alt="Frame Timing Skill 单目录工作台" width="100%">
 </p>
 
 #### CPU-only 离线批次
@@ -31,7 +39,7 @@
 添加多个目录或发现根目录，顺序分析并隔离失败项；中断后由用户继续，待复核项经显式批准后才能导出。
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/Taiquan-Zhou/frame-timing-skill/main/assets/frame-timing-batch-ui.png" alt="Frame Timing Skill 离线批次工作台" width="100%">
+  <img src="assets/frame-timing-batch-ui.png" alt="Frame Timing Skill 离线批次工作台" width="100%">
 </p>
 
 ### Windows 桌面版
@@ -67,6 +75,8 @@ frame-timing-tool batch export --state output/frame_timing_batch/analysis/batch_
 
 程序和 Agent 不会自动继续、重试、批准或导出。只有各项目验证后的 `output_frames/` 应传给下游工具。
 
+## Agent 与系统集成
+
 ### 作为 Agent Skill 使用
 
 ```text
@@ -77,8 +87,6 @@ Install this skill: https://github.com/Taiquan-Zhou/frame-timing-skill
 Use frame-timing-skill on path/to/clean_frames.
 Analyze first, validate before apply, and verify before using output_frames downstream.
 ```
-
-## AI Agent 和开发者
 
 ### Agent-safe v3 JSON CLI
 

@@ -2,13 +2,21 @@
 
 [中文](README.md)
 
-A local frame timing analysis and selection tool for reconstruction, NeRF, Gaussian Splatting, and photogrammetry. It supports an interactive single-directory workspace, CPU-only offline batches, and Agent-safe automation with traceable, verified frame output.
+An **agent-ready frame analysis and selection engine** for reconstruction data preparation. The same deterministic core is available through a Skill / CLI for agents and through a local Windows **human-in-the-loop workspace** for review, CPU-only offline batches, and verified output.
 
 [![Latest Release](https://img.shields.io/github/v/release/Taiquan-Zhou/frame-timing-skill?label=Release)](https://github.com/Taiquan-Zhou/frame-timing-skill/releases/latest)
 [![CI](https://github.com/Taiquan-Zhou/frame-timing-skill/actions/workflows/ci.yml/badge.svg)](https://github.com/Taiquan-Zhou/frame-timing-skill/actions/workflows/ci.yml)
 [![Download Windows desktop app](https://img.shields.io/badge/Windows-Download-2563eb?logo=windows)](https://github.com/Taiquan-Zhou/frame-timing-skill/releases/latest/download/FrameTimingSkill-Windows-x64.zip)
 
-## For Users
+```text
+Agent Skill / CLI ──┐
+                    ├─ analyze → plan → validate → apply → verify
+Windows workspace ──┘
+```
+
+The current release accepts frame directories. With fixed inputs and configuration, the analysis and strategy core is reproducible; human review, approval, and export remain explicit user actions. Processing requires no cloud service and never modifies source frames.
+
+## Desktop Workspace
 
 ### Choose a Workflow
 
@@ -16,14 +24,14 @@ A local frame timing analysis and selection tool for reconstruction, NeRF, Gauss
 | --- | --- | --- |
 | Single-directory workspace | Analyze, inspect, and export one frame directory | `FrameTimingSkill.exe` / `frame-timing-ui` |
 | CPU-only offline batch | Process one or more frame directories sequentially | Desktop Batch Processing / `frame-timing-tool batch` |
-| Agent-safe v3 | Agent use or system integration | `frame-timing-tool` |
+| Agent-safe v3 | Agent Skill or system integration | `frame-timing-tool` |
 
 #### Single-directory Workspace
 
 Select a frame directory and FPS, inspect timelines, ranges, and representative frames, then generate `output_frames/`.
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/Taiquan-Zhou/frame-timing-skill/main/assets/frame-timing-ui.png" alt="Frame Timing Skill single-directory workspace" width="100%">
+  <img src="assets/frame-timing-ui.png" alt="Frame Timing Skill single-directory workspace" width="100%">
 </p>
 
 #### CPU-only Offline Batch
@@ -31,7 +39,7 @@ Select a frame directory and FPS, inspect timelines, ranges, and representative 
 Add explicit directories or discover a root, process items sequentially, isolate failures, resume explicitly, and approve review items before export.
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/Taiquan-Zhou/frame-timing-skill/main/assets/frame-timing-batch-ui.png" alt="Frame Timing Skill offline batch workspace" width="100%">
+  <img src="assets/frame-timing-batch-ui.png" alt="Frame Timing Skill offline batch workspace" width="100%">
 </p>
 
 ### Windows Desktop App
@@ -67,6 +75,8 @@ frame-timing-tool batch export --state output/frame_timing_batch/analysis/batch_
 
 Neither the app nor an Agent automatically resumes, retries, approves, or exports. Only verified item `output_frames/` directories should be passed downstream.
 
+## Agent and System Integration
+
 ### Use as an Agent Skill
 
 ```text
@@ -77,8 +87,6 @@ Install this skill: https://github.com/Taiquan-Zhou/frame-timing-skill
 Use frame-timing-skill on path/to/clean_frames.
 Analyze first, validate before apply, and verify before using output_frames downstream.
 ```
-
-## For Agents And Developers
 
 ### Agent-safe v3 JSON CLI
 
