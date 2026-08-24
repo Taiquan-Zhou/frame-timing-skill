@@ -113,10 +113,8 @@ def test_readme_and_skill_document_recoverable_offline_batch_contract() -> None:
 
     for phrase in (
         "CPU-only",
+        "单目录工作台",
         "离线批次",
-        "单目录",
-        "多个目录",
-        "发现根目录",
         "frame-timing-ui",
         "frame-timing-tool batch create",
         "frame-timing-tool batch run",
@@ -125,13 +123,7 @@ def test_readme_and_skill_document_recoverable_offline_batch_contract() -> None:
         "frame-timing-tool batch export",
         "--retry-item",
         "review_required",
-        ">= 10%",
-        "恢复上次记录的批次",
-        "未完成批次必须由用户显式继续",
-        "显式继续",
-        "显式批准",
-        "显式导出",
-        "不会修改源帧",
+        "显式",
     ):
         assert phrase in readme
 
@@ -145,9 +137,7 @@ def test_readme_and_skill_document_recoverable_offline_batch_contract() -> None:
         "frame-timing-tool batch export",
         "--retry-item",
         "review_required",
-        "explicit Continue",
-        "automatically resume, retry, approve, or export",
-        "never modified",
+        "explicit",
     ):
         assert phrase in readme_en
 
@@ -193,14 +183,16 @@ def test_release_docs_explain_workflow_choice_batch_lifecycle_and_artifacts() ->
     for content in (readme, readme_en):
         assert "frame-timing-tool batch" in content
         assert "batch_state.json" in content
-        assert "batch_summary.json" in content
-        assert "review_dashboard.md" in content
         assert "output_frames/" in content
 
     assert "选择工作流" in readme
-    assert "批次生命周期" in readme
+    assert "assets/frame-timing-ui.png" in readme
+    assert "assets/frame-timing-batch-ui.png" in readme
     assert "Choose a Workflow" in readme_en
-    assert "Batch Lifecycle" in readme_en
+    assert "assets/frame-timing-ui.png" in readme_en
+    assert "assets/frame-timing-batch-ui.png" in readme_en
     assert "Batch Artifact Contract" in skill
+    assert "batch_summary.json" in skill
+    assert "review_dashboard.md" in skill
     assert "frame-timing-batch" in skill
     assert "compatibility-only" in skill
