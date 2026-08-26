@@ -195,6 +195,51 @@ def test_readme_workflow_animation_is_documented_and_lightweight() -> None:
     assert data.count(b"\x21\xf9\x04") > 1
     assert WORKFLOW_ANIMATION.stat().st_size < 8 * 1024 * 1024
 
+    width = int.from_bytes(data[6:8], byteorder="little")
+    height = int.from_bytes(data[8:10], byteorder="little")
+    assert width >= 1000
+    assert height <= 420
+
+
+def test_readme_uses_a_centered_hero_before_the_workflow_animation() -> None:
+    readme = _read(ROOT / "README.md")
+    readme_en = _read(ROOT / "README.en.md")
+
+    for content in (readme, readme_en):
+        hero_start = content.index('<div align="center">')
+        animation = content.index('src="assets/frame-timing-workflow.gif"')
+        assert hero_start < animation
+        assert "# Frame Timing Skill" in content[hero_start:animation]
+        assert "Agent-ready video-to-reconstruction pipeline" in content[hero_start:animation]
+
+    readme_hero = readme[
+        readme.index('<div align="center">') : readme.index(
+            'src="assets/frame-timing-workflow.gif"'
+        )
+    ]
+    assert "让 3D 重建从更好的帧开始" in readme_hero
+
+
+def test_readme_hero_exposes_product_actions_and_proof_points() -> None:
+    readme = _read(ROOT / "README.md")
+    readme_en = _read(ROOT / "README.en.md")
+
+    assert "[Windows 下载]" in readme
+    assert "[快速开始](#快速开始)" in readme
+    assert "[Agent Skill](SKILL.md)" in readme
+    assert "## 一套核心，两种工作方式" in readme
+    assert "### 选择工作流" not in readme
+
+    assert "[Download for Windows]" in readme_en
+    assert "[Quick Start](#quick-start)" in readme_en
+    assert "[Agent Skill](SKILL.md)" in readme_en
+    assert "## One Core, Two Workspaces" in readme_en
+    assert "### Choose a Workflow" not in readme_en
+
+    for content in (readme, readme_en):
+        for proof_point in ("Local-first", "CPU-ready", "Recoverable", "Auditable"):
+            assert proof_point in content
+
 
 def test_readme_positions_desktop_as_the_human_workspace_for_one_agent_ready_engine() -> None:
     readme = _read(ROOT / "README.md")
@@ -222,10 +267,10 @@ def test_release_docs_explain_workflow_choice_batch_lifecycle_and_artifacts() ->
         assert "batch_state.json" in content
         assert "output_frames/" in content
 
-    assert "选择工作流" in readme
+    assert "一套核心，两种工作方式" in readme
     assert "assets/frame-timing-ui.png" in readme
     assert "assets/frame-timing-batch-ui.png" in readme
-    assert "Choose a Workflow" in readme_en
+    assert "One Core, Two Workspaces" in readme_en
     assert "assets/frame-timing-ui.png" in readme_en
     assert "assets/frame-timing-batch-ui.png" in readme_en
     assert "Batch Artifact Contract" in skill

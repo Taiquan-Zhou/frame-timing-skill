@@ -1,24 +1,30 @@
+<div align="center">
+
 # Frame Timing Skill
 
-[中文](README.md)
+### Start 3D reconstruction with better frames
+
+**Agent-ready video-to-reconstruction pipeline**
+
+[Download for Windows](https://github.com/Taiquan-Zhou/frame-timing-skill/releases/latest/download/FrameTimingSkill-Windows-x64.zip) · [Quick Start](#quick-start) · [Agent Skill](SKILL.md) · [中文](README.md)
+
+[![Latest Release](https://img.shields.io/github/v/release/Taiquan-Zhou/frame-timing-skill?label=Release)](https://github.com/Taiquan-Zhou/frame-timing-skill/releases/latest) [![CI](https://github.com/Taiquan-Zhou/frame-timing-skill/actions/workflows/ci.yml/badge.svg)](https://github.com/Taiquan-Zhou/frame-timing-skill/actions/workflows/ci.yml) [![Download Windows desktop app](https://img.shields.io/badge/Windows-Download-2563eb?logo=windows)](https://github.com/Taiquan-Zhou/frame-timing-skill/releases/latest/download/FrameTimingSkill-Windows-x64.zip)
+
+</div>
 
 <p align="center">
   <img src="assets/frame-timing-workflow.gif" alt="Frame Timing Skill workflow from raw video to verified reconstruction-ready frames" width="100%">
 </p>
 
-[![Latest Release](https://img.shields.io/github/v/release/Taiquan-Zhou/frame-timing-skill?label=Release)](https://github.com/Taiquan-Zhou/frame-timing-skill/releases/latest) [![CI](https://github.com/Taiquan-Zhou/frame-timing-skill/actions/workflows/ci.yml/badge.svg)](https://github.com/Taiquan-Zhou/frame-timing-skill/actions/workflows/ci.yml) [![Download Windows desktop app](https://img.shields.io/badge/Windows-Download-2563eb?logo=windows)](https://github.com/Taiquan-Zhou/frame-timing-skill/releases/latest/download/FrameTimingSkill-Windows-x64.zip)
+<p align="center">
+  <strong>Local-first</strong> · <strong>CPU-ready</strong> · <strong>Recoverable</strong> · <strong>Auditable</strong>
+</p>
 
-The same deterministic core powers an **agent-ready interface** and a local Windows **human-in-the-loop workspace**: processing stays local, CPU-only batches are recoverable, and outputs are verified before downstream use.
+The same deterministic core powers an **agent-ready interface** and a Windows **human-in-the-loop workspace**. Processing stays local and never modifies source media; review, approval, and export remain explicit user actions.
 
-Processing stays local and never modifies source media. Review, approval, and export remain explicit user actions.
+## One Core, Two Workspaces
 
-## Desktop Workspace
-
-### Choose a Workflow
-
-- **Single-directory workspace:** analyze, review, and export one data source. Entry: `FrameTimingSkill.exe` / `frame-timing-ui`
-- **CPU-only offline batch:** process multiple data sources sequentially and resume after interruption. Entry: Desktop Batch Processing / `frame-timing-tool batch`
-- **Agent-safe v3:** integrate the Skill with an agent or another system. Entry: `frame-timing-tool`
+The desktop app covers focused review and recoverable offline batches. The same core exposes a stable JSON interface through `frame-timing-tool` for agents and system integration.
 
 ### Single-directory Workspace
 

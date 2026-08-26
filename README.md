@@ -1,24 +1,30 @@
+<div align="center">
+
 # Frame Timing Skill
 
-[English](README.en.md)
+### 让 3D 重建从更好的帧开始
+
+**Agent-ready video-to-reconstruction pipeline**
+
+[Windows 下载](https://github.com/Taiquan-Zhou/frame-timing-skill/releases/latest/download/FrameTimingSkill-Windows-x64.zip) · [快速开始](#快速开始) · [Agent Skill](SKILL.md) · [English](README.en.md)
+
+[![Latest Release](https://img.shields.io/github/v/release/Taiquan-Zhou/frame-timing-skill?label=Release)](https://github.com/Taiquan-Zhou/frame-timing-skill/releases/latest) [![CI](https://github.com/Taiquan-Zhou/frame-timing-skill/actions/workflows/ci.yml/badge.svg)](https://github.com/Taiquan-Zhou/frame-timing-skill/actions/workflows/ci.yml) [![下载 Windows 桌面版](https://img.shields.io/badge/Windows-下载桌面版-2563eb?logo=windows)](https://github.com/Taiquan-Zhou/frame-timing-skill/releases/latest/download/FrameTimingSkill-Windows-x64.zip)
+
+</div>
 
 <p align="center">
   <img src="assets/frame-timing-workflow.gif" alt="从原始视频到可验证建模帧的 Frame Timing Skill 工作流" width="100%">
 </p>
 
-[![Latest Release](https://img.shields.io/github/v/release/Taiquan-Zhou/frame-timing-skill?label=Release)](https://github.com/Taiquan-Zhou/frame-timing-skill/releases/latest) [![CI](https://github.com/Taiquan-Zhou/frame-timing-skill/actions/workflows/ci.yml/badge.svg)](https://github.com/Taiquan-Zhou/frame-timing-skill/actions/workflows/ci.yml) [![下载 Windows 桌面版](https://img.shields.io/badge/Windows-下载桌面版-2563eb?logo=windows)](https://github.com/Taiquan-Zhou/frame-timing-skill/releases/latest/download/FrameTimingSkill-Windows-x64.zip)
+<p align="center">
+  <strong>Local-first</strong> · <strong>CPU-ready</strong> · <strong>Recoverable</strong> · <strong>Auditable</strong>
+</p>
 
-同一套核心同时服务 **Agent 可调用接口**与 Windows **本地人工工作台**：本地运行、支持 CPU-only 可恢复批次，输出经验证后再进入下游。
+同一套核心同时服务 **Agent 可调用接口**与 Windows **本地人工工作台**。处理在本机完成，不修改源素材；人工复核、批准和导出始终由用户显式触发。
 
-所有处理均在本机完成。工作流不会修改源素材，人工复核、批准和导出始终由用户显式触发。
+## 一套核心，两种工作方式
 
-## 桌面工作台
-
-### 选择工作流
-
-- **单目录工作台**：分析、复核并导出一个数据源。入口：`FrameTimingSkill.exe` / `frame-timing-ui`
-- **CPU-only 离线批次**：顺序处理多个数据源，并从中断处继续。入口：桌面端“批量处理” / `frame-timing-tool batch`
-- **Agent-safe v3**：用于 Agent Skill 或系统集成。入口：`frame-timing-tool`
+桌面端覆盖单项目复核和可恢复离线批次；同一核心通过 `frame-timing-tool` 为 Agent 与系统集成提供稳定 JSON 接口。
 
 ### 单目录工作台
 
