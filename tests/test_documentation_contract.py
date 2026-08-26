@@ -212,11 +212,7 @@ def test_readme_uses_a_centered_hero_before_the_workflow_animation() -> None:
         assert "# Frame Timing Skill" in content[hero_start:animation]
         assert "Agent-ready video-to-reconstruction pipeline" in content[hero_start:animation]
 
-    readme_hero = readme[
-        readme.index('<div align="center">') : readme.index(
-            'src="assets/frame-timing-workflow.gif"'
-        )
-    ]
+    readme_hero = readme[readme.index('<div align="center">') : readme.index('src="assets/frame-timing-workflow.gif"')]
     assert "让 3D 重建从更好的帧开始" in readme_hero
 
 
