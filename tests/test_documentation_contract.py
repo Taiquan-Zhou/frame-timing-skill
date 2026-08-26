@@ -33,6 +33,7 @@ UI_SCREENSHOTS = (
     ROOT / "assets" / "frame-timing-ui.png",
     ROOT / "assets" / "frame-timing-batch-ui.png",
 )
+WORKFLOW_ANIMATION = ROOT / "assets" / "frame-timing-workflow.gif"
 
 
 def _read(path: Path) -> str:
@@ -182,6 +183,19 @@ def test_real_ui_screenshots_are_documented() -> None:
         assert height >= 800
 
 
+def test_readme_workflow_animation_is_documented_and_lightweight() -> None:
+    readme = _read(ROOT / "README.md")
+    readme_en = _read(ROOT / "README.en.md")
+    relative_path = WORKFLOW_ANIMATION.relative_to(ROOT).as_posix()
+
+    assert f'src="{relative_path}"' in readme
+    assert f'src="{relative_path}"' in readme_en
+    data = WORKFLOW_ANIMATION.read_bytes()
+    assert data.startswith((b"GIF87a", b"GIF89a"))
+    assert data.count(b"\x21\xf9\x04") > 1
+    assert WORKFLOW_ANIMATION.stat().st_size < 8 * 1024 * 1024
+
+
 def test_readme_positions_desktop_as_the_human_workspace_for_one_agent_ready_engine() -> None:
     readme = _read(ROOT / "README.md")
     readme_en = _read(ROOT / "README.en.md")
@@ -189,11 +203,11 @@ def test_readme_positions_desktop_as_the_human_workspace_for_one_agent_ready_eng
     assert "Agent 可调用" in readme
     assert "本地人工工作台" in readme
     assert "同一套核心" in readme
-    assert "当前版本以帧目录为输入" in readme
+    assert "assets/frame-timing-workflow.gif" in readme
     assert "agent-ready" in readme_en
     assert "human-in-the-loop workspace" in readme_en
     assert "same deterministic core" in readme_en
-    assert "The current release accepts frame directories" in readme_en
+    assert "assets/frame-timing-workflow.gif" in readme_en
     assert "autonomous agent" not in readme.lower()
     assert "autonomous agent" not in readme_en.lower()
 

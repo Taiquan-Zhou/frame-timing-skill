@@ -2,45 +2,41 @@
 
 [中文](README.md)
 
-An **agent-ready frame analysis and selection engine** for reconstruction data preparation. The same deterministic core is available through a Skill / CLI for agents and through a local Windows **human-in-the-loop workspace** for review, CPU-only offline batches, and verified output.
+<p align="center">
+  <img src="assets/frame-timing-workflow.gif" alt="Frame Timing Skill workflow from raw video to verified reconstruction-ready frames" width="100%">
+</p>
 
-[![Latest Release](https://img.shields.io/github/v/release/Taiquan-Zhou/frame-timing-skill?label=Release)](https://github.com/Taiquan-Zhou/frame-timing-skill/releases/latest)
-[![CI](https://github.com/Taiquan-Zhou/frame-timing-skill/actions/workflows/ci.yml/badge.svg)](https://github.com/Taiquan-Zhou/frame-timing-skill/actions/workflows/ci.yml)
-[![Download Windows desktop app](https://img.shields.io/badge/Windows-Download-2563eb?logo=windows)](https://github.com/Taiquan-Zhou/frame-timing-skill/releases/latest/download/FrameTimingSkill-Windows-x64.zip)
+[![Latest Release](https://img.shields.io/github/v/release/Taiquan-Zhou/frame-timing-skill?label=Release)](https://github.com/Taiquan-Zhou/frame-timing-skill/releases/latest) [![CI](https://github.com/Taiquan-Zhou/frame-timing-skill/actions/workflows/ci.yml/badge.svg)](https://github.com/Taiquan-Zhou/frame-timing-skill/actions/workflows/ci.yml) [![Download Windows desktop app](https://img.shields.io/badge/Windows-Download-2563eb?logo=windows)](https://github.com/Taiquan-Zhou/frame-timing-skill/releases/latest/download/FrameTimingSkill-Windows-x64.zip)
 
-```text
-Agent Skill / CLI ──┐
-                    ├─ analyze → plan → validate → apply → verify
-Windows workspace ──┘
-```
+The same deterministic core powers an **agent-ready interface** and a local Windows **human-in-the-loop workspace**: processing stays local, CPU-only batches are recoverable, and outputs are verified before downstream use.
 
-The current release accepts frame directories. With fixed inputs and configuration, the analysis and strategy core is reproducible; human review, approval, and export remain explicit user actions. Processing requires no cloud service and never modifies source frames.
+Processing stays local and never modifies source media. Review, approval, and export remain explicit user actions.
 
 ## Desktop Workspace
 
 ### Choose a Workflow
 
-| Workflow | Best for | Entry point |
-| --- | --- | --- |
-| Single-directory workspace | Analyze, inspect, and export one frame directory | `FrameTimingSkill.exe` / `frame-timing-ui` |
-| CPU-only offline batch | Process one or more frame directories sequentially | Desktop Batch Processing / `frame-timing-tool batch` |
-| Agent-safe v3 | Agent Skill or system integration | `frame-timing-tool` |
+- **Single-directory workspace:** analyze, review, and export one data source. Entry: `FrameTimingSkill.exe` / `frame-timing-ui`
+- **CPU-only offline batch:** process multiple data sources sequentially and resume after interruption. Entry: Desktop Batch Processing / `frame-timing-tool batch`
+- **Agent-safe v3:** integrate the Skill with an agent or another system. Entry: `frame-timing-tool`
 
-#### Single-directory Workspace
+### Single-directory Workspace
 
-Select a frame directory and FPS, inspect timelines, ranges, and representative frames, then generate `output_frames/`.
+Inspect motion, sharpness, and contrast timelines together with ranges and representative frames, then generate `output_frames/`.
 
 <p align="center">
   <img src="assets/frame-timing-ui.png" alt="Frame Timing Skill single-directory workspace" width="100%">
 </p>
 
-#### CPU-only Offline Batch
+### Recoverable Offline Batch
 
-Add explicit directories or discover a root, process items sequentially, isolate failures, resume explicitly, and approve review items before export.
+Analyze multiple items, isolate failures, and persist progress. Resume explicitly after interruption and approve `review_required` items before export.
 
 <p align="center">
   <img src="assets/frame-timing-batch-ui.png" alt="Frame Timing Skill offline batch workspace" width="100%">
 </p>
+
+## Quick Start
 
 ### Windows Desktop App
 
@@ -48,49 +44,50 @@ Add explicit directories or discover a root, process items sequentially, isolate
 
 1. Download and extract `FrameTimingSkill-Windows-x64.zip`.
 2. Run `FrameTimingSkill.exe`.
-3. Select a frame directory, set FPS, and start analysis.
+3. Select an input, confirm the settings, and start processing.
 
-All processing stays local. Source frames remain unchanged, and run artifacts are written under a sibling `output/` directory.
+Run artifacts are written under an isolated `output/` directory without overwriting source media.
 
-### Highlights
-
-- Motion, sharpness, and contrast timelines.
-- Static, fast-motion, very-fast-motion, and `review_required` ranges.
-- Strategy-related representative frames, local history, and recoverable batches.
-- Failure isolation, explicit retry, human approval, and explicit export.
-- Input and strategy binding, byte-level output verification, and audit artifacts.
-
-### Offline Batch CLI
-
-Repeat `--frames` for explicit directories, or use `--root` for discovery. State is stored at `output/**/analysis/batch_state.json`.
+### Python and Agent Skill
 
 ```bash
-frame-timing-tool batch create --frames path/to/a/frames --frames path/to/b/frames --state output/frame_timing_batch/analysis/batch_state.json --fps 30
-frame-timing-tool batch run --state output/frame_timing_batch/analysis/batch_state.json
-frame-timing-tool batch status --state output/frame_timing_batch/analysis/batch_state.json
-frame-timing-tool batch run --state output/frame_timing_batch/analysis/batch_state.json --retry-item FAILED_ITEM_NAME
-frame-timing-tool batch approve --state output/frame_timing_batch/analysis/batch_state.json --item ITEM_NAME --note "reviewed"
-frame-timing-tool batch export --state output/frame_timing_batch/analysis/batch_state.json
+python -m pip install "frame-timing-skill @ git+https://github.com/Taiquan-Zhou/frame-timing-skill.git"
+
+# Optional desktop UI
+python -m pip install "frame-timing-skill[ui] @ git+https://github.com/Taiquan-Zhou/frame-timing-skill.git"
+frame-timing-ui
 ```
-
-Neither the app nor an Agent automatically resumes, retries, approves, or exports. Only verified item `output_frames/` directories should be passed downstream.
-
-## Agent and System Integration
-
-### Use as an Agent Skill
 
 ```text
 Install this skill: https://github.com/Taiquan-Zhou/frame-timing-skill
+
+Use frame-timing-skill to prepare <video-or-frame-directory> for reconstruction.
+Pause when review is required, and verify outputs before downstream use.
 ```
 
-```text
-Use frame-timing-skill on path/to/clean_frames.
-Analyze first, validate before apply, and verify before using output_frames downstream.
-```
+## Core Capabilities
+
+- Raw-video ingestion, adaptive frame extraction, and quality assessment.
+- Motion, sharpness, contrast, and temporal-range analysis.
+- Reconstruction-coverage-aware frame selection and representative frames.
+- Single-run workspace and recoverable CPU-only offline batches.
+- Failure isolation, explicit retry, human approval, and explicit export.
+- Input and strategy binding, byte-level output verification, and audit artifacts.
+
+## Agent and System Integration
 
 ### Agent-safe v3 JSON CLI
 
-Agent-safe v3 uses `schema_version 3` and policy revision `coverage-static-thinning-v1`:
+`frame-timing-tool` provides a stable JSON interface for agents and system integration. The compatibility one-command workflow remains available:
+
+```bash
+frame-timing path/to/clean_frames
+```
+
+<details>
+<summary><strong>View the five-stage CLI</strong></summary>
+
+The programmatic workflow preserves explicit safety boundaries:
 
 ```text
 analyze -> plan -> validate -> apply -> verify
@@ -106,31 +103,34 @@ frame-timing-tool verify --frames path/to/clean_frames --artifact-root output/fr
 
 Policies are `coverage_first`, `balanced`, and `jitter_reduction`; `coverage_first` is the recommended default.
 
-### Installation
+</details>
+
+<details>
+<summary><strong>Offline Batch CLI</strong></summary>
+
+Batch state is stored at `output/**/analysis/batch_state.json`:
 
 ```bash
-python -m pip install git+https://github.com/Taiquan-Zhou/frame-timing-skill.git
-
-# Optional desktop UI
-python -m pip install ".[ui]"
-frame-timing-ui
+frame-timing-tool batch create --frames path/to/a/frames --frames path/to/b/frames --state output/frame_timing_batch/analysis/batch_state.json --fps 30
+frame-timing-tool batch run --state output/frame_timing_batch/analysis/batch_state.json
+frame-timing-tool batch status --state output/frame_timing_batch/analysis/batch_state.json
+frame-timing-tool batch run --state output/frame_timing_batch/analysis/batch_state.json --retry-item FAILED_ITEM_NAME
+frame-timing-tool batch approve --state output/frame_timing_batch/analysis/batch_state.json --item ITEM_NAME --note "reviewed"
+frame-timing-tool batch export --state output/frame_timing_batch/analysis/batch_state.json
 ```
 
-Compatibility one-command workflow:
+</details>
 
-```bash
-frame-timing path/to/clean_frames
-```
+## Trust Boundaries
 
-### Outputs and Audit
+- Source media remains unchanged and outputs are written to isolated directories.
+- Analysis and strategy results are reproducible for fixed inputs and configuration.
+- Neither the app nor an Agent automatically resumes, retries, approves, or exports.
+- Agent-safe v3 uses `schema_version 3` and policy revision `coverage-static-thinning-v1`.
+- Analysis, strategy, validation, execution, health, and human-review artifacts are stored under `output/frame_timing_run/`.
+- Output frames are byte-identical source-frame copies; only verified `output_frames/` should be passed downstream.
 
-Agent-safe v3 stores analysis, strategy, validation, execution, health, human-review, and `output_frames/` artifacts under `output/frame_timing_run/`. Output images are byte-identical source-frame copies, and only verified `output_frames/` should be passed downstream.
-
-### v0.5.0 Compatibility
-
-- The existing single-directory workspace and Agent-safe v3 lifecycle remain unchanged.
-- Use `frame-timing-tool batch ...` for the new recoverable batch workflow.
-- `frame-timing-batch` remains available as a legacy compatibility entry point.
+This project prepares data for reconstruction; it does not perform 3D reconstruction or model training.
 
 ## License
 
