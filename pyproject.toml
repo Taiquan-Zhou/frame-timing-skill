@@ -36,7 +36,7 @@ dependencies = [
 
 [project.optional-dependencies]
 ui = [
-  "PySide6-Essentials>=6.6,<6.9",
+  "PySide6-Essentials>=6.6,<6.12",
 ]
 dev = [
   "build>=1.2,<2",
@@ -50,7 +50,7 @@ dev = [
 ]
 release = [
   "PyInstaller>=6.14,<7",
-  "PySide6-Essentials>=6.6,<6.9",
+  "PySide6-Essentials>=6.6,<6.12",
 ]
 
 [project.urls]
